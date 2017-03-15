@@ -34,29 +34,33 @@
 ;;; :max-initial-mutations 10 ; instead of this, mutate eden individual
 ;;;  until it is ergodic (implies k-bounded and live, I think) and has no absorbing states.
    :mutation-types        ; These aren't much like Nobile because I need ergodic nets, they don't. Nobile doesn't do deletes either.
-   {:add-place     0.2    ; Add place (mine can't be absorbing, thus 1&2).  
-    :add-trans-vv  0.1    ; Add transition, connecting to visible input and output places. 
-    :add-trans-hh  0.1    ; Add transition, connecting hidden input place to hidden output place.
-    :add-trans-vh  0.1    ; Add transition, connecting visible input place to hidden output place.
-    :add-trans-hv  0.1    ; Add transition, connecting hidden input place to visible output place.
-    :add-inhibit-v 0.2    ; Add inhibitor arc, connecting a visible to a trans
-    :add-token     0.1    ; Add token to some place (visible or hidden).
-    :remove-token  0.1}}) ; Remove token from some place (visible or hidden).
+   [[:add-place     0.2]    ; Add place (mine can't be absorbing, thus 1&2).  
+    [:add-trans-vv  0.1]    ; Add transition, connecting to visible input and output places. 
+    [:add-trans-hh  0.1]    ; Add transition, connecting hidden input place to hidden output place.
+    [:add-trans-vh  0.1]    ; Add transition, connecting visible input place to hidden output place.
+    [:add-trans-hv  0.1]    ; Add transition, connecting hidden input place to visible output place.
+    [:add-inhibit-v 0.1]    ; Add inhibitor arc, connecting a visible place to a trans
+    [:add-inhibit-h 0.1]    ; Add inhibitor arc, connecting a visible place to a trans
+    [:add-token     0.1]    ; Add token to some place (visible or hidden).
+    [:remove-token  0.1]]}) ; Remove token from some place (visible or hidden).
 
 (defn add-extra-nodes
-  "Return a map {:t <> :p <>} with added nodes (transitions or places) to help make a ring pn topology"
-  [problem]
-  (let [cnt-p (count (:visible-places problem))
-        cnt-t (count (:visible-transitions problem))
-        prob {:p (:visible-places problem)
-              :t (:visible-transitions problem)}]
-    (cond (= cnt-p cnt-t) prob
-          (> cnt-p cnt-t)
-          (update-in prob [:t]
-                     into (for [n (range (- cnt-p cnt-t))] (keyword (str "tadd-" (inc n)))))
+  "Return a map {:t <> :p <> :t-adds, :p-adds} naming nodes (transitions or places) to be added.
+   Used to make the ring-shaped Eden individual."
+  [prob]
+  (let [cnt-p (count (:visible-places prob))
+        cnt-t (count (:visible-transitions prob))]
+    (as-> {:p (:visible-places prob) :t (:visible-transitions prob)} ?p
+      (cond (= cnt-p cnt-t) ?p
+            (> cnt-p cnt-t)
+            (update-in ?p [:t]
+                       into (for [n (range (- cnt-p cnt-t))] (keyword (str "tadd-" (inc n)))))
             (> cnt-t cnt-p)
-            (update-in prob [:p]
-                       into (for [n (range (- cnt-t cnt-p))] (keyword (str "padd-" (inc n))))))))
+            (update-in ?p [:p]
+                       into (for [n (range (- cnt-t cnt-p))] (keyword (str "padd-" (inc n))))))
+      (if (> cnt-p cnt-t)
+        (assoc ?p :t-adds (set (subvec (:t ?p) cnt-t)))
+        (assoc ?p :p-adds (set (subvec (:p ?p) cnt-p)))))))
 
 (defn eden-individual
   "Return the minimal and prototypical individual for the problem.
@@ -65,7 +69,6 @@
    random but rather it is constant for the problem definition."
   [problem]
   (let [prob (add-extra-nodes problem)]
-    (pnu/reset-ids! {})
     (as-> {:places [] :transitions [] :arcs []} ?pn
       (reduce (fn [pn pl] (pnu/add-pn pn (pnu/make-place pn :name pl))) ?pn (:p prob))
       (update-in ?pn [:places 0 :initial-marking] inc) ; Add a token to make it alive
@@ -77,18 +80,99 @@
                            (vec (interleave (:p prob) (:t prob)))
                            (vec (interleave (:t prob)
                                             (conj (vec (rest (:p prob)))
-                                                  (first (:p prob))))))))))))
+                                                  (first (:p prob)))))))))
+      ;; Initialize to :visible? true, then dissoc where added.
+      (assoc ?pn :places (vec (map #(assoc % :visible? true) (:places ?pn))))
+      (assoc ?pn :transitions (vec (map #(assoc % :visible? true) (:transitions ?pn))))
+      (if (:p-adds prob)
+        (assoc ?pn :places
+               (vec (map #(if (contains? (:p-adds prob) (:name %)) (dissoc % :visible?) %)
+                         (:places ?pn))))
+        (assoc ?pn :transitions
+               (vec (map #(if (contains? (:t-adds prob) (:name %)) (dissoc % :visible?) %)
+                         (:transitions ?pn))))))))
 
-(defn random-mutation [] )
 
-(defn mutate
-  [pn]
-  (let [operator (random-mutation)]
-    ))
+(defn random-mutation
+  "Return a keyword designating a mutation function."
+  []
+  (let [r (rand)]
+    (loop [types (:mutation-types +gp-params+)
+           sum (second (first (:mutation-types +gp-params+)))]
+      (let [[mtype percent] (first types)]
+        (if (> sum r)
+          (first (first types))
+          (recur (rest types)
+                 (+ sum (second (second types)))))))))
+
+(defn random-trans [pn & {:keys [subset] :or {subset identity}}]
+  (let [trans (subset (:transitions pn))]
+    (nth trans (rand-int (count trans)))))
+
+(defn random-place [pn  & {:keys [subset] :or {subset identity}}]
+  (let [places (subset (:places pn))]
+    (nth places (rand-int (count places)))))
+
+(defn- mutate-dispatch [pn & {:keys [force]}]
+  (or force (random-mutation))) ; return a keyword
+
+(defmulti mutate #'mutate-dispatch)
+
+;;; Add a (hidden) place to the Petri net."
+(defmethod mutate :add-place [pn & args]
+  (let [trans-in (:name (random-trans pn))
+        trans-out (:name (random-trans pn))]
+    (as-> pn ?pn
+      (pnu/add-pn ?pn (pnu/make-place ?pn))
+      (let [p (:name (last (:places ?pn)))]
+        (as-> ?pn ?pnn
+          (pnu/add-pn ?pnn (pnu/make-arc ?pnn trans-in p))
+          (pnu/add-pn ?pnn (pnu/make-arc ?pnn p trans-out)))))))
+
+;;; Add a (hidden) transition between two places according to visibility tests.
+(defmacro various-trans-mutate
+  [name test1 test2]
+  `(defmethod mutate ~name [pn# & args#]
+     (let [p-in#  (:name (random-place pn# :subset ~test1))
+           p-out# (:name (random-place pn# :subset ~test2))]
+       (as-> pn# ?pn#
+         (pnu/add-pn ?pn# (pnu/make-transition pn#))
+         (let [t# (:name (last (:transitions ?pn#)))]
+           (as-> ?pn# ?pnn#
+             (pnu/add-pn ?pnn# (pnu/make-arc ?pnn# p-in# t#))
+             (pnu/add-pn ?pnn# (pnu/make-arc ?pnn# t# p-out#))))))))
+
+;;; POD: This will remain a waste of time if the distribution of these remains equal.
+(various-trans-mutate :add-trans-vv #(filter :visible? %) #(filter :visible? %))
+(various-trans-mutate :add-trans-hh #(remove :visible? %) #(remove :visible? %))
+(various-trans-mutate :add-trans-vh #(filter :visible? %) #(remove :visible? %))
+(various-trans-mutate :add-trans-hv #(remove :visible? %) #(filter :visible? %))
+
+;;; Doesn't care whether the transition is visible or hidden
+(defmethod mutate :add-inhibit-v [pn & args]
+  (let [trans (random-trans pn)
+        place (random-place pn :subset #(filter :visible? %))]
+    (pnu/add-pn pn (pnu/make-arc (:name trans) (:name place) :type :inhibitor))))
+
+(defmethod mutate :add-inhibit-h [pn & args]
+  (let [trans (random-trans pn)
+        place (random-place pn :subset #(remove :visible? %))]
+    (pnu/add-pn pn (pnu/make-arc (:name trans) (:name place) :type :inhibitor))))
+  
+(defmethod mutate :add-token [pn & args]
+  (update-in pn [:places (rand-int (count (:places pn))) :initial-marking] inc))
+  
+(defmethod mutate :remove-token [pn & args]
+  (update-in pn [:places (rand-int (count (:places pn))) :initial-marking]
+             #(if (zero? %) 0 (dec %))))
+
 
 (defn crossover
   [pn1 pn2]
   )
+
+(defn i-error [ind]
+  :nyi)
 
 ;; We'll also want a way to sort a population by i-error that doesn't require 
 ;; lots of i-error re-computation:
@@ -106,7 +190,7 @@
     (nth population
          (apply min (repeatedly tournament-size #(rand-int size))))))
 
-(defn initial-pop
+#_(defn initial-pop
   "Create an population."
   [popsize & {:keys [depth] :or {depth 4}}]
   (loop [p '()]
@@ -118,12 +202,16 @@
           (recur p)))
       p)))
 
+(defn reset-all! []
+  (pnu/reset-ids! {}))
+
+
 ;; Now we can evolve a solution by starting with a random population and 
 ;; repeatedly sorting, checking for a solution, and producing a new 
 ;; population.
 (defn evolve
   [popsize]
-  (reset-all)
+  (reset-all!)
   (println "Starting evolution...")
   (loop [generation 0
          population (initial-pop popsize)]
@@ -149,6 +237,14 @@
               (repeatedly (* 1/4 popsize) #(crossover (select population 7)
                                                      (select population 7)))
               (repeatedly (* 1/4 popsize) #(select population 7)))))))))
+
+
+(defn validate-gp-params [params]
+  (cond (not (< 0.9999
+                (reduce + 0 (map second (:mutation-types params)))
+                1.0001))
+        {:error ":mutation-types does not sum to 1."}
+        :else params))
 
 ;; Run it with a population of 1000:
 
@@ -219,7 +315,7 @@
   :params {:warm-up-time 2000 :run-to-time 20000}
   :jobmix {:jobType1 (map->JobType {:portion 1.0 :w {:m1 1.0, :m2 1.0}})}})
 
-(def submodel-1
+#_(def submodel-1
   (mjp/map->Model
    {:line 
     {:m1 (mjp/map->ExpoMachine {:lambda 0.1 :mu 0.9 :W 1.0}) 
