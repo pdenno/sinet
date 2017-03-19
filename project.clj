@@ -6,5 +6,6 @@
   :dependencies [[org.clojure/clojure "1.8.0"]
                  [org.clojure/core.memoize "0.5.9"]
                  [medley "0.8.4"]
+                 [zip-visit "1.1.0"]
                  [gov.nist/spntools "0.1.0-SNAPSHOT"]])
 
