@@ -21,6 +21,7 @@
 (def +diag+ (atom nil))
 (def +log+ (atom []))
 (defn log [msg] (swap! +log+ conj msg))
+(declare +problem+)
 
 ;;;  DOCUMENTATION REQUIREMENT: Determine what among the +gp-params+ matters.
 ;;; :pn-elements -- The PN elements that can appear in individuals.
@@ -31,21 +32,23 @@
   "Genetic programming algorithm parameters: they control important aspects of the solution."
   {:pn-elements [:place :token :normal-arc :inhibitor-arc :expo-trans #_:immediate-trans #_:fixed-trans]
    :pop-size 100
-   :max-generations 10
-   :k-bounded 10            ; When to give up on computing the reachability graph. 
+   :max-generations 200
+   :pn-k-bounded 10      ; When to give up on computing the reachability graph.
+   :pn-max-states 60     
    :crossover-to-mutation-ratio 0.5
-   :elite-individuals 0.02 ; NYI
+   :elite-individuals 2     ;
    :crossover-keeps-parents? true ; NYI
    :initial-mutations 10  ; max number of times to mutate eden individuals to create first generation.
    :mutation-types       
-   [[:add-place     1/5]    ; Add place (mine can't be absorbing, thus Nobile 1&2).
-    #_[:remove-place     ]
-    [:add-trans     1/5]    ; Add transition, connecting to input and output places.
+   [[:add-place     1/6]    ; Add place (mine can't be absorbing, thus Nobile 1&2).
+    #_[:remove-place   ]
+    [:add-arc       1/6]
+    [:add-trans     1/6]    ; Add transition, connecting to input and output places.
     #_[:remove-tran      ]
-    [:add-inhibit   1/5]    ; Add inhibitor arc, connecting a place to a trans
+    [:add-inhibit   1/6]    ; Add inhibitor arc, connecting a place to a trans
     #_[:remove-inhibit ]
-    [:add-token     1/5]    ; Add token to some place (visible or hidden).
-    [:remove-token  1/5]]}) ; Remove token from some place (visible or hidden).
+    [:add-token     1/6]    ; Add token to some place (visible or hidden).
+    [:remove-token  1/6]]}) ; Remove token from some place (visible or hidden).
 
 (defn add-extra-nodes
   "Return a map {:t <> :p <> :t-adds, :p-adds} naming nodes (transitions or places) to be added.
@@ -126,16 +129,20 @@
     (when (not-empty places)
       (nth places (rand-int (count places))))))
 
-(declare mutate-m)
+(declare mutate-m reset-all! reach-pn)
+
+;;; POD This could eliminate a good individual. Needs thought. 
 (defn mutate
-  "Wrap the mutation process (mutate-m). Where no mutation is possible, 
-   log why and try again."
-  [pn]
-  (let [pnp (mutate-m pn)]
-    (if (pnu/pn? pnp)
-      pnp
-      (do (log pnp)
-          (mutate pn)))))
+  "Wrap the mutation process (mutate-m) through to reachability.
+    Where no mutation is possible, log why and try again."
+  ([pn] (mutate pn 0))
+  ([pn cnt]
+   (if (> cnt 5)
+     (assoc pn :failure {:error :mutate :reason "exceed tries"})
+     (let [pnp (mutate-m pn)
+           m-pn (if (pnu/pn? pnp) pnp (do (log pnp) (mutate pn))) ; fails if mutation didn't work. 
+           r-pn (reach-pn m-pn)]                                  ; fails if reachability not good. 
+       (if (contains? r-pn :failure) (mutate pn (inc cnt)) r-pn)))))
 
 (def +zippy+ (atom nil))
 
@@ -151,8 +158,8 @@
   (let [trans-in (:name (random-trans pn))
         trans-out (:name (random-trans pn))]
     (as-> pn ?pn
-      (update ?pn :history conj {:mutate :add-place})
       (pnu/add-pn ?pn (pnu/make-place ?pn))
+      (update ?pn :history conj {:mutate :add-place :place (:name (last (:places ?pn)))})
       (let [p (:name (last (:places ?pn)))]
         (as-> ?pn ?pnn
           (pnu/add-pn ?pnn (pnu/make-arc ?pnn trans-in p))
@@ -180,10 +187,21 @@
       {:skip :add-inhibit :msg "No visible place"})
     {:skip :add-inhibit :msg "No trans"}))
 
+(defmethod mutate-m :add-arc [pn & args]
+  (if-let [trans (random-trans pn)]
+    (if-let [place (random-place pn)]
+      (let [[from to] (case (rand-int 2) 0 (vector trans place) 1 (vector trans place))]
+        (as-> pn ?pn
+          (update ?pn :history conj {:mutate :add-arc :place place})
+          (pnu/add-pn pn (pnu/make-arc pn (:name from) (:name to)))))
+        {:skip :add-arc :msg "No visible place"})
+      {:skip :add-arc :msg "No trans"}))
+
 (defmethod mutate-m :add-token [pn & args]
-  (-> pn
-      (update :history conj {:mutate :add-token})
-      (update-in [:places (rand-int (count (:places pn))) :initial-marking] inc)))
+  (let [p-indx (rand-int (count (:places pn)))]
+    (as-> pn ?pn
+      (update ?pn :history conj {:mutate :add-token :place (:name (nth (:places ?pn) p-indx))})
+      (update-in ?pn [:places p-indx :initial-marking] inc))))
   
 (defmethod mutate-m :remove-token [pn & args]
   (if-let [p (:name (random-place pn :subset #(remove (fn [pl] (= 0 (:initial-marking pl))) %)))]
@@ -201,15 +219,13 @@
     0 pn1
     1 pn2))
 
-(declare reset-all! reach-pn)
-
 (defn initial-pop [problem]
   (let [edens (eden-individuals problem)
         fresh-eden (fn [] (nth edens (rand-int (count edens))))]
     (loop [pop [], indv (fresh-eden), mute-cnt 0, try 0]
-      (cond (> try 100000) (throw (ex-info {:error "couldn't find a population!"})),
+      (cond (> try 2000) (throw (ex-info "initial-pop tries" {:individual-cnt (count pop)})),
             (>= (count pop) (:pop-size +gp-params+)) pop,
-            :else (let [m-indv (pn-ok-> indv mutate reach-pn)]
+            :else (let [m-indv (mutate indv)]
                     (cond (:failure m-indv)
                           (do (log {:mutate-fails :initial-pop :method (last (:history m-indv))})
                               (if (< mute-cnt 2) ; POD 2 should be a +gp-params+
@@ -237,9 +253,9 @@
 (defn sort-by-error
   "Add value for :error to each PN and used it to sort the population; best first." 
   [population]
-  (as-> population p
-    (map i-error p)
-    (sort #(< (:error %1) (:error %2)) population)))
+  (as-> population ?p
+    (map i-error ?p)
+    (sort #(< (:error %1) (:error %2)) ?p)))
 
 ;; Finally, we'll define a function to select an individual from a sorted 
 ;; population using tournaments of a given size.
@@ -250,12 +266,13 @@
          (apply min (repeatedly tournament-size #(rand-int size))))))
   
 (defn reset-all! []
-  (reset! pnr/+k-bounded+ (:k-bounded +gp-params+))
+  (reset! pnr/+k-bounded+ (:pn-k-bounded +gp-params+))
+  (reset! pn/+max-states+ (:pn-max-states +gp-params+))
   (pnu/reset-ids! {})
   (reset! +log+ []))
 
 (def +pop+ "diagnostic" (atom nil))
-(declare validate-gp-params)
+(declare validate-gp-params next-generation)
 
 (defn evolve
   "Starting with a random population, sort, select, check for a soluition and 
@@ -264,47 +281,51 @@
   (reset-all!)
   (validate-gp-params +gp-params+)
   (println "Starting evolution...")
-  (loop [generation 0
-         population (-> +problem+ initial-pop sort-by-error)]
-    (let [best (first population)
-          best-error (:error best)]
-      (println "======================")
-      (println "Generation:" generation)
-      (println "Population size:" (count population))
-      (println "Total mutations:" (reduce + 0 (map #(count (:history %)) population)))
-      (println "Failed individuals:" (count (filter identity (map #(contains? % :failure) population))))
-      (println "Best error:" best-error)
-      (println "     Median error:" (:error (nth population (int (/ (:pop-size +gp-params+) 2)))))
-      (println "     Average PN size:" (pnu/avg (map pnu/pn-size population)))
-      (cond (< best-error 0.1) ; good enough to count as success
-            (do (println "Success!") best)
-            (> generation (:max-generations +gp-params+))
-            (do (println "Stopped at max-generation.") false)
-            :else
-            (recur 
-             (inc generation)
-             (as-> population ?p
-               (reset! +pop+ ?p)
-               (map #(dissoc % :M2Mp :initial-marking :Q :steady-state :avg-tokens-on-place) ?p)
-               (next-generation ?p)))))))
+  (let [start-time (System/currentTimeMillis)]
+    (loop [generation 0
+           population (-> +problem+ initial-pop sort-by-error)]
+      (let [best (first population)]
+        (println "======================")
+        (println "Generation:" generation)
+        (println "Population size:" (count population))
+        (println "Total mutations:" (reduce + 0 (map #(count (:history %)) population)))
+        (println "Failed individuals:" (count (filter identity (map #(contains? % :failure) population))))
+        (println "Elapsed time (secs):" (int (/ (- (System/currentTimeMillis) start-time) 1000)))
+        (println "Best error:" (:error best))
+        (println "     Median error:" (:error (nth population (int (/ (:pop-size +gp-params+) 2)))))
+        (println "     Average PN size:" (pnu/avg (map pnu/pn-size population)))
+        (cond (< (:error best) 0.1) ; good enough to count as success
+              (do (println "Success!") best)
+              (= generation (:max-generations +gp-params+))
+              (do (println "Stopped at max-generation.") false)
+              :else
+              (recur 
+               (inc generation)
+               (as-> population ?p
+                 (map #(dissoc % #_:M2Mp :initial-marking :Q :steady-state :avg-tokens-on-place) ?p)
+                 (next-generation ?p)
+                 (reset! +pop+ ?p))))))))
 
 (defn next-generation [population]
-  (let [popsize (count population)]
-    (sort-by-error      
-     (concat
-      (repeatedly (* 1/2 popsize) #(mutate (select population 7)))
-      (repeatedly (* 1/4 popsize) #(crossover (select population 7) (select population 7)))
-      (repeatedly (* 1/4 popsize) #(select population 7))))))
+  "Compute the next generation, a combination of tournament selection, mutations and crossover
+   of tournament winners, and elite individuals."
+  (let [popsize (count population)
+        e-cnt (:elite-individuals +gp-params+)
+        sorted-pop (sort-by-error population)]
+    (as-> (vec sorted-pop) ?spop
+      (concat 
+       (if e-cnt (subvec ?spop 0 (inc e-cnt)) [])
+       (repeatedly (* 7/8 popsize) #(mutate (select ?spop 3)))
+       ;;(repeatedly (* 1/4 popsize) #(crossover (select ?spop 7) (select ?spop 7)))
+       (repeatedly (* 1/8 popsize) #(select sorted-pop 3)))
+      (if e-cnt
+        (subvec (vec ?spop) 0 (- (:pop-size +gp-params+) e-cnt))
+        ?spop))))
+
 
 (defn validate-gp-params [params]
   (when (not (< 0.9999 (reduce + 0 (map second (:mutation-types params))) 1.0001))
     (throw (ex-info {:error ":mutation-types does not sum to 1."}))))
-
-;;; bbb
-;;; (-> (pnml/read-pnml "data/m2-inhib-balanced.xml") (pn/gspn2spn) (pnr/reachability)) ; my gspn2spn can't do it.
-;;; (-> (pnml/read-pnml "data/marsan69.xml") (pn/gspn2spn) (pnr/reachability))
-;;; (def foo (initial-pop +problem+))
-;;; (map #(if (reach-pn (reset! +diag+ %)) true false) foo)
 
 (defn reach-pn
   "Returns the argument pn with reachability calculated or false if that couldn't be done."
@@ -316,9 +337,6 @@
             pn/gspn2spn
             pnr/reachability
             pnr/live?)))
-
-;;; Run it with a population of 1000:
-;;;(evolve 1000)
 
 ;;;===================================================================================
 ;;;============================= Two machine 1 buffer spot ===========================
