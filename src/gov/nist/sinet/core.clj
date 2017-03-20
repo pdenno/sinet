@@ -17,6 +17,7 @@
 ;;;       - Implement a log for exceptional situations. 
 ;;;       - DONE (enough): Probably need more than one Eden individual for diversity (backwards, multi-loops etc).
 ;;;       - There are no mutate methods to remove elements; should there be?
+;;;       - Maybe I shouldn't care about absorbing states?
 
 (def +diag+ (atom nil))
 (def +log+ (atom []))
@@ -32,23 +33,26 @@
   "Genetic programming algorithm parameters: they control important aspects of the solution."
   {:pn-elements [:place :token :normal-arc :inhibitor-arc :expo-trans #_:immediate-trans #_:fixed-trans]
    :pop-size 100
-   :max-generations 200
-   :pn-k-bounded 10      ; When to give up on computing the reachability graph.
+   :max-generations 40
+   :debugging? false
+   :pn-k-bounded  10      ; When to give up on computing the reachability graph.
+   :pn-max-rs     2200
    :pn-max-states 60     
    :crossover-to-mutation-ratio 0.5
    :elite-individuals 2     ;
    :crossover-keeps-parents? true ; NYI
    :initial-mutations 10  ; max number of times to mutate eden individuals to create first generation.
    :mutation-types       
-   [[:add-place     1/6]    ; Add place (mine can't be absorbing, thus Nobile 1&2).
-    #_[:remove-place   ]
-    [:add-arc       1/6]
-    [:add-trans     1/6]    ; Add transition, connecting to input and output places.
-    #_[:remove-tran      ]
-    [:add-inhibit   1/6]    ; Add inhibitor arc, connecting a place to a trans
-    #_[:remove-inhibit ]
-    [:add-token     1/6]    ; Add token to some place (visible or hidden).
-    [:remove-token  1/6]]}) ; Remove token from some place (visible or hidden).
+   [[:add-place        2/10]    ; Add place (mine can't be absorbing, thus Nobile 1&2).
+    [:add-token        2/10]    ; Add token to some place (visible or hidden).
+    [:add-trans        2/10]    ; Add transition, connecting to input and output places.
+    [:add-arc          2/10]
+    [:add-inhibitor    2/10]    ; Add inhibitor arc, connecting a place to a trans
+    [:remove-place     1/10]
+    [:remove-token     1/10]
+    [:remove-trans     1/10]
+    [:remove-arc       1/10]
+    [:remove-inhibitor 1/10]]})
 
 (defn add-extra-nodes
   "Return a map {:t <> :p <> :t-adds, :p-adds} naming nodes (transitions or places) to be added.
@@ -109,9 +113,24 @@
 (defn random-mutation
   "Return a keyword designating a mutation function."
   []
-  (let [r (rand)]
-    (loop [types (:mutation-types +gp-params+)
+  (let [mtypes (:mutation-types +gp-params+)
+        r (rand (reduce (fn [sum p] (+ sum (second p))) 0 mtypes))]
+    (loop [types mtypes
            sum (second (first (:mutation-types +gp-params+)))]
+      (let [[mtype percent] (first types)]
+        (if (> sum r)
+          (first (first types))
+          (recur (rest types)
+                 (+ sum (second (second types)))))))))
+
+(defn eden-mutation
+  "Return a keyword designating a mutation function for 
+   creating the eden individuals"
+  []
+  (let [add-pairs (filter #(re-matches #"^add.*" (name (first %))) (:mutation-types +gp-params+))
+        r (rand (reduce (fn [sum p] (+ sum (second p))) 0 add-pairs))]
+    (loop [types add-pairs
+           sum (second (first add-pairs))]
       (let [[mtype percent] (first types)]
         (if (> sum r)
           (first (first types))
@@ -124,10 +143,14 @@
       (nth trans (rand-int (count trans))))))
 
 (defn random-place [pn  & {:keys [subset] :or {subset identity}}]
-  (reset! +diag+ (list pn  subset))
   (let [places (subset (:places pn))]
     (when (not-empty places)
       (nth places (rand-int (count places))))))
+
+(defn random-arc [pn  & {:keys [subset] :or {subset identity}}]
+  (let [arcs (subset (:arcs pn))]
+    (when (not-empty arcs)
+      (nth arcs (rand-int (count arcs))))))
 
 (declare mutate-m reset-all! reach-pn)
 
@@ -135,25 +158,28 @@
 (defn mutate
   "Wrap the mutation process (mutate-m) through to reachability.
     Where no mutation is possible, log why and try again."
-  ([pn] (mutate pn 0))
-  ([pn cnt]
+  ([pn] (mutate pn random-mutation 0))
+  ([pn distrib cnt]
    (if (> cnt 5)
      (assoc pn :failure {:error :mutate :reason "exceed tries"})
-     (let [pnp (mutate-m pn)
-           m-pn (if (pnu/pn? pnp) pnp (do (log pnp) (mutate pn))) ; fails if mutation didn't work. 
-           r-pn (reach-pn m-pn)]                                  ; fails if reachability not good. 
-       (if (contains? r-pn :failure) (mutate pn (inc cnt)) r-pn)))))
+     (let [pnp (mutate-m pn :distribution distrib)
+           m-pn (if (pnu/pn? pnp) pnp (do (log pnp) (mutate pn distrib 0))) ; fails if mutation didn't work. 
+           r-pn (reach-pn m-pn)]                                            
+       (if (contains? r-pn :failure) ; fails if reachability not good. 
+         (mutate pn distrib (inc cnt)) 
+         r-pn)))))
 
 (def +zippy+ (atom nil))
 
-(defn- mutate-m-dispatch [pn & {:keys [force]}]
-  (let [answer (or force (random-mutation))] ; return a keyword
+(defn- mutate-m-dispatch [pn & {:keys [force distribution]
+                                :or {distribution random-mutation}}]
+  (let [answer (or force (distribution))]
     (reset! +zippy+ answer)
     answer))
 
 (defmulti mutate-m #'mutate-m-dispatch)
 
-;;; Add a (hidden) place to the Petri net."
+;;;=================== Add =======================================
 (defmethod mutate-m :add-place [pn & args]
   (let [trans-in (:name (random-trans pn))
         trans-out (:name (random-trans pn))]
@@ -165,6 +191,12 @@
           (pnu/add-pn ?pnn (pnu/make-arc ?pnn trans-in p))
           (pnu/add-pn ?pnn (pnu/make-arc ?pnn p trans-out)))))))
 
+(defmethod mutate-m :add-token [pn & args]
+  (let [p-indx (rand-int (count (:places pn)))]
+    (as-> pn ?pn
+      (update ?pn :history conj {:mutate :add-token :place (:name (nth (:places ?pn) p-indx))})
+      (update-in ?pn [:places p-indx :initial-marking] inc))))
+  
 (defmethod mutate-m :add-trans [pn & args]
   (if-let [p-in (:name (random-place pn))]
     (if-let [p-out (:name (random-place pn :subset #(remove (fn [pl] (= (:name pl) p-in)) %)))]
@@ -178,15 +210,6 @@
       {:skip :add-trans :msg "no p-out"})
     {:skip :add-trans :msg "no p-in"}))
 
-(defmethod mutate-m :add-inhibit [pn & args]
-  (if-let [trans (random-trans pn)]
-    (if-let [place (random-place pn)]
-      (as-> pn ?pn
-        (update ?pn :history conj {:mutate :add-inhibit :place place})
-        (pnu/add-pn pn (pnu/make-arc pn (:name place) (:name trans) :type :inhibitor)))
-      {:skip :add-inhibit :msg "No visible place"})
-    {:skip :add-inhibit :msg "No trans"}))
-
 (defmethod mutate-m :add-arc [pn & args]
   (if-let [trans (random-trans pn)]
     (if-let [place (random-place pn)]
@@ -197,12 +220,24 @@
         {:skip :add-arc :msg "No visible place"})
       {:skip :add-arc :msg "No trans"}))
 
-(defmethod mutate-m :add-token [pn & args]
-  (let [p-indx (rand-int (count (:places pn)))]
+(defmethod mutate-m :add-inhibitor [pn & args]
+  (if-let [trans (random-trans pn)]
+    (if-let [place (random-place pn)]
+      (as-> pn ?pn
+        (update ?pn :history conj {:mutate :add-inhibitor :place place})
+        (pnu/add-pn pn (pnu/make-arc pn (:name place) (:name trans) :type :inhibitor)))
+      {:skip :add-inhibitor :msg "No visible place"})
+    {:skip :add-inhibitor :msg "No trans"}))
+
+
+;;;=================== Remove =======================================
+(defmethod mutate-m :remove-place [pn & args]
+  (let [place (:name (random-place pn :subset #(remove (fn [pl] (:visible? pl)) %)))]
     (as-> pn ?pn
-      (update ?pn :history conj {:mutate :add-token :place (:name (nth (:places ?pn) p-indx))})
-      (update-in ?pn [:places p-indx :initial-marking] inc))))
-  
+      (update ?pn :history conj {:mutate :remove-place :place place})
+      (assoc ?pn :places (vec (remove #(= (:name %) place) (:places ?pn))))
+      (assoc ?pn :arcs (vec (remove #(or (= (:source %) place) (= (:target %) place)) (:arcs ?pn)))))))
+
 (defmethod mutate-m :remove-token [pn & args]
   (if-let [p (:name (random-place pn :subset #(remove (fn [pl] (= 0 (:initial-marking pl))) %)))]
     (-> pn
@@ -213,19 +248,54 @@
                                   (:places pn)))))
     {:skip :remove-token :msg "No place with token"}))
 
+(defmethod mutate-m :remove-trans [pn & args]
+  (let [trans (:name (random-trans pn :subset #(remove (fn [pl] (:visible? pl)) %)))]
+    (as-> pn ?pn
+      (update ?pn :history conj {:mutate :remove-trans :trans trans})
+      (assoc ?pn :trans (vec (remove #(= (:name %) trans) (:transitions ?pn))))
+      (assoc ?pn :arcs (vec (remove #(or (= (:source %) trans) (= (:target %) trans)) (:arcs ?pn)))))))
+
+(defmethod mutate-m :remove-arc [pn & args]
+  (if-let [arc-id (:aid (random-arc pn :subset #(remove (fn [ar] (= :normal (:type ar))) %)))]
+    (as-> pn ?pn
+      (update ?pn :history conj {:mutate :remove-arc :arc-id arc-id})
+      (assoc ?pn :arcs (vec (remove #(= (:aid %) arc-id) (:arcs pn)))))
+    {:skip :remove-arc :msg "No arc"}))
+
+(defmethod mutate-m :remove-inhibitor [pn & args]
+  (if-let [arc-id (:aid (random-arc pn :subset #(remove (fn [ar] (= :inhibitor (:type ar))) %)))]
+    (as-> pn ?pn
+      (update ?pn :history conj {:mutate :remove-inhibitor :arc-id arc-id})
+      (assoc ?pn :arcs (vec (remove #(= (:aid %) arc-id) (:arcs ?pn)))))
+    {:skip :remove-inhibitor :msg "No inhibitor arcs"}))
+
+
 (defn crossover ; POD NYI
   [pn1 pn2]
   (case (rand-int 2)
     0 pn1
     1 pn2))
 
+(def +old-pop+ "diagnostic" (atom []))
+(def +pop+ "diagnostic" (atom nil))
+
 (defn initial-pop [problem]
   (let [edens (eden-individuals problem)
-        fresh-eden (fn [] (nth edens (rand-int (count edens))))]
-    (loop [pop [], indv (fresh-eden), mute-cnt 0, try 0]
+        fresh-eden (fn [] (nth edens (rand-int (count edens))))
+        start-time (System/currentTimeMillis)]
+    (reset! +old-pop+ [])
+    (loop [pop [],
+           indv (fresh-eden),
+           mute-cnt 0,
+           try 0]
+      (when (and (:debugging? +gp-params+) (> (count pop) (count @+old-pop+)))
+        (swap! +old-pop+ conj (last pop))
+        (println "\nPopulation count:" (count pop))
+        (println "Individual-size (M2Mp):" (count (:M2Mp (last pop))))
+        (println "Time:" (int (/ (- (System/currentTimeMillis) start-time) 1000))))
       (cond (> try 2000) (throw (ex-info "initial-pop tries" {:individual-cnt (count pop)})),
             (>= (count pop) (:pop-size +gp-params+)) pop,
-            :else (let [m-indv (mutate indv)]
+            :else (let [m-indv (mutate indv eden-mutation 0)]
                     (cond (:failure m-indv)
                           (do (log {:mutate-fails :initial-pop :method (last (:history m-indv))})
                               (if (< mute-cnt 2) ; POD 2 should be a +gp-params+
@@ -235,6 +305,11 @@
                           (recur (conj pop m-indv) (fresh-eden) 0 (inc try))
                           :else ; continue mutating
                           (recur pop m-indv (inc mute-cnt) (inc try))))))))
+
+(defn debug-initial-pop []
+  (reset-all!)
+  (reset! +pop+ (initial-pop +problem+))
+  true)
 
 (defn i-error [ind]
   "Compute the steady-state properties of the individual and from those, compute its error."
@@ -267,11 +342,11 @@
   
 (defn reset-all! []
   (reset! pnr/+k-bounded+ (:pn-k-bounded +gp-params+))
+  (reset! pnr/+max-rs+ (:pn-max-rs +gp-params+))
   (reset! pn/+max-states+ (:pn-max-states +gp-params+))
   (pnu/reset-ids! {})
   (reset! +log+ []))
 
-(def +pop+ "diagnostic" (atom nil))
 (declare validate-gp-params next-generation)
 
 (defn evolve
@@ -324,7 +399,7 @@
 
 
 (defn validate-gp-params [params]
-  (when (not (< 0.9999 (reduce + 0 (map second (:mutation-types params))) 1.0001))
+  #_(when (not (< 0.9999 (reduce + 0 (map second (:mutation-types params))) 1.0001))
     (throw (ex-info {:error ":mutation-types does not sum to 1."}))))
 
 (defn reach-pn
