@@ -2,7 +2,7 @@
   (:require [medley.core :refer (abs)]
             [clojure.pprint :refer (cl-format pprint)]
             [clojure.core.memoize :as m]
-            [gov.nist.spntools.core :as pn]
+            [gov.nist.spntools.core :as pn :refer :all]
             [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp pn-ok-> as-pn-ok->)]
             [gov.nist.spntools.util.reach :as pnr :refer (reachability)]
             [gov.nist.spntools.util.pnml :as pnml :refer (read-pnml)]))
@@ -13,10 +13,12 @@
 ;;; I started with Lee Spector's "gp" demonstration software...
 
 ;;; ToDo: - DONE: Get data for exponential jobs, BBS.
+;;;       ===> Make sure I'm not promoting non-mutated individuals when they fail mutation.
+;;;       ===> Normalize the error calculation.
+;;;       ===> Create/save a zero population. Read it in to start.
 ;;;       - Decide what to do about remove-token and other things that might fail or cause failure.
 ;;;       - Implement a log for exceptional situations. 
 ;;;       - DONE (enough): Probably need more than one Eden individual for diversity (backwards, multi-loops etc).
-;;;       - There are no mutate methods to remove elements; should there be?
 ;;;       - Maybe I shouldn't care about absorbing states?
 
 (def +diag+ (atom nil))
@@ -39,7 +41,8 @@
    :pn-max-rs     2200
    :pn-max-states 60     
    :crossover-to-mutation-ratio 0.5
-   :elite-individuals 2     ;
+   :selection-pressure 3 ; not normalized to pop-size
+   :elite-individuals 0
    :crossover-keeps-parents? true ; NYI
    :initial-mutations 10  ; max number of times to mutate eden individuals to create first generation.
    :mutation-types       
@@ -52,7 +55,8 @@
     [:remove-token     1/10]
     [:remove-trans     1/10]
     [:remove-arc       1/10]
-    [:remove-inhibitor 1/10]]})
+    [:remove-inhibitor 1/10]
+    [:swap-places-vv   2/10]]})
 
 (defn add-extra-nodes
   "Return a map {:t <> :p <> :t-adds, :p-adds} naming nodes (transitions or places) to be added.
@@ -109,7 +113,8 @@
    (eden-individual problem)
    (eden-individual (update problem :visible-places reverse))))
 
-;;; POD why keywords? (does get you the :force)
+(defn random-crossover [] )
+
 (defn random-mutation
   "Return a keyword designating a mutation function."
   []
@@ -127,7 +132,7 @@
   "Return a keyword designating a mutation function for 
    creating the eden individuals"
   []
-  (let [add-pairs (filter #(re-matches #"^add.*" (name (first %))) (:mutation-types +gp-params+))
+  (let [add-pairs (remove #(re-matches #"^remove.*" (name (first %))) (:mutation-types +gp-params+))
         r (rand (reduce (fn [sum p] (+ sum (second p))) 0 add-pairs))]
     (loop [types add-pairs
            sum (second (first add-pairs))]
@@ -179,6 +184,20 @@
 
 (defmulti mutate-m #'mutate-m-dispatch)
 
+(defn- crossover-m-dispatch [pn & {:keys [force distribution]
+                                   :or {distribution random-crossover}}]
+  (let [answer (or force (distribution))]
+    (reset! +zippy+ answer)
+    answer))
+
+(defmulti crossover-m #'crossover-m-dispatch)
+
+(defn crossover [pn1 pn2]
+  (let [[pnp1 pnp2] (crossover-m pn1 pn1)]
+    (if (and (pnu/pn? pnp1) (pnu/pn? pnp2))
+      [pnp1 pnp2]
+      (crossover pn1 pn2))))
+
 ;;;=================== Add =======================================
 (defmethod mutate-m :add-place [pn & args]
   (let [trans-in (:name (random-trans pn))
@@ -229,7 +248,6 @@
       {:skip :add-inhibitor :msg "No visible place"})
     {:skip :add-inhibitor :msg "No trans"}))
 
-
 ;;;=================== Remove =======================================
 (defmethod mutate-m :remove-place [pn & args]
   (let [place (:name (random-place pn :subset #(remove (fn [pl] (:visible? pl)) %)))]
@@ -269,12 +287,28 @@
       (assoc ?pn :arcs (vec (remove #(= (:aid %) arc-id) (:arcs ?pn)))))
     {:skip :remove-inhibitor :msg "No inhibitor arcs"}))
 
-
-(defn crossover ; POD NYI
-  [pn1 pn2]
-  (case (rand-int 2)
-    0 pn1
-    1 pn2))
+;;;================================================================================
+(defn swap-arcs [pn pl1 pl2]
+  "Swap use of places pl1 and pl2 in the arcs of the PN."
+  (assoc pn :arcs
+         (vec (map (fn [ar]
+                     (as-> ar ?ar
+                       (cond (= (:source ?ar) pl1) (assoc ar :source pl2)
+                             (= (:source ?ar) pl2) (assoc ar :source pl1)
+                             :else ?ar)
+                       (cond (= (:target ?ar) pl1) (assoc ar :target pl2)
+                             (= (:target ?ar) pl2) (assoc ar :target pl1)
+                             :else ?ar)))
+                   (:arcs pn)))))
+  
+(defmethod mutate-m :swap-places-vv [pn & args]
+  (if-let [pl1 (:name (random-place pn :subset #(filter (fn [pl] (:visible? pl)) %)))]
+    (if-let [pl2 (:name (random-place pn :subset #(filter (fn [pl] (and (:visible? pl)
+                                                                        (not= (:name pl) pl1)))
+                                                          %)))]
+      (swap-arcs pn pl1 pl2)
+      {:skip :swap-places-vv :msg "no 2nd place"})
+    {:skip :swap-places-vv :msg "no 1st place"}))
 
 (def +old-pop+ "diagnostic" (atom []))
 (def +pop+ "diagnostic" (atom nil))
@@ -295,7 +329,7 @@
         (println "Time:" (int (/ (- (System/currentTimeMillis) start-time) 1000))))
       (cond (> try 2000) (throw (ex-info "initial-pop tries" {:individual-cnt (count pop)})),
             (>= (count pop) (:pop-size +gp-params+)) pop,
-            :else (let [m-indv (mutate indv eden-mutation 0)]
+            :else (let [m-indv (-> indv #_crossover (mutate eden-mutation 0))]
                     (cond (:failure m-indv)
                           (do (log {:mutate-fails :initial-pop :method (last (:history m-indv))})
                               (if (< mute-cnt 2) ; POD 2 should be a +gp-params+
@@ -311,10 +345,11 @@
   (reset! +pop+ (initial-pop +problem+))
   true)
 
+;;; POD -- really should normalize values!
 (defn i-error [ind]
   "Compute the steady-state properties of the individual and from those, compute its error."
   (let [pn (pn-ok->
-            ind
+            ind ; reachability analysis has already been performed. 
             pn/Q-matrix
             pn/steady-state-props)]
     (if (:failure pn)
@@ -332,8 +367,9 @@
     (map i-error ?p)
     (sort #(< (:error %1) (:error %2)) ?p)))
 
-;; Finally, we'll define a function to select an individual from a sorted 
-;; population using tournaments of a given size.
+
+;;; Finally, we'll define a function to select an individual from a sorted 
+;;; population using tournaments of a given size.
 (defn select
   [population tournament-size]
   (let [size (count population)]
@@ -352,13 +388,14 @@
 (defn evolve
   "Starting with a random population, sort, select, check for a soluition and 
    produce a new population."
-  [problem]
-  (reset-all!)
-  (validate-gp-params +gp-params+)
-  (println "Starting evolution...")
-  (let [start-time (System/currentTimeMillis)]
-    (loop [generation 0
-           population (-> +problem+ initial-pop sort-by-error)]
+  ([problem] (evolve problem (-> problem initial-pop sort-by-error)))
+  ([problem population]
+   (reset-all!)
+   (validate-gp-params +gp-params+)
+   (println "Starting evolution...")
+   (let [start-time (System/currentTimeMillis)]
+     (loop [generation 0
+            population population]
       (let [best (first population)]
         (println "======================")
         (println "Generation:" generation)
@@ -379,7 +416,8 @@
                (as-> population ?p
                  (map #(dissoc % #_:M2Mp :initial-marking :Q :steady-state :avg-tokens-on-place) ?p)
                  (next-generation ?p)
-                 (reset! +pop+ ?p))))))))
+                 (reset! +pop+ ?p)))))))))
+
 
 (defn next-generation [population]
   "Compute the next generation, a combination of tournament selection, mutations and crossover
@@ -390,13 +428,12 @@
     (as-> (vec sorted-pop) ?spop
       (concat 
        (if e-cnt (subvec ?spop 0 (inc e-cnt)) [])
-       (repeatedly (* 7/8 popsize) #(mutate (select ?spop 3)))
-       ;;(repeatedly (* 1/4 popsize) #(crossover (select ?spop 7) (select ?spop 7)))
-       (repeatedly (* 1/8 popsize) #(select sorted-pop 3)))
+       (repeatedly (* 7/8 popsize) #(mutate (select ?spop (:selection-pressure +gp-params+))))
+       ;(repeatedly (* 2/8 popsize) #(crossover (select ?spop 7) (select ?spop 7)))
+       (repeatedly (* 1/8 popsize) #(select sorted-pop (:selection-pressure +gp-params+))))
       (if e-cnt
         (subvec (vec ?spop) 0 (- (:pop-size +gp-params+) e-cnt))
         ?spop))))
-
 
 (defn validate-gp-params [params]
   #_(when (not (< 0.9999 (reduce + 0 (map second (:mutation-types params))) 1.0001))
@@ -409,9 +446,39 @@
             pnr/possible-live?
             pnu/enter-and-exit-places?
             pnu/enter-and-exit-trans?
-            pn/gspn2spn
             pnr/reachability
             pnr/live?)))
+
+
+;;;==================== Diagnostics ========================================
+(defn write-a-pop
+  "Return a population of the argument problem sorted by error. 
+   The best individual in this population is data/initial-1.xml."
+  [problem]
+  (let [pnum (atom 0)]
+    (map #(pnml/write-pnml
+           %
+           :file (str "data/pops/initial-" (swap! pnum inc) ".xml")
+           :positions (:pn-graph-positions problem))
+         (reset! +pop+ (-> problem initial-pop sort-by-error)))))
+
+(defn read-a-pop []
+  (reset! +pop+
+          (map #(pnml/read-pnml (str "data/pops/initial-" % ".xml"))
+               (range 1 101)))
+  true)
+
+;;; Diagnostic - Because in use of evolve, also check liveness, absorbing etc.
+(defn pn2error
+  "Calculate the error for the given file."
+  [pn]
+  (-> pn
+      pnr/reachability
+      pn/Q-matrix
+      pn/steady-state-props
+      i-error
+      :error))
+
 
 ;;;===================================================================================
 ;;;============================= Two machine 1 buffer spot ===========================
@@ -436,6 +503,7 @@
   
 (def +problem+
   {:visible-places [:m1-blocked :m1-busy :m2-busy :m2-starved :buffer]
+   :pn-graph-positions (pnml/positions-from-file "data/pops/initial-positions.xml")
    :visible-transitions [:m1-finished :m2-finished] 
    :data-source +m2-11+}) ; POD not yet dynamic, of course. 
 
