@@ -1,18 +1,19 @@
 (ns gov.nist.sinet
   (:require [medley.core :refer (abs)]
             [clojure.pprint :refer (cl-format pprint)]
-            [clojure.core.memoize :as m]
+            [clojure.core.matrix :as m :refer (zero-matrix)] ; POD temporary
             [gov.nist.spntools.core :as pn :refer :all]
             [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp pn-ok-> as-pn-ok->)]
             [gov.nist.spntools.util.reach :as pnr :refer (reachability)]
             [gov.nist.spntools.util.pnml :as pnml :refer (read-pnml)]))
 
-;;; Purpose:This is a program to demonstrate ideas in system identification of 
+;;; Purpose: This is a program to demonstrate ideas in system identification of 
 ;;; discrete event systems using genetic programming.
 
-;;; I started with Lee Spector's "gp" demonstration software...
+;;; I started with Lee Spector's "gp" demonstration software.
 
 ;;; ToDo: - DONE: Get data for exponential jobs, BBS.
+;;;       ===> I think it makes more sense to perform 5-10 mutations on edens THEN test them. 
 ;;;       ===> Make sure I'm not promoting non-mutated individuals when they fail mutation.
 ;;;       ===> Normalize the error calculation.
 ;;;       ===> Create/save a zero population. Read it in to start.
@@ -21,6 +22,7 @@
 ;;;       - DONE (enough): Probably need more than one Eden individual for diversity (backwards, multi-loops etc).
 ;;;       - Maybe I shouldn't care about absorbing states?
 
+(defrecord Inv [pn id error history])
 (def +diag+ (atom nil))
 (def +log+ (atom []))
 (defn log [msg] (swap! +log+ conj msg))
@@ -35,17 +37,17 @@
   "Genetic programming algorithm parameters: they control important aspects of the solution."
   {:pn-elements [:place :token :normal-arc :inhibitor-arc :expo-trans #_:immediate-trans #_:fixed-trans]
    :pop-size 100
-   :max-generations 40
-   :debugging? false
+   :max-gens 40
+   :debugging? true
    :pn-k-bounded  10      ; When to give up on computing the reachability graph.
    :pn-max-rs     2200
-   :pn-max-states 60     
+   :pn-max-states 1000
    :crossover-to-mutation-ratio 0.5
-   :selection-pressure 3 ; not normalized to pop-size
+   :select-pressure 3 ; not normalized to pop-size
    :elite-individuals 0
    :crossover-keeps-parents? true ; NYI
    :initial-mutations 10  ; max number of times to mutate eden individuals to create first generation.
-   :mutation-types       
+   :mutation-dist ; The pdf for ordinary mutations (not eden mutations)      
    [[:add-place        2/10]    ; Add place (mine can't be absorbing, thus Nobile 1&2).
     [:add-token        2/10]    ; Add token to some place (visible or hidden).
     [:add-trans        2/10]    ; Add transition, connecting to input and output places.
@@ -54,8 +56,15 @@
     [:remove-place     1/10]
     [:remove-token     1/10]
     [:remove-trans     1/10]
-    [:remove-arc       1/10]
+    [:remove-arc       1/10] 
     [:remove-inhibitor 1/10]
+    [:swap-places-vv   2/10]]
+   :eden-dist ; for creation of eden individual, which are already rather sparse
+   [[:add-place        2/10]
+    [:add-token        2/10]  
+    [:add-trans        2/10]  
+    [:add-arc          2/10]
+    [:add-inhibitor    2/10]  
     [:swap-places-vv   2/10]]})
 
 (defn add-extra-nodes
@@ -86,8 +95,9 @@
     (as-> {:places [] :transitions [] :arcs []} ?pn
       (assoc ?pn :history [])
       (reduce (fn [pn pl] (pnu/add-pn pn (pnu/make-place pn :name pl))) ?pn (:p prob))
-      (update-in ?pn [:places 0 :initial-marking] inc) ; Add a token to make it alive
-      (reduce (fn [pn tr] (pnu/add-pn pn (pnu/make-transition pn :name tr))) ?pn (:t prob))
+      (update-in ?pn [:places 0 :initial-tokens] inc) ; Add a token to make it alive
+      (reduce (fn [pn tr] (pnu/add-pn pn (pnu/make-transition pn :name tr))) 
+              ?pn (:t prob))
       (reduce (fn [pn [from to]] (pnu/add-pn pn (pnu/make-arc pn from to)))
               ?pn
               (map vec (partition
@@ -104,10 +114,15 @@
                (vec (map #(if (contains? (:p-adds prob) (:name %)) (dissoc % :visible?) %)
                          (:places ?pn))))
         (assoc ?pn :transitions
-               (vec (map #(if (contains? (:t-adds prob) (:name %)) (dissoc % :visible?) %)
+               (vec (map (fn [trans]
+                           (if (contains? (:t-adds prob) (:name trans))
+                             (as-> trans ?t
+                               (dissoc ?t :visible?)
+                               (assoc ?t :type (if (= 0 (rand-int 2)) :exponential :immediate)))
+                             trans))
                          (:transitions ?pn))))))))
 
-(defn eden-individuals
+(defn eden-pns
   [problem]
   (list
    (eden-individual problem)
@@ -115,32 +130,18 @@
 
 (defn random-crossover [] )
 
-(defn random-mutation
+(defn rand-mute-key
   "Return a keyword designating a mutation function."
-  []
-  (let [mtypes (:mutation-types +gp-params+)
-        r (rand (reduce (fn [sum p] (+ sum (second p))) 0 mtypes))]
-    (loop [types mtypes
-           sum (second (first (:mutation-types +gp-params+)))]
-      (let [[mtype percent] (first types)]
+  ([] (rand-mute-key (:mutation-dist +gp-params+)))
+  ([mdist]
+   (let [r (rand (reduce (fn [sum p] (+ sum (second p))) 0 mdist))] ; 'normalized'
+    (loop [dist mdist
+           sum (second (first mdist))]
+      (let [[mtype _] (first dist)]
         (if (> sum r)
-          (first (first types))
-          (recur (rest types)
-                 (+ sum (second (second types)))))))))
-
-(defn eden-mutation
-  "Return a keyword designating a mutation function for 
-   creating the eden individuals"
-  []
-  (let [add-pairs (remove #(re-matches #"^remove.*" (name (first %))) (:mutation-types +gp-params+))
-        r (rand (reduce (fn [sum p] (+ sum (second p))) 0 add-pairs))]
-    (loop [types add-pairs
-           sum (second (first add-pairs))]
-      (let [[mtype percent] (first types)]
-        (if (> sum r)
-          (first (first types))
-          (recur (rest types)
-                 (+ sum (second (second types)))))))))
+          (first (first dist))
+          (recur (rest dist)
+                 (+ sum (second (second dist))))))))))
 
 (defn random-trans [pn & {:keys [subset] :or {subset identity}}]
   (let [trans (subset (:transitions pn))]
@@ -157,36 +158,29 @@
     (when (not-empty arcs)
       (nth arcs (rand-int (count arcs))))))
 
-(declare mutate-m reset-all! reach-pn)
+(declare mutate-m reset-all! eval-pn)
 
-;;; POD This could eliminate a good individual. Needs thought. 
+;;; POD This could eliminate a good individual. Needs thought.
+;;; Mutate now as the COMPLETE pn computation (through to steady-state) NEEDS THOUGHT!
 (defn mutate
-  "Wrap the mutation process (mutate-m) through to reachability.
-    Where no mutation is possible, log why and try again."
-  ([pn] (mutate pn random-mutation 0))
-  ([pn distrib cnt]
-   (if (> cnt 5)
-     (assoc pn :failure {:error :mutate :reason "exceed tries"})
-     (let [pnp (mutate-m pn :distribution distrib)
-           m-pn (if (pnu/pn? pnp) pnp (do (log pnp) (mutate pn distrib 0))) ; fails if mutation didn't work. 
-           r-pn (reach-pn m-pn)]                                            
-       (if (contains? r-pn :failure) ; fails if reachability not good. 
-         (mutate pn distrib (inc cnt)) 
-         r-pn)))))
+  "mutate the individual"
+  ([inv] (mutate inv :pick-fn rand-mute-key)) ; no args to r-m defaults to :mutation-dist
+  ([inv & {:keys [pick-fn force] :or {pick-fn rand-mute-key}}]
+   (mutate-m inv :pick-fn pick-fn :force force)))
 
 (def +zippy+ (atom nil))
 
-(defn- mutate-m-dispatch [pn & {:keys [force distribution]
-                                :or {distribution random-mutation}}]
-  (let [answer (or force (distribution))]
+(defn- mutate-m-dispatch [inv & {:keys [pick-fn force]
+                                :or {pick-fn rand-mute-key}}]
+  (let [answer (or force (pick-fn))]
     (reset! +zippy+ answer)
     answer))
 
 (defmulti mutate-m #'mutate-m-dispatch)
 
-(defn- crossover-m-dispatch [pn & {:keys [force distribution]
-                                   :or {distribution random-crossover}}]
-  (let [answer (or force (distribution))]
+(defn- crossover-m-dispatch [inv & {:keys [force pick-fn]
+                                    :or {pick-fn random-crossover}}]
+  (let [answer (or force (pick-fn))]
     (reset! +zippy+ answer)
     answer))
 
@@ -199,92 +193,108 @@
       (crossover pn1 pn2))))
 
 ;;;=================== Add =======================================
-(defmethod mutate-m :add-place [pn & args]
-  (let [trans-in (:name (random-trans pn))
-        trans-out (:name (random-trans pn))]
-    (as-> pn ?pn
-      (pnu/add-pn ?pn (pnu/make-place ?pn))
-      (update ?pn :history conj {:mutate :add-place :place (:name (last (:places ?pn)))})
-      (let [p (:name (last (:places ?pn)))]
-        (as-> ?pn ?pnn
-          (pnu/add-pn ?pnn (pnu/make-arc ?pnn trans-in p))
-          (pnu/add-pn ?pnn (pnu/make-arc ?pnn p trans-out)))))))
+(defmethod mutate-m :add-place [inv & args]
+  (let [trans-in (:name (random-trans (:pn inv)))
+        trans-out (:name (random-trans (:pn inv)))]
+    (as-> inv ?i
+      (assoc ?i :pn (pnu/add-pn (:pn ?i) (pnu/make-place (:pn ?i))))
+      (assoc ?i :pn (pnu/add-pn (:pn ?i) (pnu/make-arc (:pn ?i) trans-in (-> ?i :pn :places last :name))))
+      (assoc ?i :pn (pnu/add-pn (:pn ?i) (pnu/make-arc (:pn ?i) (-> ?i :pn :places last :name) trans-out)))
+      (update ?i :history conj {:mutate :add-place :place (-> ?i :pn :places last :name)}))))
 
-(defmethod mutate-m :add-token [pn & args]
-  (let [p-indx (rand-int (count (:places pn)))]
-    (as-> pn ?pn
-      (update ?pn :history conj {:mutate :add-token :place (:name (nth (:places ?pn) p-indx))})
-      (update-in ?pn [:places p-indx :initial-marking] inc))))
-  
-(defmethod mutate-m :add-trans [pn & args]
-  (if-let [p-in (:name (random-place pn))]
-    (if-let [p-out (:name (random-place pn :subset #(remove (fn [pl] (= (:name pl) p-in)) %)))]
-      (as-> pn ?pn
-        (pnu/add-pn ?pn (pnu/make-transition pn))
-        (let [t (:name (last (:transitions ?pn)))]
-          (as-> ?pn ?pnn
-            (update ?pnn :history conj {:mutate :add-trans :trans t})
-            (pnu/add-pn ?pnn (pnu/make-arc ?pnn p-in t))
-            (pnu/add-pn ?pnn (pnu/make-arc ?pnn t p-out)))))
-      {:skip :add-trans :msg "no p-out"})
-    {:skip :add-trans :msg "no p-in"}))
+(defmethod mutate-m :add-token [inv & args]
+  (let [pn (:pn inv)
+        p-indx (rand-int (count (:places pn)))]
+    (-> inv
+        (update :history conj {:mutate :add-token :place (-> inv :pn :places p-indx :name)})
+        (update-in inv [:pn :places p-indx :initial-tokens] inc))))
 
-(defmethod mutate-m :add-arc [pn & args]
-  (if-let [trans (random-trans pn)]
-    (if-let [place (random-place pn)]
-      (let [[from to] (case (rand-int 2) 0 (vector trans place) 1 (vector trans place))]
-        (as-> pn ?pn
-          (update ?pn :history conj {:mutate :add-arc :place place})
-          (pnu/add-pn pn (pnu/make-arc pn (:name from) (:name to)))))
-        {:skip :add-arc :msg "No visible place"})
-      {:skip :add-arc :msg "No trans"}))
+(defmethod mutate-m :add-trans [inv & args]
+  (let [pn (:pn inv)]
+    (if-let [p-in (:name (random-place pn))]
+      (if-let [p-out (:name (random-place pn :subset #(remove (fn [pl] (= (:name pl) p-in)) %)))]
+        (as-> inv ?i
+          (assoc ?i :pn 
+                 (pnu/add-pn pn (pnu/make-transition
+                                 pn ; POD choice of :exponential/:immediate here is temporary
+                                 :type (if (= 0 (rand-int 2)) :exponential :immediate))))
+          (let [t (-> ?i :pn :transitions last :name)]
+            (-> ?i
+                (update :history conj {:mutate :add-trans :trans t})
+                (assoc :pn (as-> (:pn ?i) ?pn
+                             (pnu/add-pn ?pn (pnu/make-arc ?pn p-in t))
+                             (pnu/add-pn ?pn (pnu/make-arc ?pn t p-out)))))))
+        {:skip :add-trans :msg "no p-out"})
+      {:skip :add-trans :msg "no p-in"})))
 
-(defmethod mutate-m :add-inhibitor [pn & args]
-  (if-let [trans (random-trans pn)]
-    (if-let [place (random-place pn)]
-      (as-> pn ?pn
-        (update ?pn :history conj {:mutate :add-inhibitor :place place})
-        (pnu/add-pn pn (pnu/make-arc pn (:name place) (:name trans) :type :inhibitor)))
+(defmethod mutate-m :add-arc [inv & args]
+  (if-let [tr (random-trans (:pn inv))]
+    (if-let [pl (random-place (:pn inv))]
+      (let [[from to] (case (rand-int 2) 0 (vector tr pl) 1 (vector tr pl))]
+        (as-> inv ?i
+          (update ?i :history conj {:mutate :add-arc :place pl})
+          (assoc ?i :pn (pnu/add-pn (:pn ?i) (pnu/make-arc (:pn ?i) (:name from) (:name to))))))
+      {:skip :add-arc :msg "No visible place"})
+    {:skip :add-arc :msg "No trans"}))
+
+(defmethod mutate-m :add-inhibitor [inv & args]
+  (if-let [tr (random-trans (:pn inv))]
+    (if-let [pl (random-place (:pn inv))]
+      (as-> inv ?i
+        (update ?i :history conj {:mutate :add-inhibitor :place pl})
+        (assoc ?i :pn (pnu/add-pn (:pn ?i) (pnu/make-arc (:pn ?i) (:name pl) (:name tr) :type :inhibitor))))
       {:skip :add-inhibitor :msg "No visible place"})
     {:skip :add-inhibitor :msg "No trans"}))
 
 ;;;=================== Remove =======================================
-(defmethod mutate-m :remove-place [pn & args]
-  (let [place (:name (random-place pn :subset #(remove (fn [pl] (:visible? pl)) %)))]
-    (as-> pn ?pn
-      (update ?pn :history conj {:mutate :remove-place :place place})
-      (assoc ?pn :places (vec (remove #(= (:name %) place) (:places ?pn))))
-      (assoc ?pn :arcs (vec (remove #(or (= (:source %) place) (= (:target %) place)) (:arcs ?pn)))))))
+(defmethod mutate-m :remove-place [inv & args]
+  (let [pl (:name (random-place (:pn inv) :subset #(remove (fn [pl] (:visible? pl)) %)))]
+    (as-> inv ?i
+      (update ?i :history conj {:mutate :remove-place :place pl})
+      (assoc-in ?i [:pn :places] (vec (remove #(= (:name %) pl) (-> ?i :pn :places))))
+      (assoc-in ?i [:pn :arcs]   (vec (remove #(or (= (:source %) pl)
+                                                   (= (:target %) pl)) (-> ?i :pn :arcs)))))))
 
-(defmethod mutate-m :remove-token [pn & args]
-  (if-let [p (:name (random-place pn :subset #(remove (fn [pl] (= 0 (:initial-marking pl))) %)))]
-    (-> pn
-        (update :history conj {:mutate :remove-token :place p})
-        (assoc  :places (vec (map #(if (= (:name %) p)
-                                     (update % :initial-marking dec)
-                                     %)
-                                  (:places pn)))))
+(defmethod mutate-m :remove-token [inv & args]
+  (if-let [pl (:name (random-place (:pn inv) :subset #(remove (fn [pl] (= 0 (:initial-tokens pl))) %)))]
+    (as-> inv ?i
+        (update ?i :history conj {:mutate :remove-token :place pl})
+        (assoc-in ?i [:pn :places] (vec (map #(if (= (:name %) pl)
+                                                (update % :initial-tokens dec)
+                                                %)
+                                             (-> ?i :pn :places)))))
     {:skip :remove-token :msg "No place with token"}))
 
-(defmethod mutate-m :remove-trans [pn & args]
-  (let [trans (:name (random-trans pn :subset #(remove (fn [pl] (:visible? pl)) %)))]
-    (as-> pn ?pn
-      (update ?pn :history conj {:mutate :remove-trans :trans trans})
-      (assoc ?pn :trans (vec (remove #(= (:name %) trans) (:transitions ?pn))))
-      (assoc ?pn :arcs (vec (remove #(or (= (:source %) trans) (= (:target %) trans)) (:arcs ?pn)))))))
+(defmethod mutate-m :remove-trans [inv & args]
+  (let [tr (:name (random-trans (:pn inv) :subset #(remove (fn [pl] (:visible? pl)) %)))]
+    (as-> inv ?i
+      (update ?i :history conj {:mutate :remove-trans :trans tr})
+      (assoc-in ?i [:pn :transitions] (vec (remove #(= (:name %) tr) (-> ?i :pn :transitions))))
+      (assoc-in ?i [:pn :arcs] (vec (remove #(or (= (:source %) tr) (= (:target %) tr))
+                                            (-> ?i :pn :arcs)))))))
 
-(defmethod mutate-m :remove-arc [pn & args]
-  (if-let [arc-id (:aid (random-arc pn :subset #(remove (fn [ar] (= :normal (:type ar))) %)))]
-    (as-> pn ?pn
-      (update ?pn :history conj {:mutate :remove-arc :arc-id arc-id})
-      (assoc ?pn :arcs (vec (remove #(= (:aid %) arc-id) (:arcs pn)))))
+(defn arc-not-sole
+  "Return true if removal of the argument arc wouldn't leave the net with a 
+   transition or place for which there isn't at least one "
+  [pn ar]
+  (let [pn (assoc pn :arcs (vec (remove #(= (:aid %) (:aid ar) (:arcs pn)))))]
+    (and (pnu/enter-and-exit-trans? pn)
+         (pnu/enter-and-exit-places? pn))))
+
+(defmethod mutate-m :remove-arc [inv & args]
+  (if-let [aid (:aid (random-arc (:pn inv) :subset #(filter (fn [ar] (and (= :normal (:type ar))
+                                                                             (arc-not-sole (:pn inv) ar))) %)))]
+    (as-> inv ?i
+      (update ?i :history conj {:mutate :remove-arc :aid aid})
+      (assoc-in ?i [:pn :arcs] (vec (remove #(= (:aid %) aid) (-> ?i :pn :arcs)))))
     {:skip :remove-arc :msg "No arc"}))
 
-(defmethod mutate-m :remove-inhibitor [pn & args]
-  (if-let [arc-id (:aid (random-arc pn :subset #(remove (fn [ar] (= :inhibitor (:type ar))) %)))]
-    (as-> pn ?pn
-      (update ?pn :history conj {:mutate :remove-inhibitor :arc-id arc-id})
-      (assoc ?pn :arcs (vec (remove #(= (:aid %) arc-id) (:arcs ?pn)))))
+(defmethod mutate-m :remove-inhibitor [inv & args]
+  (if-let [aid (:aid (random-arc (:pn inv) :subset #(filter (fn [ar] (and (= :inhibitor (:type ar))
+                                                                          (arc-not-sole (:pn inv) ar))) %)))]
+    (as-> inv ?i
+      (update ?i :history conj {:mutate :remove-inhibitor :aid aid})
+      (assoc-in ?i [:pn :arcs] (vec (remove #(= (:aid %) aid) (-> ?i :pn :arcs)))))
     {:skip :remove-inhibitor :msg "No inhibitor arcs"}))
 
 ;;;================================================================================
@@ -301,12 +311,14 @@
                              :else ?ar)))
                    (:arcs pn)))))
   
-(defmethod mutate-m :swap-places-vv [pn & args]
-  (if-let [pl1 (:name (random-place pn :subset #(filter (fn [pl] (:visible? pl)) %)))]
-    (if-let [pl2 (:name (random-place pn :subset #(filter (fn [pl] (and (:visible? pl)
-                                                                        (not= (:name pl) pl1)))
-                                                          %)))]
-      (swap-arcs pn pl1 pl2)
+(defmethod mutate-m :swap-places-vv [inv & args]
+  (if-let [pl1 (:name (random-place (:pn inv) :subset #(filter (fn [pl] (:visible? pl)) %)))]
+    (if-let [pl2 (:name (random-place (:pn  inv):subset #(filter (fn [pl] (and (:visible? pl)
+                                                                               (not= (:name pl) pl1)))
+                                                                 %)))]
+      (as-> inv ?i
+        (update ?i :history conj {:mutate :swap-places-vv :pl1 pl1 :pl2 :pl2})
+        (assoc ?i :pn (swap-arcs (:pn ?i) pl1 pl2)))
       {:skip :swap-places-vv :msg "no 2nd place"})
     {:skip :swap-places-vv :msg "no 1st place"}))
 
@@ -314,31 +326,34 @@
 (def +pop+ "diagnostic" (atom nil))
 
 (defn initial-pop [problem]
-  (let [edens (eden-individuals problem)
+  (let [edens (eden-pns problem)
         fresh-eden (fn [] (nth edens (rand-int (count edens))))
         start-time (System/currentTimeMillis)]
     (reset! +old-pop+ [])
-    (loop [pop [],
-           indv (fresh-eden),
-           mute-cnt 0,
-           try 0]
-      (when (and (:debugging? +gp-params+) (> (count pop) (count @+old-pop+)))
-        (swap! +old-pop+ conj (last pop))
-        (println "\nPopulation count:" (count pop))
-        (println "Individual-size (M2Mp):" (count (:M2Mp (last pop))))
-        (println "Time:" (int (/ (- (System/currentTimeMillis) start-time) 1000))))
-      (cond (> try 2000) (throw (ex-info "initial-pop tries" {:individual-cnt (count pop)})),
-            (>= (count pop) (:pop-size +gp-params+)) pop,
-            :else (let [m-indv (-> indv #_crossover (mutate eden-mutation 0))]
-                    (cond (:failure m-indv)
-                          (do (log {:mutate-fails :initial-pop :method (last (:history m-indv))})
-                              (if (< mute-cnt 2) ; POD 2 should be a +gp-params+
-                                (recur pop (fresh-eden) 0 (inc try)) ; start over
-                                (recur (conj pop indv) (fresh-eden) 0 (inc try)))) ; last one is good enough
-                          (= (:initial-mutations +gp-params+) mute-cnt) ; complete success
-                          (recur (conj pop m-indv) (fresh-eden) 0 (inc try))
-                          :else ; continue mutating
-                          (recur pop m-indv (inc mute-cnt) (inc try))))))))
+    (let [pns 
+          (loop [pop [],
+                 inv (fresh-eden),
+                 mute-cnt 0,
+                 try 0]
+            (when (and (:debugging? +gp-params+) (> (count pop) (count @+old-pop+)))
+              (swap! +old-pop+ conj (last pop))
+              (println "\nPopulation count:" (count pop))
+              (println "Individual-size (M2Mp):" (count (:M2Mp (last pop))))
+              (println "Time:" (int (/ (- (System/currentTimeMillis) start-time) 1000))))
+            (cond (> try 2000) (throw (ex-info "initial-pop tries" {:individual-cnt (count pop)})),
+                  (>= (count pop) (:pop-size +gp-params+)) pop, ; POD maybe crossover too?
+                  :else (let [m-inv (assoc inv :pn (mutate inv :pick-fn #(rand-mute-key (:eden-dist +gp-params+))))]
+                          (cond (:failure m-inv)
+                                (do (log {:mutate-fails :initial-pop :method (:history m-inv)})
+                                    (if (< mute-cnt 2) ; POD 2 should be a +gp-params+
+                                      (recur pop (fresh-eden) 0 (inc try)) ; start over
+                                      (recur (conj pop inv) (fresh-eden) 0 (inc try)))) ; last one is good enough
+                                (= (:initial-mutations +gp-params+) mute-cnt) ; complete success
+                                (recur (conj pop m-inv) (fresh-eden) 0 (inc try))
+                                :else ; continue mutating
+                                (recur pop m-inv (inc mute-cnt) (inc try))))))]
+      (map #(->Inv {:pn %1 :id %2 :history []})
+           pns (range (count pns))))))
 
 (defn debug-initial-pop []
   (reset-all!)
@@ -346,27 +361,25 @@
   true)
 
 ;;; POD -- really should normalize values!
-(defn i-error [ind]
-  "Compute the steady-state properties of the individual and from those, compute its error."
-  (let [pn (pn-ok->
-            ind ; reachability analysis has already been performed. 
-            pn/Q-matrix
-            pn/steady-state-props)]
-    (if (:failure pn)
-      (assoc pn :error 999999999.9)
-      (let [results (:avg-tokens-on-place pn)]
-        (assoc pn :error
-               (reduce (fn [sum [pname pval]] (+ sum (abs (- pval (pname results)))))
-                       0
-                       (:data-source +problem+)))))))
+(defn i-error [inv]
+  "Compute system error using PNs steady-state properties."
+  (reset! +diag+ inv)
+  (let [pn (:pn inv)]
+    (cond-> inv
+        true (assoc :err 9999999.9),
+        (:avg-tokens-on-place pn)
+        (assoc :err
+               (reduce (fn [sum [pname pval]]
+                         (+ sum (abs (- pval (-> pn :avg-tokens-on-place pname)))))
+                       0.0
+                       (:data-source +problem+))))))
               
 (defn sort-by-error
-  "Add value for :error to each PN and used it to sort the population; best first." 
-  [population]
-  (as-> population ?p
+  "Add value for :err to each PN and used it to sort the population; best first." 
+  [popu]
+  (as-> popu ?p
     (map i-error ?p)
-    (sort #(< (:error %1) (:error %2)) ?p)))
-
+    (sort #(< (:err %1) (:err %2)) ?p)))
 
 ;;; Finally, we'll define a function to select an individual from a sorted 
 ;;; population using tournaments of a given size.
@@ -383,54 +396,61 @@
   (pnu/reset-ids! {})
   (reset! +log+ []))
 
-(declare validate-gp-params next-generation)
+(declare validate-gp-params report-gen make-next-gen write-gen)
 
 (defn evolve
-  "Starting with a random population, sort, select, check for a soluition and 
+  "Starting with a random population, sort, select, check for a solution and 
    produce a new population."
-  ([problem] (evolve problem (-> problem initial-pop sort-by-error)))
-  ([problem population]
+  ([problem] (evolve problem (-> problem initial-pop)))
+  ([problem popu]
    (reset-all!)
    (validate-gp-params +gp-params+)
    (println "Starting evolution...")
    (let [start-time (System/currentTimeMillis)]
-     (loop [generation 0
-            population population]
-      (let [best (first population)]
-        (println "======================")
-        (println "Generation:" generation)
-        (println "Population size:" (count population))
-        (println "Total mutations:" (reduce + 0 (map #(count (:history %)) population)))
-        (println "Failed individuals:" (count (filter identity (map #(contains? % :failure) population))))
-        (println "Elapsed time (secs):" (int (/ (- (System/currentTimeMillis) start-time) 1000)))
-        (println "Best error:" (:error best))
-        (println "     Median error:" (:error (nth population (int (/ (:pop-size +gp-params+) 2)))))
-        (println "     Average PN size:" (pnu/avg (map pnu/pn-size population)))
-        (cond (< (:error best) 0.1) ; good enough to count as success
-              (do (println "Success!") best)
-              (= generation (:max-generations +gp-params+))
-              (do (println "Stopped at max-generation.") false)
-              :else
-              (recur 
-               (inc generation)
-               (as-> population ?p
-                 (map #(dissoc % #_:M2Mp :initial-marking :Q :steady-state :avg-tokens-on-place) ?p)
-                 (next-generation ?p)
-                 (reset! +pop+ ?p)))))))))
+     (loop [gen 0
+            popu (sort-by-error popu)]
+       (reset! +diag+ popu)
+       (let [best (first popu)]
+         (report-gen gen popu start-time)
+         (cond (< (:err best) 0.1) ; good enough to count as success
+               (do (println "Success!") best)
+               (= gen (:max-gens +gp-params+))
+               (do (println "Stopped at max-gen.") false)
+               :else
+               (recur 
+                (inc gen)
+                (as-> popu ?p
+                  (map (fn [inv] (update inv :pn #(dissoc % :avg-tokens-on-place))) ?p)
+                  (make-next-gen ?p :gen gen)
+                  (reset! +pop+ ?p)))))))))
 
+(defn report-gen
+  [gen popu start-time]
+  (let [best (first popu)]
+    (println "======================")
+    (println "Generation:" gen)
+    (println "Population size:" (count popu))
+    (println "Total mutations:" (reduce + 0 (map #(count (:history %)) popu)))
+    (println "Failed individuals:" (count (filter identity (map #(contains? % :failure) popu))))
+    (println "Elapsed time (secs):" (int (/ (- (System/currentTimeMillis) start-time) 1000)))
+    (println "Best error:" (:err best))
+    (println "ID of best:" (:id best))
+    (println "     Median error:" (:err (nth popu (int (/ (:pop-size +gp-params+) 2)))))
+    (println "     Average PN size:" (pnu/avg (map #(-> % :pn pnu/pn-size) popu)))))
 
-(defn next-generation [population]
+(defn make-next-gen [population & {:keys [gen] :or {gen -1}}]
   "Compute the next generation, a combination of tournament selection, mutations and crossover
    of tournament winners, and elite individuals."
   (let [popsize (count population)
         e-cnt (:elite-individuals +gp-params+)
         sorted-pop (sort-by-error population)]
+    (write-gen sorted-pop gen)
     (as-> (vec sorted-pop) ?spop
       (concat 
        (if e-cnt (subvec ?spop 0 (inc e-cnt)) [])
-       (repeatedly (* 7/8 popsize) #(mutate (select ?spop (:selection-pressure +gp-params+))))
+       (repeatedly (* 7/8 popsize) #(mutate (select ?spop (:select-pressure +gp-params+))))
        ;(repeatedly (* 2/8 popsize) #(crossover (select ?spop 7) (select ?spop 7)))
-       (repeatedly (* 1/8 popsize) #(select sorted-pop (:selection-pressure +gp-params+))))
+       (repeatedly (* 1/8 popsize) #(select sorted-pop (:select-pressure +gp-params+))))
       (if e-cnt
         (subvec (vec ?spop) 0 (- (:pop-size +gp-params+) e-cnt))
         ?spop))))
@@ -439,46 +459,66 @@
   #_(when (not (< 0.9999 (reduce + 0 (map second (:mutation-types params))) 1.0001))
     (throw (ex-info {:error ":mutation-types does not sum to 1."}))))
 
-(defn reach-pn
-  "Returns the argument pn with reachability calculated or false if that couldn't be done."
-  ([pn]
-   (pn-ok-> pn 
-            pnr/possible-live?
-            pnu/enter-and-exit-places?
-            pnu/enter-and-exit-trans?
-            pnr/reachability
-            pnr/live?)))
-
+(defn eval-inv
+  "Evaluate the PN all the way through to :avg-tokens-on-place vals."
+  [inv]
+  (assoc inv :pn
+         (pn-ok-> (:pn inv)
+                  pnr/renumber-pids
+                  pnr/possible-live?
+                  pnu/enter-and-exit-places?
+                  pnu/enter-and-exit-trans?
+                  pnr/reachability
+                  pnr/live?
+                  pn/Q-matrix
+                  pn/steady-state-props
+                  (dissoc :M2Mp :initial-marking :Q :steady-state))))
 
 ;;;==================== Diagnostics ========================================
+(defn read-a-pop []
+  (reset! +pop+
+          (map (fn [ix]
+                 (as-> (pnml/read-pnml (str "data/pops/initial-" ix ".xml")) ?i
+                   (map->Inv {:pn ?i :id ix :history []})
+                   (eval-inv ?i)))
+               (range 100))))
+
 (defn write-a-pop
   "Return a population of the argument problem sorted by error. 
    The best individual in this population is data/initial-1.xml."
   [problem]
   (let [pnum (atom 0)]
     (map #(pnml/write-pnml
-           %
-           :file (str "data/pops/initial-" (swap! pnum inc) ".xml")
+           (:pn %)
+           :file (str "data/junk/initial-" (:id %) ".xml")
            :positions (:pn-graph-positions problem))
          (reset! +pop+ (-> problem initial-pop sort-by-error)))))
 
-(defn read-a-pop []
-  (reset! +pop+
-          (map #(pnml/read-pnml (str "data/pops/initial-" % ".xml"))
-               (range 1 101)))
-  true)
+(defn write-gen 
+  "Write a population as 'data/gen-<gen>/individual-n.xml'"
+  [popu gen]
+  (dotimes [n (count popu)]
+    (let [filename (str "data/pops/gen-" gen "/individual-" (inc n) ".xml")]
+      (clojure.java.io/make-parents filename)
+      (pnml/write-pnml
+       (nth popu n)
+       :file filename
+       :positions (:pn-graph-positions +problem+)))))
 
-;;; Diagnostic - Because in use of evolve, also check liveness, absorbing etc.
-(defn pn2error
-  "Calculate the error for the given file."
-  [pn]
-  (-> pn
-      pnr/reachability
-      pn/Q-matrix
-      pn/steady-state-props
-      i-error
-      :error))
-
+;;; Diagnostic - Because in use of evolve, also check liveness, absorbing befoer
+;;;              going into Q-matrix. 
+(defn diag-eval-pop
+  "Return score and compute times for each individual in the population."
+  []
+  (for [inv @+pop+]
+    (let [start-time (System/currentTimeMillis)]
+      (cl-format *out* "~%Individual ~A error: ~8,3F time: ~A"
+                 (:id inv)
+                 (as-> inv ?i
+                   (update ?i :pn (eval-pn (:pn ?i)))
+                   (i-error ?i)
+                   (:err ?i))
+                 (/ (- (System/currentTimeMillis) start-time) 1000.0)))))
 
 ;;;===================================================================================
 ;;;============================= Two machine 1 buffer spot ===========================
@@ -547,4 +587,20 @@
     :params {:warm-up-time 2000 :run-to-time 20000} ; Was 20000 on training.
     :jobmix {:jobType1 (mjp/map->JobType {:portion 1.0 :w {:m1 1.0, :m2 1.0}})}}))
 
+(defn print-inv [p writer]
+  (.write writer (cl-format nil "#Inv [id=~A, err=~A]"
+                            (:id p)
+                            (if (number? (:err p))
+                              (cl-format nil "~6,2F" (:err p))
+                              :NA))))
+                                    
+(defmethod print-method Inv [p writer]
+  (print-inv p writer))
 
+(.addMethod clojure.pprint/simple-dispatch Inv (fn [p] (print-inv p *out*)))
+
+
+
+
+   
+  
