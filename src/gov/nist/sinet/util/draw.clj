@@ -19,16 +19,17 @@
 (def +arrowhead-angle+ "zero is on the shaft" (/ Math/PI 8.0))
 
 (defn setup-pn []
-  (q/frame-rate 5)    ; FPS
+  (q/frame-rate 10)    ; FPS. 10 is good
+  (q/text-font (q/create-font "DejaVu Sans" 16 true))
   (q/background 200)) ; light grey
 
 (def +log+ (atom []))
 (defn log [text]
   (swap! +log+ #(conj % text)))
 
-(declare draw-place draw-transition draw-arc ref-points)
+(declare nearest-elem ref-points draw-elem draw-arc draw-tokens)
 (declare arc-coords-trans-to-place arrowhead-coords pt-from-head)
-(declare angle distance)
+(declare angle distance +display-pn+ highlight-elem handle-mouse)
 
 (defn draw-pn []
   (let [pn @+display-pn+]
@@ -37,53 +38,92 @@
     (q/fill 255) ; white
     (q/stroke-weight 2)
     (highlight-elem pn)
-    ;(when (q/mouse-pressed?)
-    ;  (handle-mouse pn))
+    (when (q/mouse-pressed?)
+      (handle-mouse))
     (doseq [place (:places pn)]
-      (draw-place pn place))
+      (draw-elem pn place))
     (doseq [trans (:transitions pn)]
-      (draw-transition pn trans))
+      (draw-elem pn trans))
     (doseq [arc (:arcs pn)]
       (draw-arc pn arc))))
 
-(def +inhibit-draw+ "If set to an element name, don't redraw it." (atom nil))
+(def +diag+ (atom nil))
+
+(defn handle-mouse
+  "Mouse pressed: Update coordinates to move an element or its label."
+  []
+  (when-let [elem (nearest-elem @+display-pn+ [(q/mouse-x) (q/mouse-y)])]
+    (reset! +diag+ elem)
+    (swap!
+     +display-pn+
+     #(let [n (:name elem)]
+        (if (:label? elem)
+          (as-> % ?pn
+            (assoc-in ?pn [:pn-graph-positions n :label-x-off]
+                      (- (q/mouse-x) (-> ?pn :pn-graph-positions n :x)))
+            (assoc-in ?pn [:pn-graph-positions n :label-y-off]
+                      (- (q/mouse-y) (-> ?pn :pn-graph-positions n :y))))
+          (as-> % ?pn
+            (assoc-in ?pn [:pn-graph-positions n :x] (q/mouse-x))
+            (assoc-in ?pn [:pn-graph-positions n :y] (q/mouse-y))))))))
+
+(def +highlight-elem+ (atom nil))
 (defn highlight-elem
   [pn]
   (if-let [elem (nearest-elem pn [(q/mouse-x) (q/mouse-y)])]
-    (do (reset! +inhibit-draw+ (:name elem))
-        (draw-place pn elem (q/color 255 0 0)))
-    (reset! +inhibit-draw+ nil)))
+    (reset! +highlight-elem+ elem)
+    (reset! +highlight-elem+ nil)))
 
-(defn nearest-elem [pn mxy]
-  (let [[bkey bval]
-        (reduce (fn [[bkey bval] [key val]]
-                  (if (< (distance (into mxy (vector (:x val) (:y val))))
-                         (distance (into mxy (vector (:x bval) (:y bval)))))
-                    [key val]
-                    [bkey bval]))
-                (-> pn :pn-graph-positions first)
-                (-> pn :pn-graph-positions))]
-    (when (< (distance (into mxy (vector (:x bval) (:y bval)))) 50.0)
-      (some #(when (= bkey (:name %)) %) (:places pn)))))
+(defn nearest-elem
+  "Return a element (place/trans) map  indicating what was closest to the mouse.
+  :label? in the map indicates it was the elem's label that was closest.
+   Returns nil if nothing is close."
+  [pn mxy]
+  (let [[bkey min-d label?]
+        (reduce
+         (fn [[bkey min-d label?] [key val]]
+           (let [delem  (Math/round (distance (into mxy (vector (:x val) (:y val)))))
+                 dlabel (Math/round (distance (into mxy (vector (+ (:x val) (:label-x-off val))
+                                                                (+ (:y val) (:label-y-off val))))))
+                 min? (min delem dlabel min-d)]
+             (if (= min? delem)
+               [key min? false]
+               (if (= min? dlabel)
+                 [key min? true]
+                 [bkey min-d label?]))))
+         [:not-set 99999 true]
+         (-> pn :pn-graph-positions))]
+    (when (< min-d 30.0)
+      (when-let [elem (or (some #(when (= bkey (:name %)) %) (:places pn))
+                          (some #(when (= bkey (:name %)) %) (:transitions pn)))]
+        (assoc elem :label? label?)))))
 
-(defn draw-place
-  ([pn place] (draw-place pn place (q/color 0 255 0)))
-  ([pn place color]
-   (when-not (= (:name place) @+inhibit-draw+)
-     (let [n (:name place)
-           x (or (-> pn :pn-graph-positions n :x) 100)
-           y (or (-> pn :pn-graph-positions n :y) 100)]
-       (q/stroke color)
-       (q/fill 255) ; white
-       (q/ellipse x y +place-dia+ +place-dia+)
-       (q/stroke 0)
-       (q/fill 0)   ; black
-       (q/text (name n)
-               (+ x (or (-> pn :pn-graph-positions n :label-x-off) 100))
-               (+ y (or (-> pn :pn-graph-positions n :label-y-off) 100)))
-       (draw-tokens (:initial-tokens place) x y)))))
+(defn draw-elem
+  "Draws a element and its label. The element map might have :label? = true
+   to indicate that it is the label that needs highlighting. The actual 
+   updating of the net is taken care of in handle-mouse."
+  [pn elem]
+  (let [n (:name elem)
+        x (-> pn :pn-graph-positions n :x)
+        y (-> pn :pn-graph-positions n :y)
+        hilite @+highlight-elem+]
+    (q/fill (if (and (= n (:name hilite)) (:label? hilite)) (q/color 255 0 0) 0))
+    (q/text (name n)
+            (+ x (-> pn :pn-graph-positions n :label-x-off))
+            (+ y (-> pn :pn-graph-positions n :label-y-off)))
+    (q/fill 0)
+    (q/stroke (if (and (= (:name hilite) n) (not (:label? hilite))) (q/color 255 0 0) 0))
+    (if (pnu/place? elem)
+      (do
+        (q/fill 255)
+        (q/ellipse x y +place-dia+ +place-dia+)
+        (draw-tokens (:initial-tokens elem) x y))
+      (do (q/fill (if (= (:type elem) :immediate) 0 255))
+          (q/rect x y +trans-width+ +trans-height+)))
+    (q/stroke 0)
+    (q/fill 0)))
 
-(declare draw-tkn)
+(declare draw-tkn rotate intersect-circle)
 (defn draw-tokens
   [cnt x y]
   (let [d (+ +token-dia+ 1)]
@@ -110,18 +150,6 @@
   [x y]
   (q/fill 0) ; black
   (q/ellipse x y +token-dia+ +token-dia+))
-
-(defn draw-transition
-  [pn trans]
-  (let [n (:name trans)
-        x (or (-> pn :pn-graph-positions n :x) 100)
-        y (or (-> pn :pn-graph-positions n :y) 100)]
-    (if (= (:type trans) :immediate) (q/fill 0) (q/fill 255))
-    (q/rect x y +trans-width+ +trans-height+)
-    (q/fill 0) 
-    (q/text (name n)
-            (+ x (or (-> pn :pn-graph-positions n :label-x-off) 100))
-            (+ y (or (-> pn :pn-graph-positions n :label-y-off) 100)))))
 
 (defn draw-arc
   [pn arc]
@@ -229,18 +257,6 @@
                      {}
                      (:pn-graph-positions ?pn))))))
 
-;;; Just for demonstration purposes:
-(defn change-tokens
-  [cnt]
-  (swap! +display-pn+
-         (fn [pn]
-           (update-in pn [:places] #(vec (map (fn [p]
-                                                (if (= :buffer (:name p))
-                                                  (assoc p :initial-tokens cnt)
-                                                  p))
-                                              %)))))
-  true)
-
 (declare interesect-circle trans-point trans-connects)
 ;;; POD Of course I could have just backed off a parametric line by +place-dia+/2...
 (defn arc-coords-trans-to-place
@@ -318,7 +334,7 @@
 (defn show-pn
   []
   (when (displayable? @+display-pn+)
-    (q/defsketch best-pn
+    (q/defsketch best-pn :features [:resizable :keep-on-top]
       :title "Best Individual"
       :settings #(q/smooth 2) ; Turn on anti-aliasing
       :setup setup-pn
