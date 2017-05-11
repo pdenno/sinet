@@ -334,8 +334,9 @@
 (defn show-pn
   []
   (when (displayable? @+display-pn+)
-    (q/defsketch best-pn :features [:resizable :keep-on-top]
-      :title "Best Individual"
+    (q/defsketch best-pn 
+      :features [:resizable :keep-on-top]
+      :title "GP Process"
       :settings #(q/smooth 2) ; Turn on anti-aliasing
       :setup setup-pn
       :draw draw-pn
