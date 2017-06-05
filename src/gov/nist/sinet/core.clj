@@ -527,7 +527,7 @@
 
 (def +problem+
   {:visible-places [:m1-blocked :m1-busy :m2-busy :m2-starved :buffer]
-   :pn-graph-positions (pnml/positions-from-file "data/pops/initial-positions.xml")
+   :pn-graph-positions (pnml/positions-from-file "data/m2-j2-bas.xml")
    :visible-transitions [:m1-finished :m2-finished]
    :data-source +m2-11+}) ; POD not yet dynamic, of course.
 

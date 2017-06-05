@@ -17,19 +17,16 @@
 (def +inhibit-dia+ 10)
 (def +arrowhead-length+ 15)
 (def +arrowhead-angle+ "zero is on the shaft" (/ Math/PI 8.0))
+(def +lock-mouse-on+ (atom nil))
 
 (defn setup-pn []
   (q/frame-rate 10)    ; FPS. 10 is good
   (q/text-font (q/create-font "DejaVu Sans" 16 true))
   (q/background 200)) ; light grey
 
-(def +log+ (atom []))
-(defn log [text]
-  (swap! +log+ #(conj % text)))
-
 (declare nearest-elem ref-points draw-elem draw-arc draw-tokens)
 (declare arc-coords-trans-to-place arrowhead-coords pt-from-head)
-(declare angle distance +display-pn+ highlight-elem handle-mouse)
+(declare angle distance +display-pn+ highlight-elem! handle-move!)
 
 (defn draw-pn []
   (let [pn @+display-pn+]
@@ -37,9 +34,10 @@
     (q/stroke 0) ; black
     (q/fill 255) ; white
     (q/stroke-weight 2)
-    (highlight-elem pn)
-    (when (q/mouse-pressed?)
-      (handle-mouse))
+    (highlight-elem! pn)
+    (if (q/mouse-pressed?)
+      (handle-move!)
+      (reset! +lock-mouse-on+ nil))
     (doseq [place (:places pn)]
       (draw-elem pn place))
     (doseq [trans (:transitions pn)]
@@ -49,11 +47,10 @@
 
 (def +diag+ (atom nil))
 
-(defn handle-mouse
+(defn handle-move!
   "Mouse pressed: Update coordinates to move an element or its label."
   []
-  (when-let [elem (nearest-elem @+display-pn+ [(q/mouse-x) (q/mouse-y)])]
-    (reset! +diag+ elem)
+  (when-let [elem (or @+lock-mouse-on+ (nearest-elem @+display-pn+ [(q/mouse-x) (q/mouse-y)]))]
     (swap!
      +display-pn+
      #(let [n (:name elem)]
@@ -68,14 +65,17 @@
             (assoc-in ?pn [:pn-graph-positions n :y] (q/mouse-y))))))))
 
 (def +highlight-elem+ (atom nil))
-(defn highlight-elem
+(defn highlight-elem!
+  "Set +hilight-elem+ and maybe +lock-mouse-on+."
   [pn]
-  (if-let [elem (nearest-elem pn [(q/mouse-x) (q/mouse-y)])]
-    (reset! +highlight-elem+ elem)
-    (reset! +highlight-elem+ nil)))
+  (let [nearest (or @+lock-mouse-on+ (nearest-elem pn [(q/mouse-x) (q/mouse-y)]))]
+    (when (and nearest (q/mouse-pressed?)) (reset! +lock-mouse-on+ nearest))
+    (if nearest
+      (reset! +highlight-elem+ nearest)
+      (reset! +highlight-elem+ nil))))
 
 (defn nearest-elem
-  "Return a element (place/trans) map  indicating what was closest to the mouse.
+  "Return a element (place/trans) map indicating what was closest to the mouse.
   :label? in the map indicates it was the elem's label that was closest.
    Returns nil if nothing is close."
   [pn mxy]
@@ -234,17 +234,16 @@
                 (-> pn :pn-graph-positions vals))
         size (max (- (:max-x range) (:min-x range))
                   (- (:max-y range) (:min-y range)))]
-    (/ (apply min (:pn-graph-window-size pn)) size)))
+    (double (/ (apply min (:pn-graph-window-size pn)) size))))
 
 (def +display-pn+ (atom nil))
 
 (reset! +display-pn+
-  (as-> "data/2017-05-06-three.xml" ?pn
+  (as-> "data/m2-j2-bas-mine.xml" ?pn
     (read-pnml ?pn)
     (assoc ?pn :pn-graph-positions
-           (pnml/positions-from-file "data/2017-05-06-three.xml"))
-    ;; POD Consider q/width q/height
-    (assoc ?pn :pn-graph-window-size [1300 700])
+           (pnml/positions-from-file "data/m2-j2-bas-mine.xml"))
+    (assoc ?pn :pn-graph-window-size [6000 1000]) ; was 1300 700 for mac
     (let [scale-factor (pn-graph-scale ?pn)]
        (assoc ?pn :pn-graph-positions
              (reduce (fn [mp [key val]]
@@ -334,10 +333,9 @@
 (defn show-pn
   []
   (when (displayable? @+display-pn+)
-    (q/defsketch best-pn 
-      :features [:resizable :keep-on-top]
-      :title "GP Process"
+    (q/defsketch best-pn :features [:resizable :keep-on-top]
+      :title "Best Individual"
       :settings #(q/smooth 2) ; Turn on anti-aliasing
       :setup setup-pn
       :draw draw-pn
-      :size [1300 900])))
+      :size [1300 500])))
