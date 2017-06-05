@@ -10,6 +10,9 @@
 
 ;;; Purpose: Draw a Petri net and related information. Allow some interaction with it.
 
+;;; ToDo: - Prevent coincident lines. (Example in m2-j2-bas.xml)
+;;;       - Find a way that labels can get focus despite their proximity to objects.
+
 (def +place-dia+ 30)
 (def +trans-width+ 40)
 (def +trans-height+ 8)
