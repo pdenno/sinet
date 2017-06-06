@@ -1,4 +1,6 @@
 
+(ns gov.nist.sinet.core)
+
 (def +scada-log+
   [{:act :ej, :m :m2, :j 1597, :ent 1994.267904151973, :clk 2000.5882553364702}
    {:act :sm, :bf :b1, :j 1598, :n 3, :clk 2000.5882553364702}
