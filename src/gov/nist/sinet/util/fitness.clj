@@ -49,12 +49,6 @@
  {:act :sm, :bf :b1, :j 1602, :n 3, :clk 2004.9882553364698}
  {:act :ej, :m :m2, :j 1602, :ent 2000.5882553364702, :clk 2006.0882553364697}]
 
-
-[{:act :aj, :jt \*}
- {:act :bj, :bf \*, :n \*}
- {:act :sm, :bf \*, :n \*}
- {:act :ej, :m  \*}]
-
  (def +pattern-reserves+ "keys that are preserved in patterns" #{:act :jt :bf :m :n})
  
 (defn make-pattern
@@ -170,33 +164,111 @@
 ;;;===========================================
 ;;; Fitness measure
 
+(defn act2trans
+  "Return the transition (its name) responsible for the argument act."
+  [pn act]
+  (some #(when (= act (:act ((:fn %) :foobar))) (:name %))
+        (:transitions pn)))
+
 ;;; Because I'm focusing on jobs here (qpn-gather-job), at some point I'm going to have to account for
 ;;; lines in the log that were not addressed by qpn-gather-job (and the things in-between it).
-
 (defn act-is-intro? [pn act]
-  true)
+  "Return true if the named transition has an arc exiting it that 
+   introduces a token."
+  (let [trans (act2trans pn act)]
+    (some #(= :intro (-> % :bind :act))
+          (filter #(= (:source %) trans) (:arcs pn)))))
 
-[{:act :aj, :tkns [{:type :a, :id 21} {:type :a, :id 22}]}
- {:act :bj, :tkns [{:type :a, :id 22}]}
- {:act :aj, :tkns [{:type :a, :id 23} {:type :a, :id 22}]}
- {:act :sm, :tkns [{:type :a, :id 22}]}
- {:act :ej, :tkns [{:type :a, :id 22}]}]
-(defn following-props
+;;; If pn-act-is-intro? and this is not first mention of the token, then it is recycling.
+;;; An example is {:act :aj, :tkns [{:type :a, :id 23} {:type :a, :id 22}]} above.
+;;; Here I remove those. 
+(defn clean-job-log
+  [pn tkn-id job-log]
+  (remove (fn [msg]
+            (and (act-is-intro? pn (:act msg))
+                 (some #(> (:id %) tkn-id) (:tkns msg))))
+          job-log))
+
+(defn pos-in-trace
+  "Return the position of the argument action in the argument process trace."
+  [trace act]
+  (let [^clojure.lang.PersistentVector acts (vec (map :act trace))
+        idx (.indexOf acts act)]
+    (if (< idx 0) nil idx)))
+
+(defn poset-fn
+  "Return a function : trace -> boolean indicating whether 
+   the ordering relationship is violated by the arguments."
+  [x y]
+  (fn [trace] (<= (pos-in-trace trace x) (pos-in-trace trace y))))
+
+;;; POD memoize. This should be a property of the SCADA pattern. 
+(defn scada-pattern-poset
+  "Calculate the poset of a SCADA pattern"
+  [p]
+  (loop [events p
+         poset []]
+    (if (empty? (rest events))
+      poset
+      (recur
+       (next events)
+       (into poset (reduce (fn [m s] (conj m (poset-fn (:act (first events)) (:act s))))
+                           []
+                           (rest events)))))))
+(defn violates?
+  "Return true if the job-log violates the argument relation."
+  [job-log relation]
+  (not (relation job-log)))
+
+(def test-scada-pattern
+  [{:act :aj, :jt \*}
+   {:act :bj, :bf \*, :n \*}
+   {:act :sm, :bf \*, :n \*}
+   {:act :ej, :m  \*}])
+
+(def test-job-log-1
+  [{:act :aj, :tkns [{:type :a, :id 21} {:type :a, :id 22}]}
+   {:act :bj, :tkns [{:type :a, :id 22}]}
+   {:act :aj, :tkns [{:type :a, :id 23} {:type :a, :id 22}]}
+   {:act :sm, :tkns [{:type :a, :id 22}]}
+   {:act :ej, :tkns [{:type :a, :id 22}]}])
+
+(def test-job-log-2
+  [{:act :bj, :tkns [{:type :a, :id 22}]}
+   {:act :aj, :tkns [{:type :a, :id 21} {:type :a, :id 22}]}
+   {:act :aj, :tkns [{:type :a, :id 23} {:type :a, :id 22}]}
+   {:act :sm, :tkns [{:type :a, :id 22}]}
+   {:act :ej, :tkns [{:type :a, :id 22}]}])
+
+
+(def test-job-log-3
+  [{:act :ej, :tkns [{:type :a, :id 22}]}
+   {:act :bj, :tkns [{:type :a, :id 22}]}
+   {:act :aj, :tkns [{:type :a, :id 21} {:type :a, :id 22}]}
+   {:act :aj, :tkns [{:type :a, :id 23} {:type :a, :id 22}]}
+   {:act :sm, :tkns [{:type :a, :id 22}]}])
+
+
+
+;(calc-activity-disorder talking-m2-bas test-scada-pattern 22 test-job-log)
+
+;;; +1 for every precedence constraint violated. 
+;;; Will need something more for loops, but we'll get to that later. 
+(defn calc-activity-disorder
   "Compute how well a QPN job follows a given SCADA pattern."
   [pn scada-pattern tkn-id job-log]
-  ;; If act-is-intro? and this is not first mention of the token, then it is recycling.
-  ;; An example is  {:act :aj, :tkns [{:type :a, :id 23} {:type :a, :id 22}]} above.
-  ;; I just haven't decided what to do in this case. The thing is setting on m1-blocked
-  ;; I could figure that out from :on-act messages. 
-  )
-  
-
+  (let [cjob-log (clean-job-log pn tkn-id job-log)
+        poset-rels (scada-pattern-poset scada-pattern)]
+    (reduce (fn [score rel] (if (violates? cjob-log rel) (inc score) score))
+            0
+            poset-rels)))
+    
 
 (defn workflow-fitness
   "Score the QPN-generated log with respect to the SCADA log."
   []
   (qpn-patterns 
-  )
+  ))
 
 
   [{:act :bj, :tkns [{:type :a, :id 17}]}
@@ -225,7 +297,7 @@
    {:on-act :m2-complete-job, :tkn {:type :a, :id 13}, :motion :move, :from :m2-busy, :to :m2-starved}
    {:act :sm, :tkns [{:type :a, :id 14}]}
    {:on-act :m2-start-job, :tkn {:type :a, :id 13}, :motion :remove}
-   {:on-act :m2-start-job, :tkn {:type :a, :id 14}, :motion :move, :from :buffer, :to :m2-busy}
+   {:on-act :m2-start-job, :tkn {:type :a, :id 14}, :motion :move, :from :buffer, :to :m2-busy}]
 
   
 (defn print-pair [p writer]
@@ -407,3 +479,31 @@
      {:on-act :m1-start-job, :tkn {:type :a, :id 33}, :motion :add}
      {:on-act :m1-start-job, :tkn {:type :a, :id 32}, :motion :move, :from :m1-blocked, :to :buffer}]}))
      
+(def talking-m2-bas
+  (pnr/renumber-pids 
+   {:places                                         
+    [{:name :buffer, :pid 1, :initial-tokens 1    }
+     {:name :m1-blocked, :pid 2, :initial-tokens 0}
+     {:name :m1-busy, :pid 3, :initial-tokens 1   }
+     {:name :m2-busy, :pid 4, :initial-tokens 1   }
+     {:name :m2-starved, :pid 5, :initial-tokens 0}],
+    :transitions  ; :fn here would be added by GP, associating SCADA acts with transitions.
+    [{:name :m1-complete-job, :tid 6, :type :exponential, :rate 3.9 :fn (fn [tkns] {:act :bj :tkns tkns})}
+     {:name :m1-start-job, :tid 7, :type :immediate, :rate 1.0      :fn (fn [tkns] {:act :aj :tkns tkns})}
+     {:name :m2-complete-job, :tid 8, :type :exponential, :rate 1.0 :fn (fn [tkns] {:act :ej :tkns tkns})}
+     {:name :m2-start-job, :tid 9, :type :immediate, :rate 1.0      :fn (fn [tkns] {:act :sm :tkns tkns})}],
+    :arcs ; :bind here would be added by GP, selecting where to make intro and elim, split jobtypes, etc. 
+    [{:aid 10, :source :buffer, :target :m1-start-job, :name :aa-10, :type :inhibitor, :multiplicity 5 :bind {:type :a}}
+     {:aid 11, :source :buffer, :target :m2-start-job, :name :aa-11, :type :normal, :multiplicity 1 :bind {:type :a}}
+     {:aid 12, :source :m1-blocked, :target :m1-start-job, :name :aa-12, :type :normal, :multiplicity 1 :bind {:type :a}}
+     {:aid 13, :source :m1-busy, :target :m1-complete-job, :name :aa-13, :type :normal, :multiplicity 1 :bind {:type :a}}
+     {:aid 14, :source :m1-complete-job, :target :m1-blocked, :name :aa-14, :type :normal, :multiplicity 1 :bind {:type :a}}
+     {:aid 15, :source :m1-start-job, :target :buffer, :name :aa-15, :type :normal, :multiplicity 1 :bind {:type :a}}
+     {:aid 16, :source :m1-start-job, :target :m1-busy, :name :aa-16, :type :normal, :multiplicity 1
+      :bind {:type :a :act :intro}}
+     {:aid 17, :source :m2-busy, :target :m2-complete-job, :name :aa-17, :type :normal, :multiplicity 1 :bind {:type :a}}
+     {:aid 18, :source :m2-complete-job, :target :m2-starved, :name :aa-18, :type :normal, :multiplicity 1 :bind {:type :a}}
+     {:aid 19, :source :m2-start-job, :target :m2-busy, :name :aa-19, :type :normal, :multiplicity 1 :bind {:type :a}}
+     {:aid 20, :source :m2-starved, :target :m2-start-job, :name :aa-20, :type :normal, :multiplicity 1
+      :bind {:type :a :act :elim}}]}))
+
