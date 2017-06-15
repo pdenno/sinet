@@ -582,3 +582,47 @@
   (print-inv p writer))
 
 (.addMethod clojure.pprint/simple-dispatch Inv (fn [p] (print-inv p *out*)))
+
+
+;;; SCADA ==============================================================================================
+
+;;; The assumption behind scada-events and scada-states is that s-e report on actions
+;;; on jobs and all the other messsages concer state of some element of the production system, thus s-s
+;;; The GP should have mutations to change transitions to places (though that is going to be arduous). 
+
+;;; It seems to me that some of these could, in simulation, report on buffer occupancy.
+(defn scada-events
+  "Suggest a set of events that will be the visible transitions. 
+   For each of these create a message generator."
+  [log]
+  (let [events (reduce (fn [events msg]
+                         (if (contains? msg :j)
+                           (conj events (:act msg))
+                           events))
+                       #{} log)]
+    (zipmap
+     (map identity events)
+     (map #(fn [j] {:act % :j j}) events))))
+
+(defn scada-states
+  "Suggest messages that will be visible places."
+  [log]
+  (let [places (reduce (fn [places msg]
+                         (if (not (contains? msg :j))
+                           (conj places (:act msg))
+                           places))
+                       #{} log)]
+    (zipmap
+     (map identity places)
+     (map #(fn [j] {:act % }) places))))
+
+(def +scada-log+
+  "a log of events redefined elsewhere"
+  nil)
+
+(def +event-fns+
+  "a map keyed by event type name; value is a fn of one argument (job id) producing a message"
+  (scada-events +scada-log+))
+
+
+  

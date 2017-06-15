@@ -1,7 +1,7 @@
 
 (ns gov.nist.sinet.util.fitness)
 
-(def scada-log
+(def scada-log-f0
   (preprocess-log
   {:log
     [{:act :ej, :m :m2, :j 1597, :ent 1994.267904151973, :clk 2000.5882553364702}
