@@ -1,14 +1,16 @@
 (ns gov.nist.sinet.core
-  (:require [gov.nist.sinet.util.draw :as d]
+  (:require [gov.nist.sinet.util.draw :as dr :refer (show-pn +display-pn+)]
+            [gov.nist.sinet.util.fitness :as fit :refer (workflow-fitness)]
             [medley.core :refer (abs)]
             [clojure.pprint :refer (cl-format pprint)]
             [gov.nist.spntools.core :as pn :refer :all]
             [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp pn-ok-> as-pn-ok->)]
             [gov.nist.spntools.util.reach :as pnr :refer (reachability)]
+            [gov.nist.spntools.util.simulate :as sim :refer (simulate)]
             [gov.nist.spntools.util.pnml :as pnml :refer (read-pnml)]))
 
-;;; Purpose: This is a program to demonstrate ideas in system identification of
-;;; discrete event systems using genetic programming.
+;;; Purpose: This is a program to demonstrate ideas in system identification/process mining of
+;;;          discrete event systems using genetic programming.
 
 ;;; I started with Lee Spector's "gp" demonstration software.
 
@@ -126,7 +128,7 @@
    (eden-individual problem)
    (eden-individual (update problem :visible-places reverse))))
 
-(defn random-crossover [] )
+(defn random-crossover [])
 
 (defn rand-mute-key
   "Return a keyword designating a mutation function."
@@ -338,21 +340,14 @@
                                       :history []})
                            (range 5)))))))
 
-
 ;;; POD -- really should normalize values!
 (defn i-error [inv]
-  "Compute system error using PNs steady-state properties."
+  "Compute the indiviual's score."
   (reset! +diag+ inv)
-  (let [pn (:pn inv)]
-    (cond-> inv
-        true (assoc :err 9999999.9),
-        (:avg-tokens-on-place pn)
-        (assoc :err
-               (reduce (fn [sum [pname pval]]
-                         (+ sum (abs (- pval (-> pn :avg-tokens-on-place pname)))))
-                       0.0
-                       (:data-source +problem+))))))
-
+  (as-> (:pn inv) ?pn
+    (fit/workflow-fitness ?pn (:s))))
+    
+    
 (defn sort-by-error
   "Add value for :err to each PN and used it to sort the population; best first."
   [popu]
@@ -525,12 +520,14 @@
    :m2-busy    0.80188
    :m2-starved 0.19812})
 
+(load-file "data/SCADA-logs/scada-f0.clj") ; defines fit/scada-log-f0
+
 (def +problem+
   {:visible-places [:m1-blocked :m1-busy :m2-busy :m2-starved :buffer]
-   :visible-transitions [:m1-finished :m2-finished]
-   :pn-graph-positions (pnml/positions-from-file "data/m2-j2-bas.xml")
+   :visible-transitions [:m1-complete-job :m1-start-job :m2-complete-job :m2-start-job]
+   :pn-graph-positions (pnml/positions-from-file "data/m2-j2-bas.xml") ; POD replace this with an "Eden ring"
+   :scada-patterns (fit/scada-patterns fit/scada-log-f0)
    :data-source +m2-11+}) ; POD not yet dynamic, of course.
-
 
 ;;; POD these are starvation values for :m2 on MJPdes/data/submodel-1.clj.
 ;;; Unlike LS's model, I don't have pairs of (x, f(x)). These are just f(x)
@@ -587,7 +584,7 @@
 ;;; SCADA ==============================================================================================
 
 ;;; The assumption behind scada-events and scada-states is that s-e report on actions
-;;; on jobs and all the other messsages concer state of some element of the production system, thus s-s
+;;; on jobs and all the other messsages concern the state of some element of the production system, thus s-s
 ;;; The GP should have mutations to change transitions to places (though that is going to be arduous). 
 
 ;;; It seems to me that some of these could, in simulation, report on buffer occupancy.
