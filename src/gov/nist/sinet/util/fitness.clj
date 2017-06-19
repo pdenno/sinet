@@ -186,11 +186,12 @@
             (empty? (next pats)) score
             :else (recur (next pats) (min this-score score))))))
 
+;;; POD temporary for testing
 (load-file "data/test-individuals/test-m2-bas.clj") ; defines test-m2-bas
 
 ;(workflow-fitness test-m2-bas (:scada-patterns +problem+))
 (defn workflow-fitness
-  "Generate the QPN log and score it WRT SCADA patterns (calculate activity disorder)."
+  "Generate the QPN log and score it WRT SCADA patterns (calculate process disorder)."
   [pn patterns]
   (let [pn (sim/simulate pn 300)
         tkn-range (range qpn-warm-up (- (-> pn :sim :max-tkn) qpn-warm-up))

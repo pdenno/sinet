@@ -1,5 +1,8 @@
 (ns gov.nist.sinet.core
-  (:require [gov.nist.sinet.util.draw :as dr :refer (show-pn +display-pn+)]
+  "SINET demonstrate ideas in system identification/process mining using genetic programming."
+  {:author "Peter Denno"}
+  (:require [gov.nist.sinet.util.server :as svr :refer (start! stop!)]
+            ;;[gov.nist.sinet.util.draw :as dr :refer (show-pn +display-pn+)]
             [gov.nist.sinet.util.fitness :as fit :refer (workflow-fitness)]
             [medley.core :refer (abs)]
             [clojure.pprint :refer (cl-format pprint)]
@@ -8,9 +11,6 @@
             [gov.nist.spntools.util.reach :as pnr :refer (reachability)]
             [gov.nist.spntools.util.simulate :as sim :refer (simulate)]
             [gov.nist.spntools.util.pnml :as pnml :refer (read-pnml)]))
-
-;;; Purpose: This is a program to demonstrate ideas in system identification/process mining of
-;;;          discrete event systems using genetic programming.
 
 ;;; I started with Lee Spector's "gp" demonstration software.
 
@@ -342,11 +342,11 @@
 
 ;;; POD -- really should normalize values!
 (defn i-error [inv]
-  "Compute the indiviual's score."
+  "Compute the individual's score."
   (reset! +diag+ inv)
-  (as-> (:pn inv) ?pn
-    (fit/workflow-fitness ?pn (:s))))
-    
+  (assoc inv
+         :err
+         (fit/workflow-fitness (:pn inv) (:scada-patterns +problem+))))
     
 (defn sort-by-error
   "Add value for :err to each PN and used it to sort the population; best first."
@@ -523,7 +523,7 @@
 (load-file "data/SCADA-logs/scada-f0.clj") ; defines fit/scada-log-f0
 
 (def +problem+
-  {:visible-places [:m1-blocked :m1-busy :m2-busy :m2-starved :buffer]
+  {:visible-places [:buffer :m1-blocked :m1-busy :m2-busy :m2-starved]
    :visible-transitions [:m1-complete-job :m1-start-job :m2-complete-job :m2-start-job]
    :pn-graph-positions (pnml/positions-from-file "data/m2-j2-bas.xml") ; POD replace this with an "Eden ring"
    :scada-patterns (fit/scada-patterns fit/scada-log-f0)
@@ -581,45 +581,6 @@
 (.addMethod clojure.pprint/simple-dispatch Inv (fn [p] (print-inv p *out*)))
 
 
-;;; SCADA ==============================================================================================
-
-;;; The assumption behind scada-events and scada-states is that s-e report on actions
-;;; on jobs and all the other messsages concern the state of some element of the production system, thus s-s
-;;; The GP should have mutations to change transitions to places (though that is going to be arduous). 
-
-;;; It seems to me that some of these could, in simulation, report on buffer occupancy.
-(defn scada-events
-  "Suggest a set of events that will be the visible transitions. 
-   For each of these create a message generator."
-  [log]
-  (let [events (reduce (fn [events msg]
-                         (if (contains? msg :j)
-                           (conj events (:act msg))
-                           events))
-                       #{} log)]
-    (zipmap
-     (map identity events)
-     (map #(fn [j] {:act % :j j}) events))))
-
-(defn scada-states
-  "Suggest messages that will be visible places."
-  [log]
-  (let [places (reduce (fn [places msg]
-                         (if (not (contains? msg :j))
-                           (conj places (:act msg))
-                           places))
-                       #{} log)]
-    (zipmap
-     (map identity places)
-     (map #(fn [j] {:act % }) places))))
-
-(def +scada-log+
-  "a log of events redefined elsewhere"
-  nil)
-
-(def +event-fns+
-  "a map keyed by event type name; value is a fn of one argument (job id) producing a message"
-  (scada-events +scada-log+))
 
 
   
