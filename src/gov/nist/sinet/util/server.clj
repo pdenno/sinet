@@ -75,9 +75,8 @@
     [:hr]
     [:h2 "Step 4: want to re-randomize Ajax/WebSocket connection type?"]
     [:p "Hit your browser's reload/refresh button"]
-    [:script {:src "main.js"}] ; Include our cljs target. Must be at end of page.
+    [:script {:src "js/main.js"}] ; Include our cljs target. Must be at end of page.
     ))
-
 
 (defn login-handler
   "Here's where you'll add your server-side login/auth procedure (Friend, etc.).
@@ -131,12 +130,12 @@
               (chsk-send! uid
                 [:some/broadcast
                  {:what-is-this "An async broadcast pushed from server"
-                  :how-often "Every 10 seconds"
+                  :how-often "Every 100 seconds"
                   :to-whom uid
                   :i i}]))))]
 
     (go-loop [i 0]
-      (<! (async/timeout 10000))
+      (<! (async/timeout 100000))
       (when @broadcast-enabled?_ (broadcast! i))
       (recur (inc i)))))
 
