@@ -11,10 +11,13 @@
    [taoensso.timbre    :as timbre :refer (tracef debugf infof warnf errorf)]     ; POD not sure we'll keep this one
    [taoensso.sente     :as sente]
    [org.httpkit.server :as http-kit]
-   [taoensso.sente.server-adapters.http-kit :refer (get-sch-adapter)]))
+   [taoensso.sente.server-adapters.http-kit :refer (get-sch-adapter)]
 
-(timbre/set-level! :trace) ; Uncomment for more logging
-(reset! sente/debug-mode?_ true) ; Uncomment for extra debug info
+   [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp)]
+   [gov.nist.spntools.util.pnml :as pnml :refer (read-pnml)]))
+
+(timbre/set-level! :info) ; Uncomment for more logging
+;(reset! sente/debug-mode?_ true) ; Uncomment for extra debug info
 
 ;;;; Define our Sente channel socket (chsk) server
 
@@ -47,36 +50,23 @@
 
 (defn landing-pg-handler [ring-req]
   (hiccup/html
-   [:h1 "SINET System Identification from SCADA messages"]
+   [:h1 "SINET System Identification from SCADA Messages / Steady-state Behaviour"]
    [:canvas {:id "best-pn"}]
-    [:p "An Ajax/WebSocket" [:strong " (random choice!)"] " has been configured for this example"]
-    [:hr]
-    [:p [:strong "Step 1: "] " try hitting the buttons:"]
-    [:p
-     [:button#btn1 {:type "button"} "chsk-send! (w/o reply)"]
-     [:button#btn2 {:type "button"} "chsk-send! (with reply)"]]
-    [:p
-     [:button#btn3 {:type "button"} "Test rapid server>user async pushes"]
-     [:button#btn4 {:type "button"} "Toggle server>user async broadcast push loop"]]
-    [:p
-     [:button#btn5 {:type "button"} "Disconnect"]
-     [:button#btn6 {:type "button"} "Reconnect"]]
-    ;;
-    [:p [:strong "Step 2: "] " observe std-out (for server output) and below (for client output):"]
-    [:textarea#output {:style "width: 100%; height: 200px;"}]
-    ;;
-    [:hr]
-    [:h2 "Step 3: try login with a user-id"]
-    [:p  "The server can use this id to send events to *you* specifically."]
-    [:p
-     [:input#input-login {:type :text :placeholder "User-id"}]
-     [:button#btn-login {:type "button"} "Secure login!"]]
-    ;;
-    [:hr]
-    [:h2 "Step 4: want to re-randomize Ajax/WebSocket connection type?"]
-    [:p "Hit your browser's reload/refresh button"]
-    [:script {:src "js/main.js"}] ; Include our cljs target. Must be at end of page.
-    ))
+   [:hr]
+   [:p [:strong "Some Buttons "]]
+   [:p
+    [:button#btn1 {:type "button"} "chsk-send! (w/o reply)"]
+    [:button#btn2 {:type "button"} "Update PN"]]
+   [:p
+    [:button#btn3 {:type "button"} "Test rapid server>user async pushes"]
+    [:button#btn4 {:type "button"} "Toggle server>user async broadcast push loop"]]
+   [:p
+    [:button#btn5 {:type "button"} "Disconnect"]
+    [:button#btn6 {:type "button"} "Reconnect"]]
+   ;;
+   [:p [:strong "Console"]]
+   [:textarea#output {:style "width: 100%; height: 200px;"}]
+   [:script {:src "js/main.js"}])) ; Include our cljs target. Must be at end of page.
 
 (defn login-handler
   "Here's where you'll add your server-side login/auth procedure (Friend, etc.).
@@ -104,43 +94,16 @@
   (ring.middleware.defaults/wrap-defaults
     ring-routes ring.middleware.defaults/site-defaults))
 
-;;;; Some server>user async push examples
-
-(defn test-fast-server>user-pushes
-  "Quickly pushes 100 events to all connected users. Note that this'll be
-  fast+reliable even over Ajax!"
-  []
+;(server>user-push-pn (pnml/read-pnml "data/m2-inhib-bbs.xml" :rescale? true))
+(defn server>user-push-pn
+  "Push Petri net (with its geometry) to the user "
+  [pn]
   (doseq [uid (:any @connected-uids)]
-    (doseq [i (range 100)]
-      (chsk-send! uid [:fast-push/is-fast (str "hello " i "!!")]))))
+    (chsk-send! uid [:sinet/new-pn pn])))
 
-(comment (test-fast-server>user-pushes))
+(defonce broadcast-enabled?_ (atom false)) ; POD was true
 
-(defonce broadcast-enabled?_ (atom true))
-
-(defn start-example-broadcaster!
-  "As an example of server>user async pushes, setup a loop to broadcast an
-  event to all connected users every 10 seconds"
-  []
-  (let [broadcast!
-        (fn [i]
-          (let [uids (:any @connected-uids)]
-            (debugf "Broadcasting server>user: %s uids" (count uids))
-            (doseq [uid uids]
-              (chsk-send! uid
-                [:some/broadcast
-                 {:what-is-this "An async broadcast pushed from server"
-                  :how-often "Every 100 seconds"
-                  :to-whom uid
-                  :i i}]))))]
-
-    (go-loop [i 0]
-      (<! (async/timeout 100000))
-      (when @broadcast-enabled?_ (broadcast! i))
-      (recur (inc i)))))
-
-;;;; Sente event handlers
-
+;;; Sente event handlers
 (defmulti -event-msg-handler
   "Multimethod to handle Sente `event-msg`s"
   :id ; Dispatch on event-id
@@ -154,6 +117,14 @@
   )
 
 (defmethod -event-msg-handler
+  :draw/new-pn
+  [{:as ev-msg :keys [event id ?data ring-req ?reply-fn send-fn]}]
+  (let [session (:session ring-req)
+        uid     (:uid     session)]
+    (when ?reply-fn
+      (?reply-fn save-pn))))
+
+(defmethod -event-msg-handler
   :default ; Default/fallback case (no other matching handler)
   [{:as ev-msg :keys [event id ?data ring-req ?reply-fn send-fn]}]
   (let [session (:session ring-req)
@@ -162,7 +133,7 @@
     (when ?reply-fn
       (?reply-fn {:umatched-event-as-echoed-from-from-server event}))))
 
-(defmethod -event-msg-handler :example/test-rapid-push
+#_(defmethod -event-msg-handler :example/test-rapid-push
   [ev-msg] (test-fast-server>user-pushes))
 
 (defmethod -event-msg-handler :example/toggle-broadcast
@@ -182,8 +153,7 @@
     (sente/start-server-chsk-router!
       ch-chsk event-msg-handler)))
 
-;;;; Init stuff
-
+;;; Init stuff ========================================
 (defonce    web-server_ (atom nil)) ; (fn stop [])
 (defn  stop-web-server! [] (when-let [stop-fn @web-server_] (stop-fn)))
 (defn start-web-server! [& [port]]
@@ -192,38 +162,29 @@
         ring-handler (var main-ring-handler)
 
         [port stop-fn]
-        ;;; TODO Choose (uncomment) a supported web server ------------------
         (let [stop-fn (http-kit/run-server ring-handler {:port port})]
           [(:local-port (meta stop-fn)) (fn [] (stop-fn :timeout 100))])
-        ;;
-        ;; (let [server (immutant/run ring-handler :port port)]
-        ;;   [(:port server) (fn [] (immutant/stop server))])
-        ;;
-        ;; (let [port (nginx-clojure/run-server ring-handler {:port port})]
-        ;;   [port (fn [] (nginx-clojure/stop-server))])
-        ;;
-        ;; (let [server (aleph/start-server ring-handler {:port port})
-        ;;       p (promise)]
-        ;;   (future @p) ; Workaround for Ref. https://goo.gl/kLvced
-        ;;   ;; (aleph.netty/wait-for-close server)
-        ;;   [(aleph.netty/port server)
-        ;;    (fn [] (.close ^java.io.Closeable server) (deliver p nil))])
-        ;; ------------------------------------------------------------------
-
         uri (format "http://localhost:%s/" port)]
-
     (infof "Web server is running at `%s`" uri)
     (try
       (.browse (java.awt.Desktop/getDesktop) (java.net.URI. uri))
       (catch java.awt.HeadlessException _))
-
     (reset! web-server_ stop-fn)))
 
 (defn stop!  []  (stop-router!)  (stop-web-server!))
-(defn start! [] (start-router!) (start-web-server!) (start-example-broadcaster!))
+(defn start! [] (start-router!) (start-web-server!) #_(start-example-broadcaster!))
 
 (defn -main "For `lein run`, etc." [] (start!))
 
-(comment
+#_(comment
   (start!)
   (test-fast-server>user-pushes))
+
+;;; Drawing stuff ========================================
+
+;;; 14 files
+(defn show-n [n] 
+  (server>user-push-pn 
+   (pnml/read-pnml (str "/Users/pdenno/Documents/git/spntools/data/" 
+                        (nth pnml/files n))
+                   :rescale? true)))

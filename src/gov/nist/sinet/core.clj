@@ -2,7 +2,6 @@
   "SINET demonstrate ideas in system identification/process mining using genetic programming."
   {:author "Peter Denno"}
   (:require [gov.nist.sinet.util.server :as svr :refer (start! stop!)]
-            ;;[gov.nist.sinet.util.draw :as dr :refer (show-pn +display-pn+)]
             [gov.nist.sinet.util.fitness :as fit :refer (workflow-fitness)]
             [medley.core :refer (abs)]
             [clojure.pprint :refer (cl-format pprint)]
@@ -525,7 +524,7 @@
 (def +problem+
   {:visible-places [:buffer :m1-blocked :m1-busy :m2-busy :m2-starved]
    :visible-transitions [:m1-complete-job :m1-start-job :m2-complete-job :m2-start-job]
-   :pn-graph-positions (pnml/positions-from-file "data/m2-j2-bas.xml") ; POD replace this with an "Eden ring"
+   :pn-graph-positions (:pn-graph-positions (pnml/read-pnml "data/m2-j2-bas.xml" :geom? true)) ; POD replace this with an "Eden ring"
    :scada-patterns (fit/scada-patterns fit/scada-log-f0)
    :data-source +m2-11+}) ; POD not yet dynamic, of course.
 

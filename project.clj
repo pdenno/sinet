@@ -24,8 +24,10 @@
                  [quil                      "2.6.0"]]
   :plugins [[lein-figwheel "0.5.10"]
             [lein-cljsbuild "1.1.4"]]
-  :profiles {:dev { :dependencies [[figwheel-sidecar "0.5.4-6"]] ; POD added :profiles for figwheel-sidecar
+  :profiles {:dev {:dependencies [[com.cemerick/piggieback "0.2.2"]
+                                  [figwheel-sidecar "0.5.4-6"]] ; POD added :profiles for figwheel-sidecar
                    :source-paths ["src" "cljs_src"]}}
+  :repl-options {:nrepl-middleware [cemerick.piggieback/wrap-cljs-repl]}
   :source-paths ["src" "cljs_src"]
   :cljsbuild {:builds
               [{:id :cljs-client
