@@ -6,17 +6,13 @@
             [taoensso.encore :as encore :refer-macros (have have?)]
             [taoensso.timbre :as timbre :refer-macros (tracef debugf infof warnf errorf)]
             [taoensso.sente  :as sente  :refer (cb-success?)]
-
-;            [goog.events :as g-events]
-
             [gov.nist.sinet.util.draw :as draw :refer (+display-pn+)]
             [quil.core :as quil :include-macros true]
             [quil.middleware :as qm])
   (:require-macros
    [cljs.core.async.macros :as asyncm :refer (go go-loop)]))
 
-;;;(timbre/set-level! :trace) ; Uncomment for more logging
-(timbre/set-level! :error) ; POD
+(timbre/set-level! :error) ; :trace :debug etc. for more logging
 
 ;;; Util for logging output to on-screen console
 (def output-el (.getElementById js/document "output"))
@@ -28,8 +24,7 @@
 
 (->output! "ClojureScript appears to have loaded correctly.")
 
-;;;; Define our Sente channel socket (chsk) client
-
+;;; Define our Sente channel socket (chsk) client
 (let [;; For this example, select a random protocol:
       rand-chsk-type :auto ; (if (>= (rand) 0.5) :ajax :auto) ; POD :auto = ws, I think!
       _ (->output! "Randomly selected chsk type: %s" rand-chsk-type)
@@ -69,14 +64,13 @@
       (->output! "Channel socket successfully established!: %s" new-state-map)
       (->output! "Channel socket state change: %s"              new-state-map))))
 
-(def +zippy+ (atom nil))
+(def +diag+ (atom nil))
 
 (defmethod -event-msg-handler :chsk/recv
   [{:as ev-msg :keys [?data]}]
   (->output! "Push event from server: %s" (first ?data))
   (case (first ?data)
-    :sinet/new-pn (do (reset! +zippy+ ?data)
-                      (reset! gov.nist.sinet.util.draw/+display-pn+ (second ?data)))))
+    :sinet/new-pn (reset! gov.nist.sinet.util.draw/+display-pn+ (second ?data))))
 
 (defmethod -event-msg-handler :chsk/handshake
   [{:as ev-msg :keys [?data]}]
@@ -169,7 +163,7 @@
                       (->output! "Login successful")
                       (sente/chsk-reconnect! chsk))))))))))))
 
-;;; Init stuff
+;;; Init stuff  ----------------
 
 (defn start! [] (start-router!))
 
@@ -181,4 +175,4 @@
   :settings #(quil/smooth 2) ; Turn on anti-aliasing
   :setup draw/setup-pn
   :draw draw/draw-pn
-  :size [1100 500]) ; POD This is used in pnml/rescale. I need a solution for getting it here!
+  :size [900 500]) ; POD This is used in pnml/rescale. I need a solution for getting it here!

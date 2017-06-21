@@ -66,7 +66,6 @@
 (defn handle-move!
   "Mouse pressed: Update coordinates to move an element or its label."
   []
-  (gov.nist.sinet.util.client/->output! "mouse-move in draw")
   (when-let [elem (or @+lock-mouse-on+ (nearest-elem @+display-pn+ [(quil/mouse-x) (quil/mouse-y)]))]
     (swap!
      +display-pn+

@@ -46,24 +46,45 @@
     (when (not= old new)
       (infof "Connected uids change: %s" new))))
 
-;;;; Ring handlers
+(defn- active-tab 
+  [ & {:keys [tab] :or {tab :process}}]
+  "Return HTML div metaltop-teal tabs, marking TAB as active."
+  `[:ul
+    ~@(map (fn [[k v]]
+             (if (= k tab)
+               `[:li {:class "active"} [:a {:href ~(str "/FacilitySearch/" (name k))} ~v]]
+               `[:li                   [:a {:href ~(str "/FacilitySearch/" (name k))} ~v]]))
+           {:process "Process", :product "Product", :equip "Equipment",
+            :state "System State", :search "Search" :nb "Notebook"})])
 
+(defmacro app-page-wrapper
+  "Wrap pages with stylesheet, start session, etc."
+  [args & body]
+  `(hiccup/html [:html {:lang "en"}
+                 [:head [:title "SINET"]
+                  [:meta {:http-equiv "content-type" :content "text/html" :charset="iso-8859-1"}]
+                  [:link {:rel "stylesheet" :type "text/css" :href "/style.css"}]] ; Really need /style.css STRANGE!
+                 [:div {:id "metaltop-teal"} ~(active-tab :tab (:tab args))]
+                 [:body ~@body]]))
+
+;;;; Ring handlers
 (defn landing-pg-handler [ring-req]
-  (hiccup/html
+  (app-page-wrapper
+   {:tab :process}
    [:h1 "SINET System Identification from SCADA Messages / Steady-state Behaviour"]
-   [:canvas {:id "best-pn"}]
-   [:hr]
-   [:p [:strong "Some Buttons "]]
-   [:p
-    [:button#btn1 {:type "button"} "chsk-send! (w/o reply)"]
-    [:button#btn2 {:type "button"} "Update PN"]]
-   [:p
-    [:button#btn3 {:type "button"} "Test rapid server>user async pushes"]
-    [:button#btn4 {:type "button"} "Toggle server>user async broadcast push loop"]]
-   [:p
-    [:button#btn5 {:type "button"} "Disconnect"]
-    [:button#btn6 {:type "button"} "Reconnect"]]
-   ;;
+   [:table {:style "width:100%"}
+    [:tr
+     [:td [:canvas {:id "best-pn"}]]
+     [:td [:p [:strong "GP Control"]]
+      [:p
+       [:button#btn1 {:type "button"} "chsk-send! (w/o reply)"]
+       [:button#btn2 {:type "button"} "Update PN"]]
+      [:p
+       [:button#btn3 {:type "button"} "Test rapid server>user async pushes"]
+       [:button#btn4 {:type "button"} "Toggle server>user async broadcast push loop"]]
+      [:p
+       [:button#btn5 {:type "button"} "Disconnect"]
+       [:button#btn6 {:type "button"} "Reconnect"]]]]]
    [:p [:strong "Console"]]
    [:textarea#output {:style "width: 100%; height: 200px;"}]
    [:script {:src "js/main.js"}])) ; Include our cljs target. Must be at end of page.
@@ -116,25 +137,28 @@
   ;; (future (-event-msg-handler ev-msg)) ; Handle event-msgs on a thread pool
   )
 
+(def +diag+ (atom nil))
+
 (defmethod -event-msg-handler
   :draw/new-pn
   [{:as ev-msg :keys [event id ?data ring-req ?reply-fn send-fn]}]
   (let [session (:session ring-req)
         uid     (:uid     session)]
+    (reset! +diag+ {:from :draw/new-pn :event event :id id :?data ?data
+                    :ring-req ring-req :?reply-fn ?reply-fn :send-fn send-fn})
     (when ?reply-fn
-      (?reply-fn save-pn))))
+      (?reply-fn (random-pn)))))
 
 (defmethod -event-msg-handler
   :default ; Default/fallback case (no other matching handler)
   [{:as ev-msg :keys [event id ?data ring-req ?reply-fn send-fn]}]
   (let [session (:session ring-req)
         uid     (:uid     session)]
+    (reset! +diag+ {:from :default :event event :id id :?data ?data
+                    :ring-req ring-req :?reply-fn ?reply-fn :send-fn send-fn})
     (debugf "Unhandled event: %s" event)
     (when ?reply-fn
       (?reply-fn {:umatched-event-as-echoed-from-from-server event}))))
-
-#_(defmethod -event-msg-handler :example/test-rapid-push
-  [ev-msg] (test-fast-server>user-pushes))
 
 (defmethod -event-msg-handler :example/toggle-broadcast
   [{:as ev-msg :keys [?reply-fn]}]
@@ -188,3 +212,8 @@
    (pnml/read-pnml (str "/Users/pdenno/Documents/git/spntools/data/" 
                         (nth pnml/files n))
                    :rescale? true)))
+
+(defn random-pn []
+  (pnml/read-pnml (str "/Users/pdenno/Documents/git/spntools/data/" 
+                       (nth pnml/files (rand-int 14)))
+                  :rescale? true))
