@@ -171,6 +171,10 @@
 
 (def qpn-warm-up "Ignore this number of tokens on both ends of the log." 20)
 
+;;; POD temporary for testing
+(load-file "data/test-individuals/test-m2-bas.clj") ; defines test-m2-bas
+
+
 ;;; +1 for every precedence constraint violated. 
 ;;; Will need something more for loops, but we'll get to that later.
 (defn calc-process-disorder
@@ -186,9 +190,6 @@
             (empty? (next pats)) score
             :else (recur (next pats) (min this-score score))))))
 
-;;; POD temporary for testing
-(load-file "data/test-individuals/test-m2-bas.clj") ; defines test-m2-bas
-
 ;(workflow-fitness test-m2-bas (:scada-patterns +problem+))
 (defn workflow-fitness
   "Generate the QPN log and score it WRT SCADA patterns (calculate process disorder)."
@@ -202,4 +203,6 @@
                             0
                             tkn-range)]
     (double (/ total-error (count tkn-range)))))
+
+
 

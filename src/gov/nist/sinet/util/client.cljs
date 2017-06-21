@@ -66,11 +66,15 @@
 
 (def +diag+ (atom nil))
 
+;;; This is for things pushed from server
 (defmethod -event-msg-handler :chsk/recv
   [{:as ev-msg :keys [?data]}]
-  (->output! "Push event from server: %s" (first ?data))
-  (case (first ?data)
-    :sinet/new-pn (reset! gov.nist.sinet.util.draw/+display-pn+ (second ?data))))
+  (reset! +diag+ ev-msg)
+  (->output! "Pushed event from server: %s" (first ?data))
+  (let [msg-type (first ?data)]
+    (cond 
+      (= msg-type :sinet/new-pn) (reset! gov.nist.sinet.util.draw/+display-pn+ (:pn (second ?data)))
+      (= msg-type :sinet/event)  (->output! "Event from Sinet: %s" (second ?data)))))
 
 (defmethod -event-msg-handler :chsk/handshake
   [{:as ev-msg :keys [?data]}]
@@ -95,32 +99,28 @@
       (->output! "Button 1 was clicked (won't receive any reply from server)")
       (chsk-send! [:example/button1 {:had-a-callback? "nope"}]))))
 
-(when-let [target-el (.getElementById js/document "btn2")]
+(def viewing-inv "What individual is displayed" (atom -1))
+
+(when-let [target-el (.getElementById js/document "pop+")]
   (.addEventListener target-el "click"
     (fn [ev]
-      (->output! "Client: New PN requested")
-      (chsk-send! [:draw/new-pn {:had-a-callback? "indeed"}] 5000
+      (reset! +diag+ ev)                   
+      (->output! "pop+ button was clicked (get-individual-plus)")
+      (chsk-send! [:draw/get-individual {:id (swap! viewing-inv inc)}]
+                  5000
                   (fn [cb-reply]
-                     ;(->output! "Received this: %s" cb-reply)
-                    (reset! gov.nist.sinet.util.draw/+display-pn+ cb-reply))))))
+                    (->output! "Received this: %s" cb-reply)
+                    (reset! gov.nist.sinet.util.draw/+display-pn+ (:pn cb-reply)))))))
 
-(when-let [target-el (.getElementById js/document "btn3")]
-  (.addEventListener target-el "click"
+(when-let [target-el (.getElementById js/document "pop-")]
+    (.addEventListener target-el "click"
     (fn [ev]
-      (->output! "Button 3 was clicked (will ask server to test rapid async push)")
-      (chsk-send! [:example/test-rapid-push]))))
-
-(when-let [target-el (.getElementById js/document "btn4")]
-  (.addEventListener target-el "click"
-    (fn [ev]
-      (->output! "Button 4 was clicked (will toggle async broadcast loop)")
-      (chsk-send! [:example/toggle-broadcast] 5000
-        (fn [cb-reply]
-          (when (cb-success? cb-reply)
-            (let [loop-enabled? cb-reply]
-              (if loop-enabled?
-                (->output! "Async broadcast loop now enabled")
-                (->output! "Async broadcast loop now disabled")))))))))
+      (->output! "pop- button was clicked (get-individual-minus)")
+      (chsk-send! [:draw/get-individual {:id (swap! viewing-inv dec)}]
+                  5000
+                  (fn [cb-reply]
+                    (->output! "Received this: %s" cb-reply)
+                    (reset! gov.nist.sinet.util.draw/+display-pn+ (:pn cb-reply)))))))
 
 (when-let [target-el (.getElementById js/document "btn5")]
   (.addEventListener target-el "click"
@@ -134,37 +134,7 @@
                        (->output! "Reconnecting")
                        (sente/chsk-reconnect! chsk))))
 
-(when-let [target-el (.getElementById js/document "btn-login")]
-  (.addEventListener target-el "click"
-    (fn [ev]
-      (let [user-id (.-value (.getElementById js/document "input-login"))]
-        (if (str/blank? user-id)
-          (js/alert "Please enter a user-id first")
-          (do
-            (->output! "Logging in with user-id %s" user-id)
-
-            ;;; Use any login procedure you'd like. Here we'll trigger an Ajax
-            ;;; POST request that resets our server-side session. Then we ask
-            ;;; our channel socket to reconnect, thereby picking up the new
-            ;;; session.
-
-            (sente/ajax-lite "/login"
-              {:method :post
-               :headers {:X-CSRF-Token (:csrf-token @chsk-state)}
-               :params  {:user-id (str user-id)}}
-
-              (fn [ajax-resp]
-                (->output! "Ajax login response: %s" ajax-resp)
-                (let [login-successful? true ; Your logic here
-                      ]
-                  (if-not login-successful?
-                    (->output! "Login failed")
-                    (do
-                      (->output! "Login successful")
-                      (sente/chsk-reconnect! chsk))))))))))))
-
 ;;; Init stuff  ----------------
-
 (defn start! [] (start-router!))
 
 (defonce _start-once (start!))
@@ -172,7 +142,7 @@
 (quil/defsketch best-pn ;cljs :features [:resizable :keep-on-top]
   :host "best-pn"
   :title "Best Individual"
-  :settings #(quil/smooth 2) ; Turn on anti-aliasing
+  :settings #(fn [] (quil/smooth 2) #_(quil/scale 2)) ; Smooth=2 is typical 
   :setup draw/setup-pn
   :draw draw/draw-pn
   :size [900 500]) ; POD This is used in pnml/rescale. I need a solution for getting it here!

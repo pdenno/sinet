@@ -45,7 +45,7 @@
 (declare angle distance +display-pn+ highlight-elem! handle-move!)
 
 (defn draw-pn []
-  (let [pn @+display-pn+]
+  (when-let [pn @+display-pn+]
     (quil/background 230) ; POD not sure I want to keep this.
     (quil/stroke 0) ; black
     (quil/fill 255) ; white
@@ -72,13 +72,13 @@
      #(let [n (:name elem)]
         (if (:label? elem)
           (as-> % ?pn
-            (assoc-in ?pn [:pn-graph-positions n :label-x-off]
-                      (- (quil/mouse-x) (-> ?pn :pn-graph-positions n :x)))
-            (assoc-in ?pn [:pn-graph-positions n :label-y-off]
-                      (- (quil/mouse-y) (-> ?pn :pn-graph-positions n :y))))
+            (assoc-in ?pn [:geom n :label-x-off]
+                      (- (quil/mouse-x) (-> ?pn :geom n :x)))
+            (assoc-in ?pn [:geom n :label-y-off]
+                      (- (quil/mouse-y) (-> ?pn :geom n :y))))
           (as-> % ?pn
-            (assoc-in ?pn [:pn-graph-positions n :x] (quil/mouse-x))
-            (assoc-in ?pn [:pn-graph-positions n :y] (quil/mouse-y))))))))
+            (assoc-in ?pn [:geom n :x] (quil/mouse-x))
+            (assoc-in ?pn [:geom n :y] (quil/mouse-y))))))))
 
 (def +highlight-elem+ (atom nil))
 (defn highlight-elem!
@@ -108,7 +108,7 @@
                  [key min? true]
                  [bkey min-d label?]))))
          [:not-set 99999 true]
-         (-> pn :pn-graph-positions))]
+         (-> pn :geom))]
     (when (< min-d 30.0)
       (when-let [elem (or (some #(when (= bkey (:name %)) %) (:places pn))
                           (some #(when (= bkey (:name %)) %) (:transitions pn)))]
@@ -120,13 +120,13 @@
    updating of the net is taken care of in handle-mouse."
   [pn elem]
   (let [n (:name elem)
-        x (-> pn :pn-graph-positions n :x)
-        y (-> pn :pn-graph-positions n :y)
+        x (-> pn :geom n :x)
+        y (-> pn :geom n :y)
         hilite @+highlight-elem+]
     (quil/fill (if (and (= n (:name hilite)) (:label? hilite)) (quil/color 255 0 0) 0))
     (quil/text (name n)
-            (+ x (-> pn :pn-graph-positions n :label-x-off))
-            (+ y (-> pn :pn-graph-positions n :label-y-off)))
+            (+ x (-> pn :geom n :label-x-off))
+            (+ y (-> pn :geom n :label-y-off)))
     (quil/fill 0)
     (quil/stroke (if (and (= (:name hilite) n) (not (:label? hilite))) (quil/color 255 0 0) 0))
     (if (place? elem)
@@ -287,8 +287,8 @@
   [pn & names]
   (reduce (fn [v name]
             (-> v
-                (conj (-> pn :pn-graph-positions name :x))
-                (conj (-> pn :pn-graph-positions name :y))))
+                (conj (-> pn :geom name :x))
+                (conj (-> pn :geom name :y))))
           []
           names))
 

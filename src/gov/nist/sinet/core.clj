@@ -1,8 +1,8 @@
 (ns gov.nist.sinet.core
   "SINET demonstrate ideas in system identification/process mining using genetic programming."
   {:author "Peter Denno"}
-  (:require [gov.nist.sinet.util.server :as svr :refer (start! stop!)]
-            [gov.nist.sinet.util.fitness :as fit :refer (workflow-fitness)]
+  (:require [gov.nist.sinet.util.fitness :as fit :refer (workflow-fitness)]
+            [gov.nist.sinet.util.server :as svr]
             [medley.core :refer (abs)]
             [clojure.pprint :refer (cl-format pprint)]
             [gov.nist.spntools.core :as pn :refer :all]
@@ -85,6 +85,7 @@
         (assoc ?p :t-adds (set (subvec (:t ?p) cnt-t)))
         (assoc ?p :p-adds (set (subvec (:p ?p) cnt-p)))))))
 
+(declare eden-display-geometry)
 (defn eden-individual
   "Return a minimal and prototypical individual for the problem.
    It is a loop made by using visible places and transitions with additional
@@ -119,13 +120,54 @@
                                (dissoc ?t :visible?)
                                (assoc ?t :type (if (= 0 (rand-int 2)) :exponential :immediate)))
                              trans))
-                         (:transitions ?pn))))))))
+                         (:transitions ?pn)))))
+      (eden-display-geometry ?pn))))
 
-(defn eden-pns
+(defn eden-display-geometry 
+  "Assign positions to places and transitions of Eden individuals for display."
+  [pn]
+  (let [elems (interleave (map :name (:places pn)) (map :name (:transitions pn)))
+        nelems (count elems)
+        angle-inc (/ (* 2 Math/PI) nelems)
+        angle (atom (- angle-inc))]
+    (assoc pn :geom
+           (reduce (fn [geom ename]
+                     (swap! angle #(+ % angle-inc))
+                     (assoc geom ename
+                            {:x (Math/round (* 100 (Math/cos @angle)))
+                             :y (Math/round (* 100 (Math/sin @angle)))
+                             :label-x-off 10
+                             :label-y-off 15}))
+                   {}
+                   elems))))
+
+(def +edens+ (atom nil))
+
+(defn inv-geom
+  "Compute reasonable display placement (:geom) for the argument individual."
+  [inv]
+  (if (contains? (:pn inv) :geom)
+    inv
+    (let [from (-> inv :history first)
+          elems (into (set (-> inv :pn :places)) (-> inv :pn :transitions))]
+      (as-> inv ?inv
+        (assoc-in ?inv [:pn :geom] (-> (some #(when (= (:id %) from) %) @+edens+) :pn :geom))
+        (reduce (fn [inv ename]
+                  (assoc-in [inv :geom ename]
+                            {:x (+ 15 (rand-int 100))
+                             :y (+ 15 (rand-int 100))
+                             :label-x-off 10
+                             :label-y-off 15}))
+                ?inv
+                (clojure.set/difference elems (set (keys (-> inv :pn :geom)))))
+        (update-in ?inv [:pn] pnml/rescale)))))
+
+(defn eden-pns!
   [problem]
-  (list
-   (eden-individual problem)
-   (eden-individual (update problem :visible-places reverse))))
+  (reset! +edens+
+          (vector
+           (map->Inv {:pn (eden-individual problem) :id "eden-fwd"})
+           (map->Inv {:pn (eden-individual (update problem :visible-places reverse)) :id "eden-rev"}))))
 
 (defn random-crossover [])
 
@@ -167,15 +209,12 @@
   ([inv & {:keys [pick-fn force] :or {pick-fn rand-mute-key}}]
    (mutate-m inv :pick-fn pick-fn :force force)))
 
-(def +zippy+ (atom nil))
-
 (defn- mutate-m-dispatch [inv & {:keys [pick-fn force]
                                 :or {pick-fn rand-mute-key}}]
   (let [answer (or force (pick-fn))]
     (when-not (pnu/pn? (:pn inv))
       (pnu/break "last mutation failed."))
     ;(println "answer =" answer)
-    (reset! +zippy+ answer)
     answer))
 
 (defmulti mutate-m #'mutate-m-dispatch)
@@ -183,7 +222,6 @@
 (defn- crossover-m-dispatch [inv & {:keys [force pick-fn]
                                     :or {pick-fn random-crossover}}]
   (let [answer (or force (pick-fn))]
-    (reset! +zippy+ answer)
     answer))
 
 (defmulti crossover-m #'crossover-m-dispatch)
@@ -325,19 +363,19 @@
     {:skip :swap-places-vv :msg "no 1st place"}))
 
 (def +old-pop+ "diagnostic" (atom []))
-(def +pop+ "diagnostic" (atom nil))
+
 
 (defn initial-pop [problem]
-  (let [edens (eden-pns problem)
+  (let [edens (eden-pns! problem)
         pop-cnt (atom -1)]
-    (reset! +pop+
-            (vec (repeatedly
-                  (:pop-size +gp-params+)
-                  #(reduce (fn [i _] (mutate i :force (rand-mute-key (:eden-dist +gp-params+))))
-                           (map->Inv {:pn (nth edens (rand-int (count edens)))
-                                      :id (swap! pop-cnt inc)
-                                      :history []})
-                           (range 5)))))))
+    (vec (repeatedly
+          (:pop-size +gp-params+)
+          #(reduce (fn [i _] (mutate i :force (rand-mute-key (:eden-dist +gp-params+))))
+                   (let [random-eden (nth edens (rand-int (count edens)))]
+                     (map->Inv {:pn (:pn random-eden)
+                                :id (swap! pop-cnt inc)
+                                :history [(:id random-eden)]}))
+                   (range 5))))))
 
 ;;; POD -- really should normalize values!
 (defn i-error [inv]
@@ -369,7 +407,7 @@
   (pnu/reset-ids! {})
   (reset! +log+ []))
 
-(declare validate-gp-params report-gen make-next-gen write-gen)
+(declare validate-gp-params report-gen make-next-gen write-gen +pop+)
 
 (defn evolve
   "Starting with a random population, sort, select, check for a solution and
@@ -470,7 +508,7 @@
     (map #(pnml/write-pnml
            (:pn %)
            :file (str "data/junk/initial-" (:id %) ".xml")
-           :positions (:pn-graph-positions problem))
+           :positions (:geom problem))
          (reset! +pop+ (-> problem initial-pop sort-by-error)))))
 
 (defn write-gen
@@ -482,7 +520,7 @@
       (pnml/write-pnml
        (nth popu n)
        :file filename
-       :positions (:pn-graph-positions +problem+)))))
+       :positions (:geom +problem+)))))
 
 (defn diag-eval-pop
   "Return score and compute times for each individual in the population, updating +pop+."
@@ -524,7 +562,7 @@
 (def +problem+
   {:visible-places [:buffer :m1-blocked :m1-busy :m2-busy :m2-starved]
    :visible-transitions [:m1-complete-job :m1-start-job :m2-complete-job :m2-start-job]
-   :pn-graph-positions (:pn-graph-positions (pnml/read-pnml "data/m2-j2-bas.xml" :geom? true)) ; POD replace this with an "Eden ring"
+   :geom (:geom (pnml/read-pnml "data/m2-j2-bas.xml" :geom? true)) ; POD replace this with an "Eden ring"
    :scada-patterns (fit/scada-patterns fit/scada-log-f0)
    :data-source +m2-11+}) ; POD not yet dynamic, of course.
 
@@ -568,7 +606,7 @@
     :jobmix {:jobType1 (mjp/map->JobType {:portion 1.0 :w {:m1 1.0, :m2 1.0}})}}))
 
 (defn print-inv [p writer]
-  (.write writer (cl-format nil "#Inv [id=~A, err=~A]"
+  (.write writer (cl-format nil "#Inv [id=~S, err=~A]"
                             (:id p)
                             (if (number? (:err p))
                               (cl-format nil "~6,2F" (:err p))
@@ -579,7 +617,6 @@
 
 (.addMethod clojure.pprint/simple-dispatch Inv (fn [p] (print-inv p *out*)))
 
-
-
-
-  
+;;; (ns-unmap 'gov.nist.sinet.core '+pop+)
+;;; Load the default problem.
+(defonce +pop+ (atom (initial-pop +problem+)))

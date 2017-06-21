@@ -16,29 +16,25 @@
    [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp)]
    [gov.nist.spntools.util.pnml :as pnml :refer (read-pnml)]))
 
+(alias 'sinet 'gov.nist.sinet.core)
+
+(def +diag+ (atom nil))
+
 (timbre/set-level! :info) ; Uncomment for more logging
 ;(reset! sente/debug-mode?_ true) ; Uncomment for extra debug info
 
 ;;;; Define our Sente channel socket (chsk) server
-
-(let [;; Serializtion format, must use same val for client + server:
-      packer :edn ; Default packer, a good choice in most cases
-      ;; (sente-transit/get-transit-packer) ; Needs Transit dep
-
-      chsk-server
-      (sente/make-channel-socket-server!
-       (get-sch-adapter) {:packer packer})
-
+(let [packer :edn ; Default packer, a good choice in most cases
+      chsk-server (sente/make-channel-socket-server!
+                   (get-sch-adapter) {:packer packer})
       {:keys [ch-recv send-fn connected-uids
               ajax-post-fn ajax-get-or-ws-handshake-fn]}
       chsk-server]
-
   (def ring-ajax-post                ajax-post-fn)
   (def ring-ajax-get-or-ws-handshake ajax-get-or-ws-handshake-fn)
   (def ch-chsk                       ch-recv) ; ChannelSocket's receive channel
   (def chsk-send!                    send-fn) ; ChannelSocket's send API fn
-  (def connected-uids                connected-uids) ; Watchable, read-only atom
-  )
+  (def connected-uids                connected-uids)) ; Watchable, read-only atom
 
 ;; We can watch this atom for changes if we like
 (add-watch connected-uids :connected-uids
@@ -46,16 +42,15 @@
     (when (not= old new)
       (infof "Connected uids change: %s" new))))
 
-(defn- active-tab 
-  [ & {:keys [tab] :or {tab :process}}]
+(defn- active-tab
   "Return HTML div metaltop-teal tabs, marking TAB as active."
+  [ & {:keys [tab] :or {tab :process}}]
   `[:ul
     ~@(map (fn [[k v]]
              (if (= k tab)
-               `[:li {:class "active"} [:a {:href ~(str "/FacilitySearch/" (name k))} ~v]]
-               `[:li                   [:a {:href ~(str "/FacilitySearch/" (name k))} ~v]]))
-           {:process "Process", :product "Product", :equip "Equipment",
-            :state "System State", :search "Search" :nb "Notebook"})])
+               `[:li {:class "active"} [:a {:href ~(str "/sinet/" (name k))} ~v]]
+               `[:li                   [:a {:href ~(str "/sinet/" (name k))} ~v]]))
+           {:search "Search" :msg "Message Grammar", :console "Console"})])
 
 (defmacro app-page-wrapper
   "Wrap pages with stylesheet, start session, etc."
@@ -70,40 +65,39 @@
 ;;;; Ring handlers
 (defn landing-pg-handler [ring-req]
   (app-page-wrapper
-   {:tab :process}
+   {:tab :search}
    [:h1 "SINET System Identification from SCADA Messages / Steady-state Behaviour"]
    [:table {:style "width:100%"}
     [:tr
      [:td [:canvas {:id "best-pn"}]]
      [:td [:p [:strong "GP Control"]]
       [:p
-       [:button#btn1 {:type "button"} "chsk-send! (w/o reply)"]
-       [:button#btn2 {:type "button"} "Update PN"]]
+       #_[:div {:id "chunky-buttons"}
+        [:div {:class "chunky24"} [:a {:href "foo"} "My Chunky Button"]]]
+       [:button#btn1 {:type "button"} "chsk-send! (w/o reply)"]]
       [:p
-       [:button#btn3 {:type "button"} "Test rapid server>user async pushes"]
-       [:button#btn4 {:type "button"} "Toggle server>user async broadcast push loop"]]
+       [:button#pop+ {:type "button"} "View Pop +"]
+       [:button#pop- {:type "button"} "View Pop -"]]
       [:p
        [:button#btn5 {:type "button"} "Disconnect"]
        [:button#btn6 {:type "button"} "Reconnect"]]]]]
-   [:p [:strong "Console"]]
+   #_[:p [:strong "Console"]]
    [:textarea#output {:style "width: 100%; height: 200px;"}]
-   [:script {:src "js/main.js"}])) ; Include our cljs target. Must be at end of page.
+   [:script {:src "js/main.js"}] ; POD I tried placing these in the head. NG.
+   [:script {:type "text/javascript" :src "js/processing-1.4.8.js"}]))
 
-(defn login-handler
-  "Here's where you'll add your server-side login/auth procedure (Friend, etc.).
-  In our simplified example we'll just always successfully authenticate the user
-  with whatever user-id they provided in the auth request."
+(defn req-individual
+  "Push the requested individual to the client"
   [ring-req]
-  (let [{:keys [session params]} ring-req
-        {:keys [user-id]} params]
-    (debugf "Login request: %s" params)
-    {:status 200 :session (assoc session :uid user-id)}))
+  (reset! +diag+ ring-req))
+  
 
 (defroutes ring-routes
   (GET  "/"      ring-req (landing-pg-handler            ring-req))
   (GET  "/chsk"  ring-req (ring-ajax-get-or-ws-handshake ring-req))
   (POST "/chsk"  ring-req (ring-ajax-post                ring-req))
-  (POST "/login" ring-req (login-handler                 ring-req))
+;  (POST  "/View-Pop-Plus"   ring-req (req-individual     ring-req))
+;  (POST  "/View-Pop-Minus"  ring-req (req-individual     ring-req))
   (route/resources "/") ; Static files, notably public/main.js (our cljs target)
   (route/not-found "<h1>Page not found</h1>"))
 
@@ -115,31 +109,38 @@
   (ring.middleware.defaults/wrap-defaults
     ring-routes ring.middleware.defaults/site-defaults))
 
-;(server>user-push-pn (pnml/read-pnml "data/m2-inhib-bbs.xml" :rescale? true))
-(defn server>user-push-pn
-  "Push Petri net (with its geometry) to the user "
-  [pn]
-  (doseq [uid (:any @connected-uids)]
-    (chsk-send! uid [:sinet/new-pn pn])))
+;;;(server>gui-push-inv (nth @sinet/+pop+ 1))
+;;; POD So far, this one is just for debugging. 
+(defn server>gui-push-inv
+  "Push Petri net (with its geometry) to the GUI."
+  [inv]
+  (if-let [uid (-> @connected-uids :ws first)]
+    (chsk-send! uid [:sinet/new-pn (sinet/inv-geom inv)])
+    (infof "No uid when pushing PN to GUI.")))
+
+(defn server>gui-push-event
+  "Push an event (keyword) to the GUI"
+  [event-name]
+  (if-let [uid (-> @connected-uids :ws first)]
+    (chsk-send! uid [:sinet/event event-name])
+    (infof "No uid when pushing event notification to GUI.")))
 
 (defonce broadcast-enabled?_ (atom false)) ; POD was true
 
 ;;; Sente event handlers
 (defmulti -event-msg-handler
   "Multimethod to handle Sente `event-msg`s"
-  :id ; Dispatch on event-id
-  )
+  :id) ; Dispatch on event-id
 
 (defn event-msg-handler
   "Wraps `-event-msg-handler` with logging, error catching, etc."
   [{:as ev-msg :keys [id ?data event]}]
+  (infof "event-msg-handler: %s" ev-msg)
   (-event-msg-handler ev-msg) ; Handle event-msgs on a single thread
-  ;; (future (-event-msg-handler ev-msg)) ; Handle event-msgs on a thread pool
-  )
+  #_(future (-event-msg-handler ev-msg))) ; Handle event-msgs on a thread pool
 
-(def +diag+ (atom nil))
-
-(defmethod -event-msg-handler
+(declare random-pn) ; POD temporary
+(defmethod -event-msg-handler ; POD temporary
   :draw/new-pn
   [{:as ev-msg :keys [event id ?data ring-req ?reply-fn send-fn]}]
   (let [session (:session ring-req)
@@ -148,6 +149,13 @@
                     :ring-req ring-req :?reply-fn ?reply-fn :send-fn send-fn})
     (when ?reply-fn
       (?reply-fn (random-pn)))))
+
+(defmethod -event-msg-handler
+  :draw/get-individual
+  [{:as ev-msg :keys [?data ?reply-fn]}]
+  (infof "Send individual %s" ?data)
+  (when ?reply-fn
+    (?reply-fn (-> (nth @sinet/+pop+ (:id ?data)) sinet/inv-geom))))
 
 (defmethod -event-msg-handler
   :default ; Default/fallback case (no other matching handler)
@@ -159,11 +167,6 @@
     (debugf "Unhandled event: %s" event)
     (when ?reply-fn
       (?reply-fn {:umatched-event-as-echoed-from-from-server event}))))
-
-(defmethod -event-msg-handler :example/toggle-broadcast
-  [{:as ev-msg :keys [?reply-fn]}]
-  (let [loop-enabled? (swap! broadcast-enabled?_ not)]
-    (?reply-fn loop-enabled?)))
 
 ;; TODO Add your (defmethod -event-msg-handler <event-id> [ev-msg] <body>)s here...
 
@@ -200,20 +203,13 @@
 
 (defn -main "For `lein run`, etc." [] (start!))
 
-#_(comment
-  (start!)
-  (test-fast-server>user-pushes))
-
-;;; Drawing stuff ========================================
+;;; Drawing stuff (temporary)  ========================================
 
 ;;; 14 files
 (defn show-n [n] 
-  (server>user-push-pn 
-   (pnml/read-pnml (str "/Users/pdenno/Documents/git/spntools/data/" 
-                        (nth pnml/files n))
-                   :rescale? true)))
+  (server>gui-push-inv 
+   (pnml/read-pnml (str "/Users/pdenno/Documents/git/spntools/data/" (nth pnml/files n)))))
 
 (defn random-pn []
   (pnml/read-pnml (str "/Users/pdenno/Documents/git/spntools/data/" 
-                       (nth pnml/files (rand-int 14)))
-                  :rescale? true))
+                       (nth pnml/files (rand-int 14)))))
