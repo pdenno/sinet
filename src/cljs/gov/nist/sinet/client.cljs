@@ -25,27 +25,45 @@
 (->output! "ClojureScript appears to have loaded correctly.")
 
 ;;; Define our Sente channel socket (chsk) client
-(let [;; For this example, select a random protocol:
-      rand-chsk-type :auto ; (if (>= (rand) 0.5) :ajax :auto) ; POD :auto = ws, I think!
-      _ (->output! "Randomly selected chsk type: %s" rand-chsk-type)
-      ;; Serializtion format, must use same val for client + server:
-      packer :edn ; Default packer, a good choice in most cases
-      ;; (sente-transit/get-transit-packer) ; Needs Transit dep
-      {:keys [chsk ch-recv send-fn state]}
+#_(let [{:keys [chsk ch-recv send-fn state]}
       (sente/make-channel-socket-client!
-        "/chsk" ; Must match server Ring routing URL
-        {:type   rand-chsk-type
-         :packer packer})]
+       "/chsk" ; Must match server Ring routing URL
+       {:type :auto  ; POD :auto = websocket if possible, I think!
+        :packer :edn ; Default packer, used for client & server.
+        :ws-kalive-ms 50000})] ; POD added, and I'm guessing.
   (def chsk       chsk)
   (def ch-chsk    ch-recv) ; ChannelSocket's receive channel
   (def chsk-send! send-fn) ; ChannelSocket's send API fn
   (def chsk-state state)   ; Watchable, read-only atom
   )
 
-;;;; Sente event handlers
-(defmulti -event-msg-handler
-  "Multimethod to handle Sente `event-msg`s"
-  :id) ; Dispatch on event-id
+(let [;; For this example, select a random protocol:
+      rand-chsk-type :auto ;(if (>= (rand) 0.5) :ajax :auto)
+      _ (->output! "Randomly selected chsk type: %s" rand-chsk-type)
+
+      ;; Serializtion format, must use same val for client + server:
+      packer :edn ; Default packer, a good choice in most cases
+      ;; (sente-transit/get-transit-packer) ; Needs Transit dep
+
+      {:keys [chsk ch-recv send-fn state]}
+      (sente/make-channel-socket-client!
+        "/chsk" ; Must match server Ring routing URL
+        {:type   rand-chsk-type
+         :packer packer})]
+
+  (def chsk       chsk)
+  (def ch-chsk    ch-recv) ; ChannelSocket's receive channel
+  (def chsk-send! send-fn) ; ChannelSocket's send API fn
+  (def chsk-state state)   ; Watchable, read-only atom
+  )
+
+
+; Dispatch on event-id
+(defn- -event-msg-handler-dispatch [event]
+  (or (:id event) :default))
+
+;;; Sente event handlers
+(defmulti -event-msg-handler #'-event-msg-handler-dispatch)
 
 (defn event-msg-handler
   "Wraps `-event-msg-handler` with logging, error catching, etc."
@@ -93,34 +111,39 @@
       ch-chsk event-msg-handler)))
 
 ;;; UI events
-(when-let [target-el (.getElementById js/document "btn1")]
+#_(when-let [target-el (.getElementById js/document "btn1")]
   (.addEventListener target-el "click"
     (fn [ev]
       (->output! "Button 1 was clicked (won't receive any reply from server)")
       (chsk-send! [:example/button1 {:had-a-callback? "nope"}]))))
 
-(def viewing-inv "What individual is displayed" (atom -1))
+(when-let [target-el (.getElementById js/document "btn1")]
+  (.addEventListener target-el "click"
+    (fn [ev]
+      (->output! "Button 1 was clicked (will receive reply from server)")
+      (chsk-send! [:example/button1 {:had-a-callback? "indeed"}] 5000
+        (fn [cb-reply] (->output! "Callback reply: %s" cb-reply))))))
+
+(def viewing-pn "What PN is displayed" (atom -1))
 
 (when-let [target-el (.getElementById js/document "pop+")]
   (.addEventListener target-el "click"
     (fn [ev]
-      (reset! +diag+ ev)                   
       (->output! "pop+ button was clicked (get-individual-plus)")
-      (chsk-send! [:draw/get-individual {:id (swap! viewing-inv inc)}]
-                  5000
-                  (fn [cb-reply]
-                    (->output! "Received this: %s" cb-reply)
-                    (reset! gov.nist.sinet.util.draw/+display-pn+ (:pn cb-reply)))))))
+      (chsk-send! [:sinet/get-individual {:id (swap! viewing-pn inc)}] 5000
+        (fn [cb-reply]
+          (->output! "Received PN %s." @viewing-pn)
+          (reset! +diag+ cb-reply)
+          (reset! gov.nist.sinet.util.draw/+display-pn+ cb-reply))))))
 
 (when-let [target-el (.getElementById js/document "pop-")]
     (.addEventListener target-el "click"
     (fn [ev]
       (->output! "pop- button was clicked (get-individual-minus)")
-      (chsk-send! [:draw/get-individual {:id (swap! viewing-inv dec)}]
-                  5000
-                  (fn [cb-reply]
-                    (->output! "Received this: %s" cb-reply)
-                    (reset! gov.nist.sinet.util.draw/+display-pn+ (:pn cb-reply)))))))
+      (chsk-send! [:sinet/get-individual {:id (swap! viewing-pn dec)}] 5000
+        (fn [cb-reply]
+          (->output! "Received PN %s." @viewing-pn)                    
+          (reset! gov.nist.sinet.util.draw/+display-pn+ cb-reply))))))
 
 (when-let [target-el (.getElementById js/document "btn5")]
   (.addEventListener target-el "click"
@@ -142,7 +165,7 @@
 (quil/defsketch best-pn ;cljs :features [:resizable :keep-on-top]
   :host "best-pn"
   :title "Best Individual"
-  :settings #(fn [] (quil/smooth 2) #_(quil/scale 2)) ; Smooth=2 is typical 
+  :settings #(fn [] (quil/smooth 2) (quil/pixel-density 2) #_(quil/scale 2)) ; Smooth=2 is typical 
   :setup draw/setup-pn
   :draw draw/draw-pn
   :size [900 500]) ; POD This is used in pnml/rescale. I need a solution for getting it here!

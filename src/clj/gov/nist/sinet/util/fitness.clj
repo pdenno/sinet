@@ -171,10 +171,6 @@
 
 (def qpn-warm-up "Ignore this number of tokens on both ends of the log." 20)
 
-;;; POD temporary for testing
-(load-file "data/test-individuals/test-m2-bas.clj") ; defines test-m2-bas
-
-
 ;;; +1 for every precedence constraint violated. 
 ;;; Will need something more for loops, but we'll get to that later.
 (defn calc-process-disorder

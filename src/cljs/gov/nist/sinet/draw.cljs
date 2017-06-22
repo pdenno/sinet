@@ -4,8 +4,7 @@
   (:require [quil.core :as quil :include-macros true]
             [quil.middleware :as qm]
             [medley.core :refer (abs)]
-            [cljs.pprint :refer (pprint)]
-            #_[gov.nist.sinet.util.client :refer (->output!)]))
+            [cljs.pprint :refer (pprint)]))
   
 ;;; ToDo: - Prevent coincident lines. (Example in m2-j2-bas.xml)
 ;;;       - Find a way that labels can get focus despite their proximity to objects.

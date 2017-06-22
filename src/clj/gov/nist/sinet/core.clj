@@ -3,6 +3,7 @@
   {:author "Peter Denno"}
   (:require [gov.nist.sinet.util.fitness :as fit :refer (workflow-fitness)]
             [gov.nist.sinet.util.server :as svr]
+            [gov.nist.sinet.util.utils :refer :all]
             [medley.core :refer (abs)]
             [clojure.pprint :refer (cl-format pprint)]
             [gov.nist.spntools.core :as pn :refer :all]
@@ -140,27 +141,6 @@
                              :label-y-off 15}))
                    {}
                    elems))))
-
-(def +edens+ (atom nil))
-
-(defn inv-geom
-  "Compute reasonable display placement (:geom) for the argument individual."
-  [inv]
-  (if (contains? (:pn inv) :geom)
-    inv
-    (let [from (-> inv :history first)
-          elems (into (set (-> inv :pn :places)) (-> inv :pn :transitions))]
-      (as-> inv ?inv
-        (assoc-in ?inv [:pn :geom] (-> (some #(when (= (:id %) from) %) @+edens+) :pn :geom))
-        (reduce (fn [inv ename]
-                  (assoc-in [inv :geom ename]
-                            {:x (+ 15 (rand-int 100))
-                             :y (+ 15 (rand-int 100))
-                             :label-x-off 10
-                             :label-y-off 15}))
-                ?inv
-                (clojure.set/difference elems (set (keys (-> inv :pn :geom)))))
-        (update-in ?inv [:pn] pnml/rescale)))))
 
 (defn eden-pns!
   [problem]
@@ -407,7 +387,7 @@
   (pnu/reset-ids! {})
   (reset! +log+ []))
 
-(declare validate-gp-params report-gen make-next-gen write-gen +pop+)
+(declare validate-gp-params report-gen make-next-gen write-gen)
 
 (defn evolve
   "Starting with a random population, sort, select, check for a solution and
@@ -618,5 +598,5 @@
 (.addMethod clojure.pprint/simple-dispatch Inv (fn [p] (print-inv p *out*)))
 
 ;;; (ns-unmap 'gov.nist.sinet.core '+pop+)
-;;; Load the default problem.
-(defonce +pop+ (atom (initial-pop +problem+)))
+;;; Load the default problem. (not defonce....)
+(when-not @+pop+ (reset! +pop+ (initial-pop +problem+)))

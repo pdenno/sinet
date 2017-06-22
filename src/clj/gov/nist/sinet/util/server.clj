@@ -13,18 +13,17 @@
    [org.httpkit.server :as http-kit]
    [taoensso.sente.server-adapters.http-kit :refer (get-sch-adapter)]
 
+   [gov.nist.sinet.util.utils :refer :all]
    [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp)]
    [gov.nist.spntools.util.pnml :as pnml :refer (read-pnml)]))
 
-(alias 'sinet 'gov.nist.sinet.core)
-
 (def +diag+ (atom nil))
 
-(timbre/set-level! :info) ; Uncomment for more logging
+(timbre/set-level! :debug) ; Uncomment for more logging
 ;(reset! sente/debug-mode?_ true) ; Uncomment for extra debug info
 
 ;;;; Define our Sente channel socket (chsk) server
-(let [packer :edn ; Default packer, a good choice in most cases
+#_(let [packer :edn ; Default packer, a good choice in most cases
       chsk-server (sente/make-channel-socket-server!
                    (get-sch-adapter) {:packer packer})
       {:keys [ch-recv send-fn connected-uids
@@ -35,6 +34,26 @@
   (def ch-chsk                       ch-recv) ; ChannelSocket's receive channel
   (def chsk-send!                    send-fn) ; ChannelSocket's send API fn
   (def connected-uids                connected-uids)) ; Watchable, read-only atom
+
+(let [;; Serializtion format, must use same val for client + server:
+      packer :edn ; Default packer, a good choice in most cases
+      ;; (sente-transit/get-transit-packer) ; Needs Transit dep
+
+      chsk-server
+      (sente/make-channel-socket-server!
+       (get-sch-adapter) {:packer packer})
+
+      {:keys [ch-recv send-fn connected-uids
+              ajax-post-fn ajax-get-or-ws-handshake-fn]}
+      chsk-server]
+
+  (def ring-ajax-post                ajax-post-fn)
+  (def ring-ajax-get-or-ws-handshake ajax-get-or-ws-handshake-fn)
+  (def ch-chsk                       ch-recv) ; ChannelSocket's receive channel
+  (def chsk-send!                    send-fn) ; ChannelSocket's send API fn
+  (def connected-uids                connected-uids) ; Watchable, read-only atom
+  )
+
 
 ;; We can watch this atom for changes if we like
 (add-watch connected-uids :connected-uids
@@ -84,20 +103,17 @@
    #_[:p [:strong "Console"]]
    [:textarea#output {:style "width: 100%; height: 200px;"}]
    [:script {:src "js/main.js"}] ; POD I tried placing these in the head. NG.
-   [:script {:type "text/javascript" :src "js/processing-1.4.8.js"}]))
+   [:script {:type "text/javascript" :src "js/processing.js"}]))
 
 (defn req-individual
   "Push the requested individual to the client"
   [ring-req]
   (reset! +diag+ ring-req))
-  
 
 (defroutes ring-routes
   (GET  "/"      ring-req (landing-pg-handler            ring-req))
-  (GET  "/chsk"  ring-req (ring-ajax-get-or-ws-handshake ring-req))
-  (POST "/chsk"  ring-req (ring-ajax-post                ring-req))
-;  (POST  "/View-Pop-Plus"   ring-req (req-individual     ring-req))
-;  (POST  "/View-Pop-Minus"  ring-req (req-individual     ring-req))
+  (GET  "/chsk"  ring-req (ring-ajax-get-or-ws-handshake ring-req)) ; POD These are essential; part of how...
+  (POST "/chsk"  ring-req (ring-ajax-post                ring-req)) ; ...the protocol works. 
   (route/resources "/") ; Static files, notably public/main.js (our cljs target)
   (route/not-found "<h1>Page not found</h1>"))
 
@@ -109,13 +125,13 @@
   (ring.middleware.defaults/wrap-defaults
     ring-routes ring.middleware.defaults/site-defaults))
 
-;;;(server>gui-push-inv (nth @sinet/+pop+ 1))
+;;;(server>gui-push-inv (nth @+pop+ 1))
 ;;; POD So far, this one is just for debugging. 
 (defn server>gui-push-inv
   "Push Petri net (with its geometry) to the GUI."
   [inv]
   (if-let [uid (-> @connected-uids :ws first)]
-    (chsk-send! uid [:sinet/new-pn (sinet/inv-geom inv)])
+    (chsk-send! uid [:sinet/new-pn (inv-geom inv)])
     (infof "No uid when pushing PN to GUI.")))
 
 (defn server>gui-push-event
@@ -127,15 +143,23 @@
 
 (defonce broadcast-enabled?_ (atom false)) ; POD was true
 
-;;; Sente event handlers
-(defmulti -event-msg-handler
-  "Multimethod to handle Sente `event-msg`s"
-  :id) ; Dispatch on event-id
+; Dispatch on event-id
+#_(defn- -event-msg-handler-dispatch [event]
+  (println "dispatch, event id = " (:id event))
+    (:id event))
 
+(defmulti -event-msg-handler
+;;;  "Multimethod to handle Sente `event-msg`s"
+ :id ; Dispatch on event-id
+ )
+
+;;; Sente event handlers
+#_(defmulti -event-msg-handler #'-event-msg-handler-dispatch)
+  
 (defn event-msg-handler
   "Wraps `-event-msg-handler` with logging, error catching, etc."
   [{:as ev-msg :keys [id ?data event]}]
-  (infof "event-msg-handler: %s" ev-msg)
+;  (infof "event-msg-handler: %s" ev-msg) ;; This one will print a lot and often!
   (-event-msg-handler ev-msg) ; Handle event-msgs on a single thread
   #_(future (-event-msg-handler ev-msg))) ; Handle event-msgs on a thread pool
 
@@ -145,17 +169,28 @@
   [{:as ev-msg :keys [event id ?data ring-req ?reply-fn send-fn]}]
   (let [session (:session ring-req)
         uid     (:uid     session)]
-    (reset! +diag+ {:from :draw/new-pn :event event :id id :?data ?data
-                    :ring-req ring-req :?reply-fn ?reply-fn :send-fn send-fn})
     (when ?reply-fn
       (?reply-fn (random-pn)))))
 
 (defmethod -event-msg-handler
-  :draw/get-individual
-  [{:as ev-msg :keys [?data ?reply-fn]}]
-  (infof "Send individual %s" ?data)
-  (when ?reply-fn
-    (?reply-fn (-> (nth @sinet/+pop+ (:id ?data)) sinet/inv-geom))))
+  :example/button1 ; POD added
+  [{:as ev-msg :keys [event id ?data ring-req ?reply-fn send-fn]}]
+  (let [session (:session ring-req)
+        uid     (:uid     session)]
+    (debugf "POD Now handled: %s" event)
+    (when ?reply-fn
+      (?reply-fn {:yes-handeled event}))))
+
+(defmethod -event-msg-handler
+  :sinet/get-individual
+  [{:as ev-msg :keys [event id ?data ring-req ?reply-fn send-fn]}]
+  (let [session (:session ring-req)
+        uid     (:uid     session)
+        pn-id   (:id ?data)]
+    (debugf "get-individual: %s" pn-id)
+    (when ?reply-fn
+      (when (and (>= pn-id 0) (< pn-id (count @+pop+)))
+        (?reply-fn (-> (nth @+pop+ (:id ?data)) inv-geom :pn))))))
 
 (defmethod -event-msg-handler
   :default ; Default/fallback case (no other matching handler)
@@ -200,6 +235,7 @@
 
 (defn stop!  []  (stop-router!)  (stop-web-server!))
 (defn start! [] (start-router!) (start-web-server!) #_(start-example-broadcaster!))
+(defn restart! [] (stop!) (start!))
 
 (defn -main "For `lein run`, etc." [] (start!))
 
