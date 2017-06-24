@@ -19,7 +19,7 @@
 
 (def +diag+ (atom nil))
 
-(timbre/set-level! :debug) ; Uncomment for more logging
+(timbre/set-level! :info) ; Uncomment for more logging
 ;(reset! sente/debug-mode?_ true) ; Uncomment for extra debug info
 
 ;;;; Define our Sente channel socket (chsk) server
@@ -144,22 +144,17 @@
 (defonce broadcast-enabled?_ (atom false)) ; POD was true
 
 ; Dispatch on event-id
-#_(defn- -event-msg-handler-dispatch [event]
-  (println "dispatch, event id = " (:id event))
-    (:id event))
-
-(defmulti -event-msg-handler
-;;;  "Multimethod to handle Sente `event-msg`s"
- :id ; Dispatch on event-id
- )
+(defn- -event-msg-handler-dispatch [event]
+  (when-not (= (:id event) :chsk/ws-ping)
+    (println "dispatch, event id =" (:id event)))
+  (:id event))
 
 ;;; Sente event handlers
-#_(defmulti -event-msg-handler #'-event-msg-handler-dispatch)
+(defmulti -event-msg-handler #'-event-msg-handler-dispatch)
   
 (defn event-msg-handler
   "Wraps `-event-msg-handler` with logging, error catching, etc."
   [{:as ev-msg :keys [id ?data event]}]
-;  (infof "event-msg-handler: %s" ev-msg) ;; This one will print a lot and often!
   (-event-msg-handler ev-msg) ; Handle event-msgs on a single thread
   #_(future (-event-msg-handler ev-msg))) ; Handle event-msgs on a thread pool
 

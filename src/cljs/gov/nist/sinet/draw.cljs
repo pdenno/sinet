@@ -36,7 +36,10 @@
 (def +lock-mouse-on+ (atom nil))
 (def +display-pn+ (atom nil))
 
-(declare rotate)
+(defn rotate [x y theta]
+  "Rotate (x,y) theta radians about origin."
+  {:x (double (- (* (Math/cos theta) x) (* (Math/sin theta) y)))
+   :y (double (+ (* (Math/sin theta) x) (* (Math/cos theta) y)))}) 
 
 ;;;   8----7----6----2----3----4----5
 ;;;   |                             |
@@ -262,11 +265,6 @@
               (and (<= xr 0) (>= yr 0)) (Math/acos xr)
               :else  (- (* 2.0 Math/PI) (Math/acos xr)))))))
 
-(defn rotate [x y theta]
-  "Rotate (x,y) theta radians about origin."
-  {:x (double (- (* (Math/cos theta) x) (* (Math/sin theta) y)))
-   :y (double (+ (* (Math/sin theta) x) (* (Math/cos theta) y)))}) 
-
 (defn pt-from-head
   "Return a point d units beyond (or within, if negative) the line segment."
   [x1 y1 x2 y2 d]
@@ -336,21 +334,19 @@
             taken (vals taken-map)
             not-taken? (fn [n] (or (= n (arc taken-map)) ; take by me
                                    (not (some #(= n %) taken))))
-            slope (Math/abs (double (/ (- cy ty) (max (- cx tx) 0.00001))))
+            y-diff (Math/abs (double (/ (- cy ty))))
+            zippy (when (and (= place :m2-busy) (= trans :m1-complete-job))
+                    (reset! +diag+ {:y-diff  y-diff}))
             ;; at this point candidates is a MAP INDEX BY AN INTEGER position See also gfn.
             candidates (basic-candidates D top-showing? left-showing?)
             candidates (remove (fn [c] (some #(= (first c) %) taken)) candidates)
             candidates (sort (fn [[_ d1] [_ d2]] (< d1 d2)) candidates)
             best (cond (empty? candidates) closest
-                       (and (< slope 0.3) left-showing? (not-taken? 1)) (gfn 1) 
-                       (and (< slope 0.3) (not-taken? 0)) (gfn 0)
+                       (and (< y-diff 5) left-showing? (not-taken? 1)) (gfn 1) 
+                       (and (< y-diff 5) (not-taken? 0)) (gfn 0)
                        (and +trans-prefer-center?+ top-showing? (not-taken? 2)) (gfn 2)
                        (and +trans-prefer-center?+ (not-taken? 9)) (gfn 9)
                        :else (first candidates))]
-        (when (and (= place :m1-blocked) (= trans :m1-complete-job))
-          (reset! +diag+ {:arc arc :top-showing? top-showing? :D D :taken-map taken-map
-                          :t-connects t-connects :cx cx :cy cy
-                          :best best :candidates candidates}))
         (if (and me-now? (< (Math/abs (- (get D me-now?) (get D (first best)))) 3))
           {:pt (nth t-connects me-now?) :take me-now?} ; Don't change. Prevent jitter.
           {:pt (nth t-connects (first best)) :take (first best)})))))

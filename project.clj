@@ -10,7 +10,7 @@
                  [com.cemerick/piggieback   "0.2.2"] ; sente exlusions https://github.com/ptaoussanis/sente/issues/277
                  [com.taoensso/sente        "1.11.0" :exclusions [com.taoensso/encore]]
                  [com.taoensso/timbre       "4.10.0" :exclusions [com.taoensso/encore]]
-                 [com.taoensso/encore       "2.87.0"] ; 2.91.1 is modern but 2.87.0 for issue 277
+                 [com.taoensso/encore       "2.91.1"] ; 2.91.1 is modern but 2.87.0 for issue 277 -- NG
                  [http-kit                  "2.2.0"]
                  [ring                      "1.6.1"]
                  [ring/ring-defaults        "0.3.0"]
