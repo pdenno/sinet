@@ -39,6 +39,7 @@
   "Genetic programming algorithm parameters: they control important aspects of the solution."
   {:pn-elements [:place :token :normal-arc :inhibitor-arc :expo-trans #_:immediate-trans #_:fixed-trans]
    :pop-size 100
+   :eden-mutations 5
    :max-gens 40
    :debugging? true
    :pn-k-bounded  10      ; When to give up on computing the reachability graph.
@@ -344,18 +345,83 @@
 
 (def +old-pop+ "diagnostic" (atom []))
 
+(defn flow-balance
+  "Compute the difference tokens-out minus tokens in."
+  [pn trans]
+  (- (reduce (fn [sum arc] (+ sum (:multiplicity arc)))
+             0
+             (pnu/arcs-outof pn trans))
+     (reduce (fn [sum arc] (+ sum (:multiplicity arc)))
+             0
+             (remove #(= (:type %) :inhibitor) (pnu/arcs-into pn trans)))))
+
+;;; POD This will need to be more sophisticated when there is colour.
+;;; NB It matters on what arc you add tokens, but it doesn't matter on which you :elim them.
+(defn random-intro
+  "Define a 'random plan' (a map) to :intro CNT tokens to the outbound arcs of the trans."
+  [pn trans cnt]
+  (let [arcs (map :name (pnu/arcs-outof pn trans))
+        narcs (count arcs)]
+    (reduce (fn [tally _] (update-in tally [(nth arcs (rand-int narcs))] inc))
+            (zipmap arcs (repeat narcs 0))
+            (range cnt))))
+
+(defn add-scada-report-fns [inv]
+  "Add SCADA report functions to transitions."
+  (update-in
+   inv [:pn :transitions]
+   (fn [all]
+     (vec (map (fn [tr] (assoc tr :fn `(fn [tkns] {:act ~(:name tr) :tkns tkns}))) all)))))
+
+;;; POD This (and one for trans and place) belong in pnu/
+(defn arc-index
+  "Return the index of the named arc in pn. (For use with assoc-in, update-in, etc."
+  [pn name]
+  (loop [n 0
+         arcs (:arcs pn)]
+    (if (= name (:name (first arcs)))
+      n
+      (recur (inc n) (next arcs)))))
+
+(defn add-color-binding [inv]
+  "Add color binding to arcs. To address imbalance, add :elim acts and (randomly) add :intro acts."
+    (assoc-in
+     inv [:pn :arcs]
+     (:arcs
+      (reduce
+       (fn [pn trans]
+         (let [arcs (map :name (into (pnu/arcs-into pn trans) (pnu/arcs-outof pn trans)))
+               diff (flow-balance pn trans)]
+           (as-> pn ?pn
+             (reduce (fn [pn arc] (assoc-in pn [:arcs (arc-index pn arc) :bind] {:color :blue})) ?pn arcs)
+             (cond (< diff 0) ; if < 0, arbitrary (first) removes tkns.
+                   (update-in ?pn [:arcs 0 :bind]
+                              #(-> % (assoc :act :remove) (assoc :cnt (Math/abs diff))))
+                   (> diff 0) ; add diff tokens somewhere randomly.
+                   (let [intro-plan (random-intro ?pn trans diff)]
+                     (reduce (fn [pn arc]
+                               (update-in pn [:arcs (arc-index pn arc) :bind]
+                                          #(-> % (assoc :act :intro) (assoc :cnt (arc intro-plan)))))
+                             ?pn
+                             (map :name (pnu/arcs-outof ?pn trans))))
+                   :else ?pn))))
+       (:pn inv)
+       (map :name (-> inv :pn :transitions))))))
 
 (defn initial-pop [problem]
   (let [edens (eden-pns! problem)
         pop-cnt (atom -1)]
     (vec (repeatedly
           (:pop-size +gp-params+)
-          #(reduce (fn [i _] (mutate i :force (rand-mute-key (:eden-dist +gp-params+))))
-                   (let [random-eden (nth edens (rand-int (count edens)))]
-                     (map->Inv {:pn (:pn random-eden)
+          #(as-> (nth edens (rand-int (count edens))) ?inv
+             (reduce (fn [inv _]
+                       (mutate inv :force (rand-mute-key (:eden-dist +gp-params+))))
+                     (map->Inv {:pn (:pn ?inv)
                                 :id (swap! pop-cnt inc)
-                                :history [(:id random-eden)]}))
-                   (range 5))))))
+                                :history [(:id ?inv)]})
+                     (range (:eden-mutations +gp-params+)))
+             (add-scada-report-fns ?inv)
+             (add-colol-binding ?inv)))))) 
 
 ;;; POD -- really should normalize values!
 (defn i-error [inv]
@@ -390,8 +456,8 @@
 (declare validate-gp-params report-gen make-next-gen write-gen)
 
 (defn evolve
-  "Starting with a random population, sort, select, check for a solution and
-   produce a new population."
+  "Toplevel: Starting with a random population (create one if given just one arg), 
+   sort, select, check for a solution and produce a new population."
   ([problem] (evolve problem (-> problem initial-pop)))
   ([problem popu]
    (reset-all!)

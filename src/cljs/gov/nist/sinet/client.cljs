@@ -132,7 +132,7 @@
       (->output! "pop+ button was clicked (get-individual-plus)")
       (chsk-send! [:sinet/get-individual {:id (swap! viewing-pn inc)}] 5000
         (fn [cb-reply]
-          (->output! "Received PN %s = %s." @viewing-pn cb-reply)
+          (->output! "Received PN %s." @viewing-pn)
           (reset! +diag+ cb-reply)
           (reset! gov.nist.sinet.util.draw/+display-pn+ cb-reply))))))
 
@@ -168,4 +168,5 @@
   :settings #(fn [] (quil/smooth 2) #_(quil/scale 2)) ; Smooth=2 is typical. Can't use pixel-density with js.
   :setup draw/setup-pn
   :draw draw/draw-pn
+  :mouse-wheel draw/pn-wheel-fn
   :size [900 500]) ; POD This is used in pnml/rescale. I need a solution for getting it here!

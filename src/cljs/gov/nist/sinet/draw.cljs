@@ -6,10 +6,20 @@
             [medley.core :refer (abs)]
             [cljs.pprint :refer (pprint)]))
   
-;;; ToDo: 
-
+;;; ToDo: Replace pn-trans-point: review everything on the trans and distribute
+;;;       so that things are on the correct side, not overlapping, spaced nicely
   
 ;;;================== Stuff borrowed from pnu (not cljs)  ========================
+(defn ppp []
+  (binding [cljs.pprint/*print-right-margin* 140]
+    (pprint *1)))
+
+(defn ppprint [arg]
+  (binding [cljs.pprint/*print-right-margin* 140]
+    (pprint arg)))
+
+(defn transition? [obj] (:tid obj))
+
 (defn name2obj
   [pn name]
   (or 
@@ -31,10 +41,11 @@
 (def +trans-prefer-center?+ true)
 (def +token-dia+ 4)
 (def +inhibit-dia+ 10)
-(def +arrowhead-length+ 15)
+(def +arrowhead-length+ 12)
 (def +arrowhead-angle+ "zero is on the shaft" (/ Math/PI 8.0))
 (def +lock-mouse-on+ (atom nil))
-(def +display-pn+ (atom nil))
+(def +hilite-elem+ (atom nil))
+(defonce +display-pn+ (atom nil))
 
 (defn rotate [x y theta]
   "Rotate (x,y) theta radians about origin."
@@ -53,7 +64,7 @@
         th (/ +trans-height+ 2.0)
         p3 (* 0.3333333 tw)
         p4 (* 0.6666666 tw)
-        p5 (* 0.8555555 tw) ; Not quite as drawn above. This looks better. 
+        p5 (* 0.9500000 tw) 
         srotate (fn [x y theta] (vec (map #(Math/round %) (vals (rotate x y theta)))))
         ;; These are in window coordinates (0, 0 is upper left)
         base [[tw 0.0] [(- tw) 0.0]
@@ -73,7 +84,7 @@
 
 (declare nearest-elem ref-points draw-elem draw-arc draw-tokens)
 (declare arc-coords-trans-to-place! arrowhead-coords pt-from-head)
-(declare angle distance highlight-elem! handle-move!)
+(declare angle distance hilite-elem! handle-move! rotate-trans!)
 
 (defn draw-pn []
   (when-let [pn @+display-pn+]
@@ -81,7 +92,7 @@
     (q/stroke 0) ; black
     (q/fill 255) ; white
     (q/stroke-weight 1)
-    (highlight-elem! pn)
+    (hilite-elem! pn)
     (if (q/mouse-pressed?)
       (handle-move!)
       (reset! +lock-mouse-on+ nil))
@@ -111,15 +122,15 @@
             (assoc-in ?pn [:geom n :x] (q/mouse-x))
             (assoc-in ?pn [:geom n :y] (q/mouse-y))))))))
 
-(def +highlight-elem+ (atom nil))
-(defn highlight-elem!
+
+(defn hilite-elem!
   "Set +hilight-elem+ and maybe +lock-mouse-on+."
   [pn]
   (let [nearest (or @+lock-mouse-on+ (nearest-elem pn [(q/mouse-x) (q/mouse-y)]))]
     (when (and nearest (q/mouse-pressed?)) (reset! +lock-mouse-on+ nearest))
     (if nearest
-      (reset! +highlight-elem+ nearest)
-      (reset! +highlight-elem+ nil))))
+      (reset! +hilite-elem+ nearest)
+      (reset! +hilite-elem+ nil))))
 
 (defn nearest-elem
   "Return a element (place/trans) map indicating what was closest to the mouse.
@@ -165,7 +176,7 @@
   (let [n (:name elem)
         x (-> pn :geom n :x)
         y (-> pn :geom n :y)
-        hilite @+highlight-elem+]
+        hilite @+hilite-elem+]
     (q/fill (if (and (= n (:name hilite)) (:label? hilite)) (q/color 255 0 0) 0))
     (q/text (name n)
             (+ x (-> pn :geom n :label-x-off))
@@ -334,20 +345,26 @@
             taken (vals taken-map)
             not-taken? (fn [n] (or (= n (arc taken-map)) ; take by me
                                    (not (some #(= n %) taken))))
-            y-diff (Math/abs (double (/ (- cy ty))))
-            zippy (when (and (= place :m2-busy) (= trans :m1-complete-job))
-                    (reset! +diag+ {:y-diff  y-diff}))
+            y-diff (Math/abs (double (- cy ty)))
             ;; at this point candidates is a MAP INDEX BY AN INTEGER position See also gfn.
             candidates (basic-candidates D top-showing? left-showing?)
             candidates (remove (fn [c] (some #(= (first c) %) taken)) candidates)
             candidates (sort (fn [[_ d1] [_ d2]] (< d1 d2)) candidates)
+            #_zippy #_(when (and (= place :Place-22) (= trans :m1-start-job) (= arc :aa-76))
+                    (reset! +diag+ {:place place :trans trans :arc arc
+                                    :top-showing? top-showing?
+                                    :me-now? me-now?
+                                    :left-showing? left-showing?
+                                    :first-candidate (first candidates)
+                                    :taken-map taken-map
+                                    :y-diff y-diff :cy cy :ty ty}))
             best (cond (empty? candidates) closest
                        (and (< y-diff 5) left-showing? (not-taken? 1)) (gfn 1) 
                        (and (< y-diff 5) (not-taken? 0)) (gfn 0)
                        (and +trans-prefer-center?+ top-showing? (not-taken? 2)) (gfn 2)
-                       (and +trans-prefer-center?+ (not-taken? 9)) (gfn 9)
-                       :else (first candidates))]
-        (if (and me-now? (< (Math/abs (- (get D me-now?) (get D (first best)))) 3))
+                       (and +trans-prefer-center?+ (not top-showing?) (not-taken? 9)) (gfn 9)
+                       :else (first candidates))] ; POD 8 below for jitter is sensitive to trans size
+        (if (and me-now? (< (Math/abs (- (get D me-now?) (get D (first best)))) 8)) 
           {:pt (nth t-connects me-now?) :take me-now?} ; Don't change. Prevent jitter.
           {:pt (nth t-connects (first best)) :take (first best)})))))
 
@@ -396,7 +413,7 @@
 
 (defn pn-wheel-fn
   [_]
-  (when-let [hilite @+highlight-elem+]
+  (when-let [hilite @+hilite-elem+]
     (when (contains? hilite :tid)
       (when (> (- (.getTime (js/Date.)) @last-rot) 250)
         (reset! last-rot (.getTime (js/Date.)))
@@ -408,4 +425,5 @@
                                    (= 1 (:rotate %)) (assoc % :rotate 2),
                                    (= 2 (:rotate %)) (assoc % :rotate 3),
                                    :else (dissoc % :rotate)))))))))
+
 
