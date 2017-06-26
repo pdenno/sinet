@@ -366,12 +366,22 @@
             (zipmap arcs (repeat narcs 0))
             (range cnt))))
 
+(defn pick-from-atom!
+  [atom]
+  (let [picked (nth @atom (rand-int (count @atom)))]
+    (swap! atom (fn [a] (remove #(= picked %) a)))
+    picked))
+
 (defn add-scada-report-fns [inv]
-  "Add SCADA report functions to transitions."
-  (update-in
-   inv [:pn :transitions]
-   (fn [all]
-     (vec (map (fn [tr] (assoc tr :fn `(fn [tkns] {:act ~(:name tr) :tkns tkns}))) all)))))
+  "Randomly add SCADA report functions to transitions."
+  (let [report-fn (fn [name] (fn [tkns] {:act name :tkns tkns}))
+        events-left (atom (:scada-events +problem+))
+        trans-left (atom (range (count (-> inv :pn :transitions))))]
+    (reduce (fn [inv _]
+              (update-in inv [:pn :transitions (pick-from-atom! trans-left)]
+                         #(assoc % :fn (report-fn (pick-from-atom! events-left)))))
+              inv
+              (range (count (:scada-events +problem+))))))
 
 ;;; POD This (and one for trans and place) belong in pnu/
 (defn arc-index
@@ -382,6 +392,15 @@
     (if (= name (:name (first arcs)))
       n
       (recur (inc n) (next arcs)))))
+
+(defn trans-index
+  "Return the index of the named index in pn. (For use with assoc-in, update-in, etc."
+  [pn name]
+  (loop [n 0
+         trans (:transitions pn)]
+    (if (= name (:name (first trans)))
+      n
+      (recur (inc n) (next trans)))))
 
 (defn add-color-binding [inv]
   "Add color binding to arcs. To address imbalance, add :elim acts and (randomly) add :intro acts."
@@ -420,23 +439,28 @@
                                 :id (swap! pop-cnt inc)
                                 :history [(:id ?inv)]})
                      (range (:eden-mutations +gp-params+)))
+             (assoc-in ?inv [:pn :id] (:id ?inv))
              (add-scada-report-fns ?inv)
-             (add-colol-binding ?inv)))))) 
+             (add-color-binding ?inv))))))
 
-;;; POD -- really should normalize values!
+(def +remaining-to-eval+ (atom nil))
+    
 (defn i-error [inv]
   "Compute the individual's score."
-  (reset! +diag+ inv)
-  (assoc inv
-         :err
-         (fit/workflow-fitness (:pn inv) (:scada-patterns +problem+))))
-    
+  (let [id (:id inv)]
+    (println "Evaluating Inv" id)
+    (swap! +remaining-to-eval+ (fn [lis] (remove lis #(= % id))))
+    (assoc inv
+           :err
+           (fit/workflow-fitness (:pn inv) (:scada-patterns +problem+)))))
+
 (defn sort-by-error
   "Add value for :err to each PN and used it to sort the population; best first."
   [popu]
-  (as-> popu ?p
-    (map i-error ?p)
-    (sort #(< (:err %1) (:err %2)) ?p)))
+  (reset! +remaining-to-eval+ (range (count popu))) 
+  (as-> popu ?i
+    (pmap i-error ?i)
+    (sort #(< (:err %1) (:err %2)) ?i)))
 
 ;;; Finally, we'll define a function to select an individual from a sorted
 ;;; population using tournaments of a given size.
@@ -458,15 +482,14 @@
 (defn evolve
   "Toplevel: Starting with a random population (create one if given just one arg), 
    sort, select, check for a solution and produce a new population."
-  ([problem] (evolve problem (-> problem initial-pop)))
-  ([problem popu]
+  ([problem]
    (reset-all!)
    (validate-gp-params +gp-params+)
    (println "Starting evolution...")
    (let [start-time (System/currentTimeMillis)]
      (loop [gen 0
-            popu (sort-by-error popu)]
-       (reset! +diag+ popu)
+            popu (sort-by-error (-> problem initial-pop))]
+       (reset! +pop+ popu)
        (let [best (first popu)]
          (report-gen gen popu start-time)
          (cond (< (:err best) 0.1) ; good enough to count as success
@@ -478,8 +501,8 @@
                 (inc gen)
                 (as-> popu ?p
                   (map (fn [inv] (update inv :pn #(dissoc % :avg-tokens-on-place))) ?p)
-                  (make-next-gen ?p :gen gen)
-                  (reset! +pop+ ?p)))))))))
+                  (make-next-gen ?p :gen gen)))))))))
+
 
 (defn report-gen
   [gen popu start-time]
@@ -605,10 +628,15 @@
 
 (load-file "data/SCADA-logs/scada-f0.clj") ; defines fit/scada-log-f0
 
+;;; POD As currently conceived, the problem is to associate :scada-events with :visible-transitions
+;;;     and then of course, get the wiring correct. 
+;;;     Each transition in the initial population will be randomly given one of the four functions
+;;;;    (from those that not already chosen). Mutations will move them around. etc. 
 (def +problem+
   {:visible-places [:buffer :m1-blocked :m1-busy :m2-busy :m2-starved]
+   :use-cpus (.availableProcessors (Runtime/getRuntime)) ; counts hyperthreading apparently
+   :scada-events [:bj :aj :ej :sm] 
    :visible-transitions [:m1-complete-job :m1-start-job :m2-complete-job :m2-start-job]
-   :geom (:geom (pnml/read-pnml "data/m2-j2-bas.xml" :geom? true)) ; POD replace this with an "Eden ring"
    :scada-patterns (fit/scada-patterns fit/scada-log-f0)
    :data-source +m2-11+}) ; POD not yet dynamic, of course.
 
@@ -665,4 +693,4 @@
 
 ;;; (ns-unmap 'gov.nist.sinet.core '+pop+)
 ;;; Load the default problem. (not defonce....)
-(when-not @+pop+ (reset! +pop+ (initial-pop +problem+)))
+;(when-not @+pop+ (reset! +pop+ (initial-pop +problem+)))

@@ -9,6 +9,8 @@
 
 ;;; Purpose: Fitness test
 
+(def +diag+ (atom nil))
+
 (defn preprocess-log
   "Add line numbers. This is used by hand on the datafile."
   [data]
@@ -60,16 +62,22 @@
 
 (declare all-scada-patterns trim-patterns scada-ordering-relations act2trans)
 (defn scada-patterns
-  "Compute SCADA patterns."
+  "Compute the problem's SCADA patterns. It is a vector of maps with keys
+   (:id :form :njobs :relations). Run once per problem."
   [log]
   (as-> (:log log) ?pats ; POD fix this! All this preprocessing
     (all-scada-patterns ?pats)
     (trim-patterns ?pats 5 5)
-    (map #(assoc % :relations (scada-ordering-relations %)) ?pats)))
+    (map #(as-> % ?pat
+            (assoc ?pat :relations (scada-ordering-relations %))
+            (assoc ?pat :njobs (count (:jobs ?pat)))
+            (dissoc ?pat :jobs)) ; POD don't think the actual job will be useful.
+         ?pats)))
        
 ;;; POD Probably want start and stop point for every occurrence. 
 (defn all-scada-patterns
-  "Return a vector of all the job patterns found in the SCADA log."
+  "Return a vector of all the job patterns found in the SCADA log.
+   Run once per problem."
   [data]
   (let [pattern-id (atom -1)]
     (reduce (fn [patterns job-id]
@@ -84,7 +92,7 @@
 
 (defn trim-patterns
   "Trim up to ntrim patterns from the ends of the pattern vector if they account for only a few (njobs) jobs.
-   These are quite likely to be fragments of the complete log for these jobs."
+   These are quite likely to be fragments of the complete log for these jobs. Run once per problem."
   [patterns ntrim njobs]
   (let [size (count patterns)]
     (reduce (fn [patterns id]
@@ -100,13 +108,19 @@
   [trace act]
   (let [^clojure.lang.PersistentVector acts (vec (map :act trace))
         idx (.indexOf acts act)]
-    (if (< idx 0) nil idx)))
+    (if (< idx 0) false idx)))
 
 (defn ordering-fn
-  "Return a function : trace -> boolean indicating whether 
-   the ordering relationship is violated by the argument QPN process trace."
+  "Return a function : trace -> boolean indicating whether the ordering relationship 
+   is violated by the argument QPN process trace. If one or both of the arguments 
+   does not even appear in the trace, it is considered violated."
   [x y]
-  (fn [trace] (<= (pos-in-trace trace x) (pos-in-trace trace y))))
+  (fn [trace]
+    (let [pos-x (pos-in-trace trace x)
+          pos-y (pos-in-trace trace y)]
+      (if (and pos-x pos-y)
+        (<= (pos-in-trace trace x) (pos-in-trace trace y))
+        true))))
 
 (defn scada-ordering-relations
   "Calculate ordering functions for a SCADA pattern."
@@ -155,21 +169,53 @@
                  (some #(> (:id %) tkn-id) (:tkns msg))))
           (qpn-gather-tkn (-> pn :sim :log) tkn-id)))
 
+;;; POD not used yet, but useful. 
+(defn qpn-characterize-tkn-trace
+  "Return a map describing the relative frequency that each event occurs in a token trace."
+  [log tkn-id]
+  (let [acts (distinct (map :act (qpn-gather-tkn log tkn-id)))]
+    (reduce (fn [distrib msg]
+              (update-in distrib [(:act msg)] inc))
+            (zipmap acts (repeat (count acts) 0))
+            (filter #(contains? % :act) log))))
+
+;;; POD this will have to updated for colour, currently I assume just one job type.
+(defn qpn-typical-jobs
+  "Return isolated log entry from typical jobs (a statistical analysis)."
+  [pn]
+  ;; Check variance across qpn-c-t-t; use it (and process pattern) to determine job types.
+  ;(NYI)
+  ;; Of the types, choose one (a safe one).
+  (let [tkn-id (Math/round (/ (-> pn :sim :max-tkn) 2.0))]
+    (vector ; POD current assume just one job type. 
+     (loop [log (qpn-gather-tkn (-> pn :sim :log) tkn-id) ; this collects just :acts
+            trace []]
+       (let [msg (first log)]
+         (cond (empty? log) trace, 
+               (some #(= (:act %) (:act msg)) trace) trace,
+               :else (recur (next log) (conj trace msg))))))))
+            
 ;;;===========================================
 ;;; Fitness measure
 ;;;===========================================
 (defn act2trans
   "Return the transition (its name) responsible for the argument act."
   [pn act]
-  (some #(when (= act (:act ((:fn %) :foobar))) (:name %))
+  (some #(when (= act (:act ((:fn %) :arg-do-not-matter))) (:name %))
         (:transitions pn)))
+
+(defn diag-describe-pn-transition-binding
+  [pn]
+  (zipmap (map :name (:transitions pn))
+          (map #((:fn %) :job-x) (:transitions pn))))
+            
 
 (defn violates?
   "Return true if the qpn-job violates the argument relation."
   [qpn-job relation]
   (not (relation qpn-job)))
 
-(def qpn-warm-up "Ignore this number of tokens on both ends of the log." 20)
+(def +qpn-warm-up+ "Ignore this number of tokens on both ends of the log." 5)
 
 ;;; +1 for every precedence constraint violated. 
 ;;; Will need something more for loops, but we'll get to that later.
@@ -186,19 +232,35 @@
             (empty? (next pats)) score
             :else (recur (next pats) (min this-score score))))))
 
-;(workflow-fitness test-m2-bas (:scada-patterns +problem+))
+(defn avg-scada-process-steps
+  "Calculate the weighted average number of steps in a SCADA pattern."
+  [patterns]
+  (let [njobs (apply + (map #(:njobs %) patterns))]
+    (/ (apply + (map #(* (/ (:njobs %) njobs) (count (:form %))) patterns))
+       (count patterns))))
+
+;;; (workflow-fitness (:pn i1) (:scada-patterns +problem+)) ; i1 is in the file data/test-m2-bas.clj
+;;; Problem here is to run enough steps to get enough jobs to be able to trim some. 
 (defn workflow-fitness
-  "Generate the QPN log and score it WRT SCADA patterns (calculate process disorder)."
+  "Generate a QPN log for the PN and return the score WRT SCADA patterns. The score is the
+   average (across all complete jobs) of the process disorder of the best matched process.
+   If there are very few jobs (perhaps because :elim :intro weirdness), then just score them."
   [pn patterns]
-  (let [pn (sim/simulate pn 300)
-        tkn-range (range qpn-warm-up (- (-> pn :sim :max-tkn) qpn-warm-up))
-        total-error (reduce (fn [sum tkn-id]
-                              (calc-process-disorder
-                               (qpn-log-about pn tkn-id)
-                               patterns))
-                            0
-                            tkn-range)]
-    (double (/ total-error (count tkn-range)))))
+  (let [pn (sim/simulate pn (* 100 (avg-scada-process-steps patterns)))
+        max-tkn (-> pn :sim :max-tkn)]
+    (if (> max-tkn 20) 
+      (let [tkn-range (range +qpn-warm-up+ (- (-> pn :sim :max-tkn) +qpn-warm-up+))
+            total-error (reduce (fn [sum tkn-id]
+                                  (calc-process-disorder
+                                   (qpn-log-about pn tkn-id)
+                                   patterns))
+                                0
+                                tkn-range)]
+        (double (/ total-error (count tkn-range))))
+      ;; Otherwise just a few jobs
+      (let [typical-job (first (qpn-typical-jobs pn))]
+        (calc-process-disorder typical-job patterns)))))
+          
 
 
 

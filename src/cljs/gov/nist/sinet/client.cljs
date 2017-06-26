@@ -129,7 +129,7 @@
 (when-let [target-el (.getElementById js/document "pop+")]
   (.addEventListener target-el "click"
     (fn [ev]
-      (->output! "pop+ button was clicked (get-individual-plus)")
+      ;(->output! "pop+ button was clicked (get-individual-plus)")
       (chsk-send! [:sinet/get-individual {:id (swap! viewing-pn inc)}] 5000
         (fn [cb-reply]
           (->output! "Received PN %s." @viewing-pn)
@@ -139,7 +139,7 @@
 (when-let [target-el (.getElementById js/document "pop-")]
     (.addEventListener target-el "click"
     (fn [ev]
-      (->output! "pop- button was clicked (get-individual-minus)")
+      ;(->output! "pop- button was clicked (get-individual-minus)")
       (chsk-send! [:sinet/get-individual {:id (swap! viewing-pn dec)}] 5000
         (fn [cb-reply]
           (->output! "Received PN %s." @viewing-pn)                    

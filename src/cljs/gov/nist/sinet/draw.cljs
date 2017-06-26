@@ -6,8 +6,10 @@
             [medley.core :refer (abs)]
             [cljs.pprint :refer (pprint)]))
   
-;;; ToDo: Replace pn-trans-point: review everything on the trans and distribute
-;;;       so that things are on the correct side, not overlapping, spaced nicely
+;;; ToDo: * Replace pn-trans-point: review everything on the trans and distribute
+;;;         so that things are on the correct side, not overlapping, and spaced nicely. 
+;;;       * Show :intro :elim acts (and their multiplicity).
+;;;       * Integrate simulation stepping capability.  
   
 ;;;================== Stuff borrowed from pnu (not cljs)  ========================
 (defn ppp []
@@ -122,7 +124,6 @@
             (assoc-in ?pn [:geom n :x] (q/mouse-x))
             (assoc-in ?pn [:geom n :y] (q/mouse-y))))))))
 
-
 (defn hilite-elem!
   "Set +hilight-elem+ and maybe +lock-mouse-on+."
   [pn]
@@ -219,7 +220,7 @@
 
 (defn draw-tkn
   [x y]
-  (q/fill 0) ; black
+  (q/fill 0) ; (q/fill 0 0 255) ; blue
   (q/ellipse x y +token-dia+ +token-dia+))
 
 (defn draw-arc
