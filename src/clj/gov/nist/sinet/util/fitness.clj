@@ -202,13 +202,12 @@
   "Return the transition (its name) responsible for the argument act."
   [pn act]
   (some #(when (= act (:act ((:fn %) :arg-do-not-matter))) (:name %))
-        (:transitions pn)))
+        (filter #(contains? % :fn) (:transitions pn))))
 
 (defn diag-describe-pn-transition-binding
   [pn]
   (zipmap (map :name (:transitions pn))
           (map #((:fn %) :job-x) (:transitions pn))))
-            
 
 (defn violates?
   "Return true if the qpn-job violates the argument relation."
@@ -217,27 +216,28 @@
 
 (def +qpn-warm-up+ "Ignore this number of tokens on both ends of the log." 5)
 
-;;; +1 for every precedence constraint violated. 
-;;; Will need something more for loops, but we'll get to that later.
-(defn calc-process-disorder
-  "Return the best score from matching the argument job against every SCADA pattern."
-  [job patterns]
-  (loop [pats patterns
-         score 99999]
-    (let [this-score (reduce (fn [score rel]
-                               (if (violates? job rel) (inc score) score))
-                             0
-                             (:relations (first pats)))]
-      (cond (= this-score 0) 0
-            (empty? (next pats)) score
-            :else (recur (next pats) (min this-score score))))))
-
 (defn avg-scada-process-steps
   "Calculate the weighted average number of steps in a SCADA pattern."
   [patterns]
   (let [njobs (apply + (map #(:njobs %) patterns))]
     (/ (apply + (map #(* (/ (:njobs %) njobs) (count (:form %))) patterns))
        (count patterns))))
+
+;;; +1 for every precedence constraint violated. +1 for each act not manifest in the QPN log. 
+;;; Will need something more for loops, but we'll get to that later.
+(defn calc-process-disorder
+  "Return the best score from matching the argument job against every SCADA pattern."
+  [job patterns]
+  (loop [pats patterns
+         start-score 99999]
+    (let [nact-diff (Math/abs (- (count job) (count (:form (first pats)))))
+          nviolates (reduce (fn [score rel] (if (violates? job rel) (inc score) score))
+                            0
+                            (:relations (first pats)))
+          this-score (+ nact-diff nviolates)]
+      (cond (= this-score 0) 0
+            (empty? (next pats)) this-score
+            :else (recur (next pats) (min this-score start-score))))))
 
 ;;; (workflow-fitness (:pn i1) (:scada-patterns +problem+)) ; i1 is in the file data/test-m2-bas.clj
 ;;; Problem here is to run enough steps to get enough jobs to be able to trim some. 
@@ -248,12 +248,11 @@
   [pn patterns]
   (let [pn (sim/simulate pn (* 100 (avg-scada-process-steps patterns)))
         max-tkn (-> pn :sim :max-tkn)]
-    (if (> max-tkn 20) 
+    (println "max-tkn =" max-tkn)
+    (if (> max-tkn 20)
       (let [tkn-range (range +qpn-warm-up+ (- (-> pn :sim :max-tkn) +qpn-warm-up+))
             total-error (reduce (fn [sum tkn-id]
-                                  (calc-process-disorder
-                                   (qpn-log-about pn tkn-id)
-                                   patterns))
+                                  (+ sum (calc-process-disorder (qpn-log-about pn tkn-id) patterns)))
                                 0
                                 tkn-range)]
         (double (/ total-error (count tkn-range))))

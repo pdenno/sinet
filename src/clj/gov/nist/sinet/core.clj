@@ -39,14 +39,14 @@
   "Genetic programming algorithm parameters: they control important aspects of the solution."
   {:pn-elements [:place :token :normal-arc :inhibitor-arc :expo-trans #_:immediate-trans #_:fixed-trans]
    :pop-size 100
-   :eden-mutations 5
+   :eden-mutations 4
    :max-gens 40
    :debugging? true
    :pn-k-bounded  10      ; When to give up on computing the reachability graph.
    :pn-max-rs     1000
    :crossover-to-mutation-ratio 0.5
-   :select-pressure 3 ; not normalized to pop-size
-   :elite-individuals 0
+   :select-pressure 20 ; POD not normalized to pop-size
+   :elite-individuals 3
    :crossover-keeps-parents? true ; NYI
    :initial-mutations 10  ; max number of times to mutate eden individuals to create first generation.
    :mutation-dist ; The pdf for ordinary mutations (not eden mutations)
@@ -294,13 +294,22 @@
       (assoc-in ?i [:pn :arcs] (vec (remove #(or (= (:source %) tr) (= (:target %) tr))
                                             (-> ?i :pn :arcs)))))))
 
-(defn arc-not-sole
+;;; POD Seems like a pretty costly way to test this!
+#_(defn arc-not-sole
   "Return true if removal of the argument arc wouldn't leave the net with a
-   transition or place for which there isn't at least one "
+   transition or place for which there isn't at least one arc in and one out."
   [pn ar]
   (let [pn (assoc pn :arcs (vec (remove #(= (:aid %) (:aid ar) (:arcs pn)))))]
     (and (pnu/enter-and-exit-trans? pn)
          (pnu/enter-and-exit-places? pn))))
+
+(defn arc-not-sole
+  "Return true if removal of the argument arc wouldn't leave the net with a
+   transition or place for which there isn't at least one arc in and one out."
+  [pn ar]
+  (and (> (count (remove #(= :inhibitor (:type %)) (pnu/arcs-into  pn (:source ar)))) 1)
+       (> (count (remove #(= :inhibitor (:type %)) (pnu/arcs-outof pn (:target ar)))) 1)))
+
 
 (defmethod mutate-m :remove-arc [inv & args]
   (if-let [aid (:aid (random-arc (:pn inv) :subset #(filter (fn [ar] (and (= :normal (:type ar))
@@ -412,7 +421,7 @@
          (let [arcs (map :name (into (pnu/arcs-into pn trans) (pnu/arcs-outof pn trans)))
                diff (flow-balance pn trans)]
            (as-> pn ?pn
-             (reduce (fn [pn arc] (assoc-in pn [:arcs (arc-index pn arc) :bind] {:color :blue})) ?pn arcs)
+             (reduce (fn [pn arc] (assoc-in pn [:arcs (arc-index pn arc) :bind] {:jtype :blue})) ?pn arcs)
              (cond (< diff 0) ; if < 0, arbitrary (first) removes tkns.
                    (update-in ?pn [:arcs 0 :bind]
                               #(-> % (assoc :act :remove) (assoc :cnt (Math/abs diff))))
@@ -443,23 +452,20 @@
              (add-scada-report-fns ?inv)
              (add-color-binding ?inv))))))
 
-(def +remaining-to-eval+ (atom nil))
-    
 (defn i-error [inv]
   "Compute the individual's score."
-  (let [id (:id inv)]
-    (println "Evaluating Inv" id)
-    (swap! +remaining-to-eval+ (fn [lis] (remove lis #(= % id))))
-    (assoc inv
-           :err
-           (fit/workflow-fitness (:pn inv) (:scada-patterns +problem+)))))
+  (let [id (:id inv)
+        result (assoc inv
+                      :err
+                      (fit/workflow-fitness (:pn inv) (:scada-patterns +problem+)))]
+    (println result)
+    result))
 
 (defn sort-by-error
   "Add value for :err to each PN and used it to sort the population; best first."
   [popu]
-  (reset! +remaining-to-eval+ (range (count popu))) 
   (as-> popu ?i
-    (pmap i-error ?i)
+    (pmap i-error ?i) ; POD pmap
     (sort #(< (:err %1) (:err %2)) ?i)))
 
 ;;; Finally, we'll define a function to select an individual from a sorted
@@ -502,7 +508,6 @@
                 (as-> popu ?p
                   (map (fn [inv] (update inv :pn #(dissoc % :avg-tokens-on-place))) ?p)
                   (make-next-gen ?p :gen gen)))))))))
-
 
 (defn report-gen
   [gen popu start-time]

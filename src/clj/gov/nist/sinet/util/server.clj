@@ -147,7 +147,7 @@
 (defn- -event-msg-handler-dispatch [event]
   (when-not (= (:id event) :chsk/ws-ping)
     ;(println "dispatch, event id =" (:id event)))
-  (:id event))
+  (:id event)))
 
 ;;; Sente event handlers
 (defmulti -event-msg-handler #'-event-msg-handler-dispatch)
