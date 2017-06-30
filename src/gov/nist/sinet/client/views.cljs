@@ -1,91 +1,67 @@
 (ns gov.nist.sinet.client.views
   (:require [quil.core :as quil :include-macros true]
             [quil.middleware :as qm]
-            [gov.nist.sinet.client.ws :as ws :refer (->output! output-atom)]
+            [gov.nist.sinet.client.ws :as ws :refer (->output! output-atom chsk-send!)]
             [gov.nist.sinet.client.draw :as draw :refer (setup-pn draw-pn pn-wheel-fn)]
             [reagent.core :as rea]))
 
+(def viewing-pn "What PN is displayed" (rea/atom {:index 0 :id nil}))
+
+(defn view-pop
+  "Display the next PN in the population"
+  [{index :index}]
+  (->output! "pop+/- button was clicked (get-individual-plus/minus)")
+  (chsk-send! [:sinet/get-individual index] 5000
+              (fn [cb-reply]
+                (->output! "Received PN %s = %s." (:id cb-reply) cb-reply)
+                (reset! gov.nist.sinet.draw/+display-pn+ cb-reply))))
+
 (defn start-evolve
   [{:as args}]
+  (ws/->output! "Starting evolution...")
   (ws/chsk-send! [:sinet/evolve {:status :best-wishes}]))
 
 (defn buttons []
   [:div.buttons
-   "Buttons"
-   [:button {:on-click start-evolve} "Evolve"]
-   [:br]
-   [:button {:on-click start-evolve} "Evolve again"]])
+   [:table
+    [:tbody
+     [:tr [:td [:strong "GP Control"]]] ; POD does nothing
+     [:tr [:td "Viewing PN " (:index @viewing-pn)]]
+     [:tr
+      [:td [:button {:on-click (fn [] (view-pop (swap! viewing-pn #(update % :index inc))))}]]
+      [:td [:button {:on-click (fn [] (view-pop (swap! viewing-pn #(update % :index dec))))}]]]
+     [:tr
+      [:td [:button {:on-click start-evolve} "Evolve"]]
+      [:td [:button {:on-click start-evolve} "Evolve"]]]]]])
 
 ;;; Util for logging output to on-screen console
-
 (defn console-area []
   [:div#console
-   [:h2 "Console"]
+   [:strong "Console"]
    [:textarea {:value @ws/output-atom :readOnly true
                :style {:width "100%" :height "200px"}}]])
-(defn pn-area []
+(defn drawing-area []
   [:div#pn
    [:canvas {:id "best-pn"}]])
 
-#_(defn simple-example []
-  [:div
-   [greeting "SINET"]
-   [clock]
-   [color-input]
-   [buttons]
-   [output-area]])
-
-(defn main [data]
-  [:div
-   [:h1 (:title @data)]
-   [:div "Hello world! This is reagent speaking!"]
-   [console-area]
-   [:br]
-   [:div "Look in your browsers developer console to see the web socket communication when clicking below buttons."]
-   [:br]
-   [:button {:on-click start-evolve} "Evolve"]
-   [:br]
-   [:button {:on-click ws/test-socket-event} "Send Message Event"]])
-
-
-#_(quil/defsketch best-pn ;cljs :features [:resizable :keep-on-top]
+(quil/defsketch best-pn 
   :host "best-pn"
   :title "Best Individual"
-  :settings #(fn [] (quil/smooth 2) #_(quil/scale 2)) ; Smooth=2 is typical. Can't use pixel-density with js.
+  :settings #(fn [] (quil/smooth 2)) ; Smooth=2 is typical. Can't use pixel-density with js.
   :setup draw/setup-pn
   :draw draw/draw-pn
   :mouse-wheel draw/pn-wheel-fn
-  :size [900 500]) ; POD This is used in pnml/rescale. I need a solution for getting it here!
+  :size [900 500]) ; POD This is used in pnml/rescale. I need a solution for getting it here! (component?)
 
+(defn main [data]
+  (view-pop 0)
+  [:div
+   [:h1 (:title @data)]
+   ;;[:table [:tbody [:tr [:td [drawing-area]] [:td [buttons]]]]]
+   #_[drawing-area]
+   #_[buttons]
+   [console-area]
+   [:br]
+   [:button {:on-click ws/test-socket-event} "Send Message Event"]])
 
-
-#_(when-let [target-el (.getElementById js/document "pop+")]
-  (.addEventListener target-el "click"
-    (fn [ev]
-      (->output! "pop+ button was clicked (get-individual-plus)")
-      (chsk-send! [:sinet/get-individual {:id (swap! viewing-pn inc)}] 5000
-        (fn [cb-reply]
-          (->output! "Received PN %s." @viewing-pn)
-          (reset! gov.nist.sinet.util.draw/+display-pn+ cb-reply))))))
-
-#_(when-let [target-el (.getElementById js/document "pop-")]
-    (.addEventListener target-el "click"
-    (fn [ev]
-      ;(->output! "pop- button was clicked (get-individual-minus)")
-      (chsk-send! [:sinet/get-individual {:id (swap! viewing-pn dec)}] 5000
-        (fn [cb-reply]
-          (->output! "Received PN %s." @viewing-pn)                    
-          (reset! gov.nist.sinet.util.draw/+display-pn+ cb-reply))))))
-
-#_(when-let [target-el (.getElementById js/document "btn5")]
-  (.addEventListener target-el "click"
-                     (fn [ev]
-                       (->output! "Disconnecting")
-                       (sente/chsk-disconnect! chsk))))
-
-#_(when-let [target-el (.getElementById js/document "btn6")]
-  (.addEventListener target-el "click"
-                     (fn [ev]
-                       (->output! "Reconnecting")
-                       (sente/chsk-reconnect! chsk))))
 

@@ -42,8 +42,8 @@
   (->output! "Pushed event from server: %s " (first ?data))
   (let [msg-type (first ?data)]
     (cond 
-      (= msg-type :sinet/new-generation) #_(->output! "report= %s" ?data)
-      (= msg-type :sinet/event) #_(->output! "Event from Sinet: %s" (second ?data)))))
+      (= msg-type :sinet/new-generation) (->output! "report= %s" ?data)
+      (= msg-type :sinet/event) (->output! "Event from Sinet: %s" (second ?data)))))
 
 (defn event-msg-handler* [{:as ev-msg :keys [id ?data event]}]
   (event-msg-handler ev-msg))
