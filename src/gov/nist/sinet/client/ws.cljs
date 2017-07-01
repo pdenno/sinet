@@ -2,7 +2,6 @@
   (:require [taoensso.encore :as encore :refer-macros (have have?)] ; POD two logging facilities
             [taoensso.timbre :as timbre :refer-macros (tracef debugf infof warnf errorf)] ; POD two logging facilities
             [taoensso.sente :as sente]
-            [taoensso.sente.packers.transit :as sente-transit]
             [reagent.core :as rea]))
 
 (timbre/set-level! :error) ; :trace :debug etc. for more logging
@@ -14,6 +13,8 @@
   (let [msg (apply encore/format fmt args)]
     (timbre/debug msg)
     (swap! output-atom #(str % "\n" msg))))
+
+(->output! "ClojureScript appears to have loaded correctly.")
 
 (defmulti push-msg-handler (fn [[id _]] id)) ; Dispatch on event key which is 1st elem in vector
 
@@ -48,9 +49,8 @@
 (defn event-msg-handler* [{:as ev-msg :keys [id ?data event]}]
   (event-msg-handler ev-msg))
 
-(let [packer :edn
-      {:keys [chsk ch-recv send-fn state]}
-      (sente/make-channel-socket! "/chsk" {:type :auto :packer packer})]
+(let [{:keys [chsk ch-recv send-fn state]}
+      (sente/make-channel-socket! "/chsk" {:type :auto :packer :edn})]
   (def chsk       chsk)
   (def ch-chsk    ch-recv)
   (def chsk-send! send-fn)

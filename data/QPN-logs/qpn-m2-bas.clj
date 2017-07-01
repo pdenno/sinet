@@ -1,5 +1,5 @@
 
-(ns gov.nist.sinet.util.fitness)
+(ns gov.nist.sinet.fitness)
 
 (def qpn-m2-bas
   [{:act :bj, :tkns [{:type :a, :id 17}]}

@@ -1,16 +1,16 @@
 (ns gov.nist.sinet.gp
   "SINET demonstrate ideas in system identification/process mining using genetic programming."
   {:author "Peter Denno"}
-  (:require [gov.nist.sinet.fitness :as fit :refer (workflow-fitness)]
-            [gov.nist.sinet.server :as svr]
-            [gov.nist.sinet.utils :refer :all]
-            [medley.core :refer (abs)]
+  (:require [clojure.tools.logging :as log]
             [clojure.pprint :refer (cl-format pprint)]
+            [medley.core :refer (abs)]
             [gov.nist.spntools.core :as pn :refer :all]
             [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp pn-ok-> as-pn-ok->)]
             [gov.nist.spntools.util.reach :as pnr :refer (reachability)]
             [gov.nist.spntools.util.simulate :as sim :refer (simulate)]
-            [gov.nist.spntools.util.pnml :as pnml :refer (read-pnml)]))
+            [gov.nist.spntools.util.pnml :as pnml :refer (read-pnml)] ;  POD clean this up
+            [gov.nist.sinet.fitness :as fit :refer (workflow-fitness)]
+            [gov.nist.sinet.ws :as ws]))
 
 ;;; I started with Lee Spector's "gp" demonstration software.
 
@@ -29,7 +29,62 @@
 (def +diag+ (atom nil))
 (def +log+ (atom []))
 (defn log [msg] (swap! +log+ conj msg))
-(declare +problem+)
+
+(def +pop+ "Diagnostic set to population vector" (atom nil))
+(def +edens+ "Vector of eden individuals"  (atom nil))
+
+;;;  DOCUMENTATION REQUIREMENT: Determine what among the +gp-params+ matters.
+;;; :pn-elements -- The PN elements that can appear in individuals.
+;;; :initial-individuals -- percentage of each element type.
+;;; :elite-individuals -- carry over this amount of the best without revision.
+;;; :max-initial-mutations -- apply 1 to this number of mutations (uniform distribution to the "Eden individual")
+(def +gp-params+
+  "Genetic programming algorithm parameters: they control important aspects of the solution."
+  {:pn-elements [:place :token :normal-arc :inhibitor-arc :expo-trans #_:immediate-trans #_:fixed-trans]
+   :pop-size 100
+   :eden-mutations 4
+   :max-gens 3
+   :debugging? true
+   :pn-k-bounded  10      ; When to give up on computing the reachability graph.
+   :pn-max-rs     1000
+   :crossover-to-mutation-ratio 0.5
+   :select-pressure 70 ; POD not normalized to pop-size
+   :elite-individuals 3
+   :no-new-jobs-penalty 1.00001
+   :crossover-keeps-parents? true ; NYI
+   :initial-mutations 10  ; max number of times to mutate eden individuals to create first generation.
+   :mutation-dist ; The pdf for ordinary mutations (not eden mutations)
+   [[:add-place        1/10]    ; Add place (mine can't be absorbing, thus Nobile 1&2).
+    [:add-token        1/10]    ; Add token to some place (visible or hidden).
+    [:add-trans        1/10]    ; Add transition, connecting to input and output places.
+    [:add-arc          1/10]
+    [:add-inhibitor    1/10]    ; Add inhibitor arc, connecting a place to a trans
+    [:remove-place     1/10]
+    [:remove-token     1/10]
+    [:remove-trans     1/10]
+    [:remove-arc       1/10]
+    [:remove-inhibitor 1/10]
+    [:swap-places-vv   2/10]]
+   :eden-dist ; for creation of eden individual, which are already rather sparse
+   [[:add-place        2/10]
+    [:add-token        2/10]
+    [:add-trans        2/10]
+    [:add-arc          2/10]
+    [:add-inhibitor    2/10]
+    [:swap-places-vv   2/10]]})
+
+;;; POD As currently conceived, the problem is to associate :scada-events with :visible-transitions
+;;;     and then of course, get the wiring correct. 
+;;;     Each transition in the initial population will be randomly given one of the four functions
+;;;;    (from those that not already chosen). Mutations will move them around. etc.
+(load-file "data/SCADA-logs/scada-f0.clj") ; defines fit/scada-log-f0
+(def +problem+
+  {:visible-places [:buffer :m1-blocked :m1-busy :m2-busy :m2-starved]
+   :use-cpus (.availableProcessors (Runtime/getRuntime)) ; counts hyperthreading apparently
+   :scada-events [:bj :aj :ej :sm] 
+   :visible-transitions [:m1-complete-job :m1-start-job :m2-complete-job :m2-start-job]
+   :scada-patterns (fit/scada-patterns fit/scada-log-f0)
+   :data-source :ignore #_+m2-11+}) ; POD not yet dynamic, of course.
 
 (defn add-extra-nodes
   "Return a map {:t <> :p <> :t-adds, :p-adds} naming nodes (transitions or places) to be added.
@@ -410,8 +465,7 @@
   (let [id (:id inv)
         result (assoc inv
                       :err
-                      (fit/workflow-fitness (:pn inv) (:scada-patterns +problem+)))]
-    ;(println result)
+                      (fit/workflow-fitness (:pn inv) +problem+ +gp-params+))]
     result))
 
 (defn sort-by-error
@@ -436,13 +490,7 @@
   (pnu/reset-ids! {})
   (reset! +log+ []))
 
-(declare evolve validate-gp-params report-gen make-next-gen write-gen)
-
-;;; Response to "Evolve" button
-(defmethod svr/-event-msg-handler
-  :sinet/evolve
-  [ev-msg]
-  (evolve +problem+))
+(declare +pop+ evolve validate-gp-params report-gen make-next-gen write-gen)
 
 (defn evolve
   "Toplevel: Starting with a random population (create one if given just one arg), 
@@ -488,13 +536,14 @@
            (recur (conj pop (select sorted-pop (:select-pressure +gp-params+)))))))))
 
 (def report-data "A map of things to report to the GUI" (atom nil))
+(declare server>gui-notify-new-gen)
 
 (defn report-gen
   "Set the report-data atom to new data and notify the server"
   [pop gen start-time]
   (println "Gen=" gen)
   (let [best (first pop)]
-    (svr/server>gui-notify-new-gen
+    (server>gui-notify-new-gen
      (reset! report-data
              {:generation gen
               :pop-size (count pop)
@@ -505,21 +554,6 @@
               :median-error (:err (nth pop (int (/ (:pop-size +gp-params+) 2))))
               :average-pn-size (pnu/avg (map #(-> % :pn pnu/pn-size) pop))})))
   pop)
-
-#_(defn report-gen
-  [pop gen start-time]
-  (let [best (first pop)]
-    (println "======================")
-    (println "Generation:" gen)
-    (println "Population size:" (count pop))
-    (println "Total mutations:" (reduce + 0 (map #(count (:history %)) pop)))
-    (println "Failed individuals:" (count (filter identity (map #(contains? % :failure) pop))))
-    (println "Elapsed time (secs):" (int (/ (- (System/currentTimeMillis) start-time) 1000)))
-    (println "Best error:" (:err best))
-    (println "ID of best:" (:id best))
-    (println "     Median error:" (:err (nth pop (int (/ (:pop-size +gp-params+) 2)))))
-    (println "     Average PN size:" (pnu/avg (map #(-> % :pn pnu/pn-size) pop)))
-    pop))
 
 (defn validate-gp-params [params]
   #_(when (not (< 0.9999 (reduce + 0 (map second (:mutation-types params))) 1.0001))
@@ -611,20 +645,6 @@
    :m2-busy    0.80188
    :m2-starved 0.19812})
 
-(load-file "data/SCADA-logs/scada-f0.clj") ; defines fit/scada-log-f0
-
-;;; POD As currently conceived, the problem is to associate :scada-events with :visible-transitions
-;;;     and then of course, get the wiring correct. 
-;;;     Each transition in the initial population will be randomly given one of the four functions
-;;;;    (from those that not already chosen). Mutations will move them around. etc. 
-(def +problem+
-  {:visible-places [:buffer :m1-blocked :m1-busy :m2-busy :m2-starved]
-   :use-cpus (.availableProcessors (Runtime/getRuntime)) ; counts hyperthreading apparently
-   :scada-events [:bj :aj :ej :sm] 
-   :visible-transitions [:m1-complete-job :m1-start-job :m2-complete-job :m2-start-job]
-   :scada-patterns (fit/scada-patterns fit/scada-log-f0)
-   :data-source +m2-11+}) ; POD not yet dynamic, of course.
-
 ;;; POD these are starvation values for :m2 on MJPdes/data/submodel-1.clj.
 ;;; Unlike LS's model, I don't have pairs of (x, f(x)). These are just f(x)
 ;;; for x = (and (feed-buffer-empty? <machine>) (not (busy? <machine>))).
@@ -676,6 +696,61 @@
 
 (.addMethod clojure.pprint/simple-dispatch Inv (fn [p] (print-inv p *out*)))
 
-;;; (ns-unmap 'gov.nist.sinet.core '+pop+)
-;;; Load the default problem. (not defonce....)
-;(when-not @+pop+ (reset! +pop+ (initial-pop +problem+)))
+;;;===========================================================
+;;; Communication with the client
+;;;===========================================================
+(defn clean-pn-for-transmit [pn]
+  "Sente can't send functions, at least."
+  (as-> pn ?pn
+    (update ?pn :transitions (fn [t] (vec (map #(dissoc % :fn) t))))))
+
+(defn inv-geom
+  "Compute reasonable display placement (:geom) for the argument individual."
+  [inv]
+  (let [from (-> inv :history first)
+        elems (into (set (map :name (-> inv :pn :places))) (map :name (-> inv :pn :transitions)))]
+    (assoc inv :pn
+           (as-> (:pn inv) ?pn
+             (assoc ?pn :geom (-> (some #(when (= (:id %) from) %) @+edens+) :pn :geom))
+             (reduce (fn [pn ename]
+                       (assoc-in pn [:geom ename]
+                                 {:x (+ 15 (rand-int 100))
+                                  :y (+ 15 (rand-int 100))
+                                  :label-x-off 10
+                                  :label-y-off 15}))
+                     ?pn
+                     (clojure.set/difference elems (set (keys (:geom ?pn)))))
+             (pnml/rescale ?pn)))))
+
+(ws/register-method
+  :sinet/get-individual     
+  (fn [{:as ev-msg :keys [?data ?reply-fn]}]
+    (reset! +diag+ ev-msg)
+    (if (empty? @+pop+)
+      (log/info "No population in get-individual!")
+      (let [pn-index  ?data]
+        (println "get-individual: " pn-index)
+        (when ?reply-fn
+          (when (and (>= pn-index 0) (< pn-index (count @+pop+)))
+            (?reply-fn (-> (nth @+pop+ pn-index) inv-geom :pn clean-pn-for-transmit))))))))
+
+(ws/register-method
+ :sinet/evolve
+ (fn [ev-msg]
+   (evolve +problem+)))
+
+(defn server>gui-notify-new-gen [report])
+;;;(server>gui-push-inv (nth @+pop+ 1))
+;;; POD So far, this one is just for debugging. 
+#_(defn server>gui-notify-new-gen
+  "Push Petri net (with its geometry) to the GUI."
+  [report]
+  (let [uids (ws-connection :connected-uids )] ; <===================================
+    (if-let [uid (-> @uids :any first)]
+      (ws/send! uid [:sinet/new-generation report])
+      (log/info "notify-new-gen failed -- BTW using log/debug"))))
+
+;;; POD should be start of component start. Useful for GUI.
+;;; Not defonce
+(when (empty? @+pop+)
+  (reset! +pop+ (-> +problem+ initial-pop sort-by-error)))

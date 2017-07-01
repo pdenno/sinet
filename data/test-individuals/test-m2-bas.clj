@@ -1,8 +1,8 @@
 
-(ns gov.nist.sinet.core)
+(ns gov.nist.sinet.gp)
 
 ;;; m2-bas
-(def i1
+(def test-m2-bas
   (map->Inv
    {:pn
     {:places                                         

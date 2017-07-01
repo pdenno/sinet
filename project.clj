@@ -15,8 +15,9 @@
                  [ch.qos.logback/logback-classic "1.2.3"] ; this one might go.
                  [org.clojure/tools.logging      "0.4.0"]      ; likewise this one. 
                  [com.taoensso/sente             "1.11.0" :exclusions [com.taoensso/encore]]
-                 [com.cognitect/transit-clj      "0.8.300"]  ; from rente
-                 [com.cognitect/transit-cljs     "0.8.239"] ; from rente
+                 ;[com.cognitect/transit-clj      "0.8.300"]  ; from rente
+                 ;[com.cognitect/transit-cljs     "0.8.239"] ; from rente
+
 
                  [com.taoensso/timbre        "4.10.0" :exclusions [com.taoensso/encore]]
                  [com.taoensso/encore        "2.91.1"] ; 2.91.1 is modern but 2.87.0 for issue 277 -- NG
@@ -39,7 +40,7 @@
   :resource-paths ["resources" "resources-index/prod"]
   :target-path "target/%s"
 
-  :main ^:skip-aot gov.nist.sinet.run
+  :main ^:skip-aot gov.nist.sinet.run ; POD tried .user with cljs-repl (NG?)
 
   :cljsbuild
   {:builds

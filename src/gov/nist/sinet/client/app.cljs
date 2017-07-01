@@ -8,7 +8,6 @@
                               :messages []
                               :re-render-flip false}))
 
-
 (defmulti handle-event (fn [data [ev-id ev-data]] ev-id))
 
 (defmethod handle-event :default

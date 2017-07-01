@@ -3,16 +3,34 @@
             [com.stuartsierra.component :as component]
             [clojure.core.async :as async]
             [taoensso.sente.server-adapters.http-kit :as sente-http]
-            [taoensso.sente :as sente]
-            [taoensso.sente.packers.transit :as sente-transit]
-            [gov.nist.sinet.utils :as utils]))
+            [taoensso.sente :as sente]))
 
 (def ping-counts (atom 0))
 
-(defmulti event-msg-handler :id) ; Dispatch on event-id
+; Dispatch on event-id
+(defn- event-msg-handler-dispatch [event]
+  (when-not (= (:id event) :chsk/ws-ping)
+    (log/info (str "dispatch, event id =" (:id event))))
+  (:id event))
+
+;;; Sente event handlers
+(defmulti event-msg-handler #'event-msg-handler-dispatch)
+
+;;; "POD added because there is no clojure/add-method and NS problems with defining one elsewhere."
+(defonce event-methods (atom {}))
+
+(defn register-method
+  "POD added to 'add methods'"
+  [tag fn]
+  (swap! event-methods #(assoc % tag fn)))
+
 ;; Wrap for logging, catching, etc.:
-(defn     event-msg-handler* [{:as ev-msg :keys [id ?data event]}]
-  (event-msg-handler ev-msg))
+(defn  event-msg-handler* [{:as ev-msg :keys [id ?data event]}]
+  (println "wrapper, id = " id)
+  (if (contains? @event-methods id)
+    (do ;(log/info (str "event-method " id))
+        ((get @event-methods id) ev-msg))
+  (event-msg-handler ev-msg)))
 
 (defmethod event-msg-handler :chsk/ws-ping
   [_]
@@ -27,11 +45,11 @@
     (send-fn :sente/all-users-without-uid
              [:rente/testevent {:message (str "Hello socket from server Event (no callback), received: " ?data)}])))
 
-(defmethod event-msg-handler :default ; Fallback
+(defmethod event-msg-handler :default ; Fallback (POD sort of)
   [{:as ev-msg :keys [event id ?data ring-req ?reply-fn send-fn]}]
   (let [session (:session ring-req)
         uid     (:uid     session)]
-    (println "Unhandled event: %s" event)
+    (println "Unhandled event: " event "id = " id)
     (when ?reply-fn
       (?reply-fn {:umatched-event-as-echoed-from-from-server event}))))
 
@@ -43,10 +61,9 @@
     (if (and ch-recv connected-uids send-fn ring-handlers)
       component
       (let [component (component/stop component)
-            packer :edn
             {:keys [ch-recv send-fn connected-uids
                     ajax-post-fn ajax-get-or-ws-handshake-fn]}
-            (sente/make-channel-socket! sente-http/http-kit-adapter {:packer packer})]
+            (sente/make-channel-socket! sente-http/http-kit-adapter {:packer :edn})]
         (log/info "WebSocket connection started") ; POD was log/debug
         (assoc component
           :ch-recv ch-recv
@@ -76,49 +93,4 @@
 (defn new-ws-connection []
   (map->WSConnection {}))
 
-;;;=============== My stuff from server.clj -- some belongs in GP?
-(defn clean-pn-for-transmit [pn]
-  "Sente can't send functions, at least."
-  (as-> pn ?pn
-    (update ?pn :transitions (fn [t] (vec (map #(dissoc % :fn) t))))))
-
-(defn get-individual 
-  [{:as ev-msg :keys [event id ?data ring-req ?reply-fn send-fn]}]
-  (if (empty? @utils/+pop+)
-    (log/info "No population in get-individual!")
-    (let [session (:session ring-req)
-          uid     (:uid     session)
-          pn-id   (:id ?data)]
-      (log/info "get-individual: %s" pn-id)
-      (when ?reply-fn
-        (when (and (>= pn-id 0) (< pn-id (count @utils/+pop+)))
-          (?reply-fn (-> (nth @utils/+pop+ (:id ?data)) utils/inv-geom :pn clean-pn-for-transmit)))))))
-
-(defmethod event-msg-handler
-  :sinet/get-individual
-  [{:as ev-msg :keys [event id ?data ring-req ?reply-fn send-fn]}]
-  (println "get-individual...")
-  (get-individual ev-msg))
-
-;;;(server>gui-push-inv (nth @+pop+ 1))
-;;; POD So far, this one is just for debugging. 
-#_(defn server>gui-notify-new-gen
-  "Push Petri net (with its geometry) to the GUI."
-  [report]
-  (let [uids (ws-connection :connected-uids )] ; <===================================
-    (if-let [uid (-> @uids :any first)]
-      (send! uid [:sinet/new-generation report])
-      (log/info "notify-new-gen failed -- BTW using log/debug"))))
-
-(defn get-individual 
-  [{:as ev-msg :keys [event id ?data ring-req ?reply-fn send-fn]}]
-  (if (empty? @utils/+pop+)
-    (log/info "No population in get-individual!")
-    (let [session (:session ring-req)
-          uid     (:uid     session)
-          pn-id   (:id ?data)]
-      (log/info "get-individual: %s" pn-id)
-      (when ?reply-fn
-        (when (and (>= pn-id 0) (< pn-id (count @utils/+pop+)))
-          (?reply-fn (-> (nth @utils/+pop+ (:id ?data)) utils/inv-geom clean-pn-for-transmit)))))))
 

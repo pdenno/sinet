@@ -2,7 +2,6 @@
   (:require [medley.core :refer (abs)]
             [clojure.pprint :refer (cl-format pprint)]
             [clojure.set :refer (union difference intersection)]
-            [gov.nist.sinet.utils :refer :all]
             [gov.nist.spntools.core :as pn :refer :all]
             [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp)]
             [gov.nist.spntools.util.reach :as pnr :refer (reachability)]
@@ -246,8 +245,9 @@
   "Generate a QPN log for the PN and return the score WRT SCADA patterns. The score is the
    average (across all complete jobs) of the process disorder of the best matched process.
    If there are very few jobs (perhaps because :elim :intro weirdness), then just score them."
-  [pn patterns]
-  (let [pn (sim/simulate pn :max-steps (* 50 (avg-scada-process-steps patterns)))
+  [pn problem gp-params]
+  (let [patterns (:scada-patterns problem)
+        pn (sim/simulate pn :max-steps (* 50 (avg-scada-process-steps patterns)))
         max-tkn (-> pn :sim :max-tkn)]
     ;(println "max-tkn =" max-tkn)
     (if (> max-tkn 20)
@@ -259,7 +259,7 @@
         (double (/ total-error (count tkn-range))))
       ;; Otherwise just a few jobs
       (let [typical-job (first (qpn-typical-jobs pn))]
-        (+ (:no-new-jobs-penalty +gp-params+)
+        (+ (:no-new-jobs-penalty gp-params)
            (calc-process-disorder typical-job patterns))))))
           
 

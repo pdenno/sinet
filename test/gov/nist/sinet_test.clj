@@ -1,11 +1,11 @@
 (ns gov.nist.sinet-test
   (:require [clojure.test :refer :all]
             [gov.nist.spntools.util.reach :as pnr]
-            [gov.nist.sinet.core :refer :all]
-            [gov.nist.sinet.util.fitness :as fit :refer :all]))
+            [gov.nist.sinet.gp :as gp :refer :all]
+            [gov.nist.sinet.fitness :as fit :refer (scada-log-f0 scada-patterns calc-process-disorder qpn-m2-bas)]))
 
 (load-file "data/SCADA-logs/scada-f0.clj") ; defines fit/scada-log-f0
-(load-file "data/test-individuals/test-m2-bas.clj") ; defines (in .core) test-m2-bas individual (a perfect individual for scada-log-f0)
+(load-file "data/test-individuals/test-m2-bas.clj") ; defines (in .gp) test-m2-bas individual (a perfect individual for scada-log-f0)
 (load-file "data/QPN-logs/qpn-m2-bas.clj") ; defines fit/qpn-m2-bas (a log for the perfect individual above)
 
 (deftest scada-pattern-disorder
@@ -21,14 +21,14 @@
                {:act :sm, :bf \*, :n \*}
              {:act :ej, :m \*}]}))
       (is (= 0
-             (fit/calc-process-disorder (fit/qpn-log-about test-m2-bas 22) 22)
-              
+             (fit/calc-process-disorder (fit/qpn-log-about gp/test-m2-bas 22) 22)
+             gp/test-m2-bas ; pod I'm guessing
               (first pats)
               22
-              (qpn-gather-job qpn-m2-bas 22))))
+              (fit/qpn-gather-tkn fit/qpn-m2-bas 22)))
       (is (= 1
-             (fit/calc-activity-disorder
-              test-m2-bas
+             (fit/calc-process-disorder
+              gp/test-m2-bas
               (first pats)
               22
               [{:act :bj, :tkns [{:type :a, :id 22}]}
@@ -37,8 +37,8 @@
                {:act :sm, :tkns [{:type :a, :id 22}]}
                {:act :ej, :tkns [{:type :a, :id 22}]}])))
       (is (= 4
-             (fit/calc-activity-disorder
-              test-m2-bas
+             (fit/calc-process-disorder
+              gp/test-m2-bas
               (first pats)
               22
               [{:act :ej, :tkns [{:type :a, :id 22}]}
