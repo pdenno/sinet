@@ -18,6 +18,7 @@
   (:re-render-flip @data)
   [views/main data])
 
+;;; See ~/Documents/git/sinet/resources-index/dev/index.html for "app"
 (defn ^:export main []
   (when-let [root (.getElementById js/document "app")]
     (reagent/render-component [app state] root)))

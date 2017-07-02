@@ -22,21 +22,24 @@
   (ws/chsk-send! [:sinet/evolve {:status :best-wishes}]))
 
 (defn drawing-area []
-  [:div#pn
+  [:div#pn {:class "col-md-10"}
    [:canvas {:id "best-pn"}]])
 
 (defn buttons []
-  [:div.buttons {:ref "buttons"} ; POD I'm not using this.
-   [:table
-    [:tbody
-     [:tr [:td [:strong "GP Control"]]] ; POD does nothing
-     [:tr [:td "Viewing PN " (:index @viewing-pn)]]
-     [:tr
-      [:td [:button {:on-click (fn [] (view-pop (swap! viewing-pn #(update % :index inc))))} "Pop+"]]
-      [:td [:button {:on-click (fn [] (view-pop (swap! viewing-pn #(update % :index dec))))} "Pop-"]]]
-     [:tr
-      [:td [:button {:on-click start-evolve} "Evolve"]]
-      [:td [:button {:on-click start-evolve} "Evolve"]]]]]])
+  [:div#buttons {:class "col-md-2"}
+   [:div {:class "container"}
+    [:div {:class "row"} [:strong "GP Control"]]
+    [:div {:class "row"} "Viewing PN " (:index @viewing-pn)]
+    [:div {:class "row"}
+     [:div {:class "btn-group btn-group-sm"}
+      [:button {:class "btn btn-primary"
+                :on-click (fn [] (view-pop (swap! viewing-pn #(update % :index inc))))} "Pop+"]
+      [:button {:class "btn btn-primary"
+                :on-click (fn [] (view-pop (swap! viewing-pn #(update % :index dec))))} "Pop-"]]]
+    [:div {:class "row"}
+     [:div {:class "btn-group btn-group-sm"}
+      [:button {:class "btn btn-primary" :on-click start-evolve} "Evolve"]
+      [:button {:class "btn btn-primary" :on-click start-evolve} "Pause Evolve"]]]]])
 
 ;;; Util for logging output to on-screen console
 (defn console-area []
@@ -57,16 +60,32 @@
 
 (defn main [data]
   (view-pop @viewing-pn)
-  [:div
-   [:div {:id "metaltop-teal"} [:li foo]]
-   [:h1 (:title @data)]
-   ;[:table [:tbody [:tr [:td [drawing-area]] [:td [buttons]]]]]
-   [drawing-area]
-   [buttons]
-   [console-area]
-   [:br]
-   [:button {:on-click ws/test-socket-event} "Send Message Event"]
-   [:br]
-   [:button {:on-click ws/test-socket-callback} "Send Message Callback"]])
+  [:body {:id "myPage" :data-spy "scroll" :data-target=".navbar" :data-offset="60"}
+   [:nav {:class "navbar navbar-default navbar-fixed-top"}
+    [:div {:class "container"}
+     [:div {:class "navbar-header"}
+      [:button {:type "button" :class "navbar-toggle" :data-toggle "collapse" :data-target "#myNavbar"}
+       [:span {:class "icon-bar"}]
+       [:span {:class "icon-bar"}]
+       [:span {:class "icon-bar"}]]
+      [:a {:class "navbar-brand" :href "#myPage"} "Logo" ]]
+     [:div {:class "collapse navbar-collapse" :id "myNavbar"}
+      [:ul {:class "nav navbar-nav navbar-right"}
+       [:li [:a {:href "#gp"}GP]]
+       [:li [:a {:href "#gpparams"}GP Parameters]]
+       [:li [:a {:href "#patterns"}Message Patterns]]]]]]
+  [:div {:class "container-fluid"}
+   [:div {:class "jumbotron text-center"} 
+    [:h1 "Sinet"]
+    [:p "System Identification for Smart Manufacturing"]]
+   [:div {:class "row"}
+    [drawing-area]
+    [buttons]]
+   [:div {:class "row"}
+    [console-area]]
+   [:div {:class "row"}
+    [:div {:class "btn-group btn-group-sm"}
+     [:button {:class "btn btn-primary" :on-click ws/test-socket-event} "Send Message Event"]
+     [:button {:class "btn btn-primary" :on-click ws/test-socket-callback} "Send Message Callback"]]]]])
 
 
