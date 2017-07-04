@@ -75,7 +75,7 @@
                          ?pop 
                        (gp/sort-by-error ?pop
                                          (-> ?c :problem :scada-patterns)
-                                         (-> ?c :gp-params :no-new-job-penalty))))
+                                         (-> ?c :gp-params :no-new-jobs-penalty))))
       ?c))
   (stop [component]
     component))

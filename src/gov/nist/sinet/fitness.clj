@@ -242,7 +242,8 @@
   "Generate a QPN log for the PN and return the score WRT SCADA patterns. The score is the
    average (across all complete jobs) of the process disorder of the best matched process.
    If there are very few jobs (perhaps because :elim :intro weirdness), then just score them."
-  [pn patterns no-new-job-penalty]
+  [pn patterns no-new-jobs-penalty]
+  (reset! +diag+ (list pn patterns no-new-jobs-penalty))
   (let [pn (sim/simulate pn :max-steps (* 50 (avg-scada-process-steps patterns)))
         max-tkn (-> pn :sim :max-tkn)]
     ;(println "max-tkn =" max-tkn)
@@ -255,7 +256,7 @@
         (double (/ total-error (count tkn-range))))
       ;; Otherwise just a few jobs
       (let [typical-job (first (qpn-typical-jobs pn))]
-        (+ no-new-job-penalty
+        (+ no-new-jobs-penalty
            (calc-process-disorder typical-job patterns))))))
           
 

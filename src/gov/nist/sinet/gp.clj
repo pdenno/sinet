@@ -474,7 +474,7 @@
     (loop [gen 0
            pop (-> problem initial-pop)]
       (as-> pop ?pop
-        (sort-by-error ?pop) ; runs the fitness function
+        (sort-by-error ?pop (pr-param :scada-patterns) (pr-param :no-new-jobs-penalty)) ; runs the fitness function
         (update-pop! ?pop)
         (report-gen ?pop gen start-time)
         (cond (< (:err (first ?pop)) 0.1) ; good enough to count as success (POD :gp-param+)
