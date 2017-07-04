@@ -2,13 +2,40 @@
   (:gen-class)
   (:require [clojure.tools.logging :as log]
             [com.stuartsierra.component :as component]
+            [clojure.tools.namespace.repl :refer [refresh refresh-all]]
             [gov.nist.sinet.config :as config]
-            [gov.nist.sinet.system :refer [system]]))
+            [gov.nist.sinet.system :as system]))
 
-(def +system+ (atom nil))
+(defonce system nil)
 
+;;; These are used in development and production.
+(defn init []
+  (alter-var-root #'system (fn [_] (system/system (config/get-config))))) 
+
+(defn start []
+  (alter-var-root #'system component/start))
+
+(defn stop []
+  (alter-var-root #'system
+    (fn [s] (when s (component/stop s)))))
+
+(defn run []
+  (init)
+  (start))
+
+(defn reset []
+  (stop)
+  (refresh :after 'user/run))
+
+;;; POD This is essential to geting past component!
+(defn app-info []
+  (:app system))
+
+;;; This is for production executable. 
 (defn -main [& args]
-  (let [config (config/get-config)
-        system (component/start (system config))]
+  (let [config (config/get-config)]
+    (run)
     (log/info "Sinet started")
-    (reset! +system+ system)))
+    system))
+
+

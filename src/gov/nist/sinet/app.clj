@@ -48,7 +48,7 @@
       (assoc ?c
              :gp-params {:pn-elements [:place :token :normal-arc :inhibitor-arc :expo-trans #_:immediate-trans #_:fixed-trans]
                          :pop-size 100
-                         :eden-mutations 4
+                         :eden-mutation-cnt 4
                          :max-gens 3
                          :debugging? true
                          :pn-k-bounded  10      ; When to give up on computing the reachability graph.
@@ -65,12 +65,21 @@
                        :use-cpus (.availableProcessors (Runtime/getRuntime)) ; counts hyperthreading apparently
                        :scada-events [:bj :aj :ej :sm] 
                        :visible-transitions [:m1-complete-job :m1-start-job :m2-complete-job :m2-start-job]
-                       ;:scada-patterns (-> "data/SCADA-logs/scada-f0-vec.clj" load-scada fit/scada-patterns)
+                       :scada-patterns (-> "data/SCADA-logs/scada-f0-vec.clj" load-scada fit/scada-patterns)
                        :data-source :ignore #_+m2-11+}) ; POD not yet dynamic, of course.
-      (assoc ?c :pop nil #_(-> ?c :problem gp/initial-pop gp/sort-by-error))
+      ;; POD This will go away someday. 
+      (assoc ?c :pop (as-> (gp/initial-pop (:problem ?c)
+                                           (-> ?c :gp-params :pop-size)
+                                           (-> ?c :gp-params :eden-dist)
+                                           (-> ?c :gp-params :eden-mutation-cnt))
+                         ?pop 
+                       (gp/sort-by-error ?pop
+                                         (-> ?c :problem :scada-patterns)
+                                         (-> ?c :gp-params :no-new-job-penalty))))
       ?c))
   (stop [component]
     component))
 
 (defn new-app []
-  (map->App {})) 
+ (map->App {}))
+

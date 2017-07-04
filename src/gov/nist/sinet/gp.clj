@@ -3,7 +3,6 @@
   {:author "Peter Denno"}
   (:require [clojure.tools.logging :as log]
             [clojure.pprint :refer (cl-format pprint)]
-            [medley.core :refer (abs)]
             [gov.nist.spntools.core :as pn :refer :all]
             [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp pn-ok-> as-pn-ok->)]
             [gov.nist.spntools.util.reach :as pnr :refer (reachability)]
@@ -25,66 +24,38 @@
 ;;;       - DONE (enough): Probably need more than one Eden individual for diversity (backwards, multi-loops etc).
 ;;;       - GSPN: Maybe I shouldn't care about absorbing states?
 
+;;; POD Two nasty functions...
+(defn app-info []
+  ((resolve 'gov.nist.sinet.run/app-info)))
+
+(defn update-pop! [pop]
+  (alter-var-root
+   (resolve 'gov.nist.sinet.run/system)
+   #(assoc-in % [:app :pop] pop)))
+
+(defn gp-param [name]
+  (-> (app-info) :gp-params name))
+
+(defn pr-param [name]
+  (-> (app-info) :problem name))
+
 (defrecord Inv [pn id error history])
 (def +diag+ (atom nil))
 (def +log+ (atom []))
 (defn log [msg] (swap! +log+ conj msg))
 
-(def +pop+ "Diagnostic set to population vector" (atom nil))
 (def +edens+ "Vector of eden individuals"  (atom nil))
 
-;;;  DOCUMENTATION REQUIREMENT: Determine what among the +gp-params+ matters.
+;;;  DOCUMENTATION REQUIREMENT: Determine what among the :gp-params matters.
 ;;; :pn-elements -- The PN elements that can appear in individuals.
 ;;; :initial-individuals -- percentage of each element type.
 ;;; :elite-individuals -- carry over this amount of the best without revision.
 ;;; :max-initial-mutations -- apply 1 to this number of mutations (uniform distribution to the "Eden individual")
-(def +gp-params+
-  "Genetic programming algorithm parameters: they control important aspects of the solution."
-  {:pn-elements [:place :token :normal-arc :inhibitor-arc :expo-trans #_:immediate-trans #_:fixed-trans]
-   :pop-size 100
-   :eden-mutations 4
-   :max-gens 3
-   :debugging? true
-   :pn-k-bounded  10      ; When to give up on computing the reachability graph.
-   :pn-max-rs     1000
-   :crossover-to-mutation-ratio 0.5
-   :select-pressure 70 ; POD not normalized to pop-size
-   :elite-individuals 3
-   :no-new-jobs-penalty 1.00001
-   :crossover-keeps-parents? true ; NYI
-   :initial-mutations 10  ; max number of times to mutate eden individuals to create first generation.
-   :mutation-dist ; The pdf for ordinary mutations (not eden mutations)
-   [[:add-place        1/10]    ; Add place (mine can't be absorbing, thus Nobile 1&2).
-    [:add-token        1/10]    ; Add token to some place (visible or hidden).
-    [:add-trans        1/10]    ; Add transition, connecting to input and output places.
-    [:add-arc          1/10]
-    [:add-inhibitor    1/10]    ; Add inhibitor arc, connecting a place to a trans
-    [:remove-place     1/10]
-    [:remove-token     1/10]
-    [:remove-trans     1/10]
-    [:remove-arc       1/10]
-    [:remove-inhibitor 1/10]
-    [:swap-places-vv   2/10]]
-   :eden-dist ; for creation of eden individual, which are already rather sparse
-   [[:add-place        2/10]
-    [:add-token        2/10]
-    [:add-trans        2/10]
-    [:add-arc          2/10]
-    [:add-inhibitor    2/10]
-    [:swap-places-vv   2/10]]})
 
 ;;; POD As currently conceived, the problem is to associate :scada-events with :visible-transitions
 ;;;     and then of course, get the wiring correct. 
 ;;;     Each transition in the initial population will be randomly given one of the four functions
 ;;;;    (from those that not already chosen). Mutations will move them around. etc.
-;;(load-file "data/SCADA-logs/scada-f0.clj") ; defines fit/scada-log-f0
-(def +problem+
-  {:visible-places [:buffer :m1-blocked :m1-busy :m2-busy :m2-starved]
-   :use-cpus (.availableProcessors (Runtime/getRuntime)) ; counts hyperthreading apparently
-   :scada-events [:bj :aj :ej :sm] 
-   :visible-transitions [:m1-complete-job :m1-start-job :m2-complete-job :m2-start-job]
-;   :scada-patterns (fit/scada-patterns fit/scada-log-f0)
-   :data-source :ignore #_+m2-11+}) ; POD not yet dynamic, of course.
 
 (defn add-extra-nodes
   "Return a map {:t <> :p <> :t-adds, :p-adds} naming nodes (transitions or places) to be added.
@@ -171,7 +142,7 @@
 
 (defn rand-mute-key
   "Return a keyword designating a mutation function."
-  ([] (rand-mute-key (:mutation-dist +gp-params+)))
+  ([] (rand-mute-key (gp-param :mutation-dist)))
   ([mdist]
    (let [r (rand (reduce (fn [sum p] (+ sum (second p))) 0 mdist))] ; 'normalized'
     (loop [dist mdist
@@ -392,13 +363,13 @@
 (defn add-scada-report-fns [inv]
   "Randomly add SCADA report functions to transitions."
   (let [report-fn (fn [name] (fn [tkns] {:act name :tkns tkns}))
-        events-left (atom (:scada-events +problem+))
+        events-left (atom (pr-param :scada-events))
         trans-left (atom (range (count (-> inv :pn :transitions))))]
     (reduce (fn [inv _]
               (update-in inv [:pn :transitions (pick-from-atom! trans-left)]
                          #(assoc % :fn (report-fn (pick-from-atom! events-left)))))
               inv
-              (range (count (:scada-events +problem+))))))
+              (range (count (pr-param :scada-events))))))
 
 ;;; POD This (and one for trans and place) belong in pnu/
 (defn arc-index
@@ -444,35 +415,35 @@
        (:pn inv)
        (map :name (-> inv :pn :transitions))))))
 
-(defn initial-pop [problem]
+(defn initial-pop [problem pop-size eden-dist eden-mutation-cnt]
   (let [edens (eden-pns! problem)
         pop-cnt (atom -1)]
     (vec (repeatedly
-          (:pop-size +gp-params+)
+          pop-size
           #(as-> (nth edens (rand-int (count edens))) ?inv
              (reduce (fn [inv _]
-                       (mutate inv :force (rand-mute-key (:eden-dist +gp-params+))))
+                       (mutate inv :force (rand-mute-key eden-dist)))
                      (map->Inv {:pn (:pn ?inv)
                                 :id (swap! pop-cnt inc)
                                 :history [(:id ?inv)]})
-                     (range (:eden-mutations +gp-params+)))
+                     (range eden-mutation-cnt))
              (assoc-in ?inv [:pn :id] (:id ?inv))
              (add-scada-report-fns ?inv)
              (add-color-binding ?inv))))))
 
-(defn i-error [inv]
+(defn i-error [inv patterns penalty]
   "Compute the individual's score."
   (let [id (:id inv)
         result (assoc inv
                       :err
-                      (fit/workflow-fitness (:pn inv) +problem+ +gp-params+))]
+                      (fit/workflow-fitness (:pn inv) patterns penalty))]
     result))
 
 (defn sort-by-error
   "Add value for :err to each PN and used it to sort the population; best first."
-  [popu]
+  [popu patterns penalty]
   (as-> popu ?i
-    (pmap i-error ?i) ; POD pmap
+    (pmap #(i-error % patterns penalty) ?i) ; POD pmap
     (vec (sort #(< (:err %1) (:err %2)) ?i))))
 
 ;;; Finally, we'll define a function to select an individual from a sorted
@@ -484,31 +455,31 @@
          (apply min (repeatedly tournament-size #(rand-int size))))))
 
 (defn reset-all! []
-  (reset! pnr/+k-bounded+ (:pn-k-bounded +gp-params+))
-  (reset! pnr/+max-rs+ (:pn-max-rs +gp-params+))
-  (reset! pn/+max-states+ (:pn-max-states +gp-params+))
+  (reset! pnr/+k-bounded+ (gp-param :pn-k-bounded))
+  (reset! pnr/+max-rs+ (gp-param :pn-max-rs))
+  (reset! pn/+max-states+ (gp-param :pn-max-states))
   (pnu/reset-ids! {})
   (reset! +log+ []))
 
-(declare +pop+ evolve validate-gp-params report-gen make-next-gen write-gen)
+(declare evolve validate-gp-params report-gen make-next-gen write-gen)
 
 (defn evolve
   "Toplevel: Starting with a random population (create one if given just one arg), 
    sort, select, check for a solution and produce a new population."
   [problem]
   (reset-all!)
-  (validate-gp-params +gp-params+)
+  (validate-gp-params nil) ; needs integration with system. 
   (println "Starting evolution...")
   (let [start-time (System/currentTimeMillis)]
     (loop [gen 0
            pop (-> problem initial-pop)]
       (as-> pop ?pop
         (sort-by-error ?pop) ; runs the fitness function
-        (reset! +pop+ ?pop)
+        (update-pop! ?pop)
         (report-gen ?pop gen start-time)
-        (cond (< (:err (first ?pop)) 0.1) ; good enough to count as success (POD +gp-param+)
+        (cond (< (:err (first ?pop)) 0.1) ; good enough to count as success (POD :gp-param+)
               (do (println "Success!") (first ?pop)),
-              (= gen (:max-gens +gp-params+))
+              (= gen (gp-param :max-gens))
               (do (println "Stopped at max-gen.") false)
               :else
               (recur
@@ -524,16 +495,18 @@
 (defn make-next-gen [sorted-pop & {:keys [gen] :or {gen -1}}]
   "Compute the next generation, a combination of tournament selection, mutations and crossover
    of tournament winners, and elite individuals."
-  (let [e-cnt (:elite-individuals +gp-params+)]
+  (let [e-cnt (gp-param :elite-individuals)
+        pop-size (gp-param :pop-size)
+        pressure (gp-param :select-pressure)]
     ;;(write-gen sorted-pop gen)
     (as-> sorted-pop ?spop
       (into (subvec ?spop 0 e-cnt)
-            (repeatedly (* 7/8 (:pop-size +gp-params+)) #(mutate (select ?spop (:select-pressure +gp-params+)))))
-       ;;(repeatedly (* 2/8 (:pop-size +gp-params+)) #(crossover (select ?spop 7) (select ?spop 7)))
+            (repeatedly (* 7/8 pop-size) #(mutate (select ?spop pressure))))
+       ;;(repeatedly (* 2/8 (gp-param :pop-size)) #(crossover (select ?spop 7) (select ?spop 7)))
        (loop [pop ?spop]
-         (if (>= (count pop) (:pop-size +gp-params+))
-           (subvec (vec pop) 0 (:pop-size +gp-params+))
-           (recur (conj pop (select sorted-pop (:select-pressure +gp-params+)))))))))
+         (if (>= (count pop) pop-size)
+           (subvec (vec pop) 0 pop-size)
+           (recur (conj pop (select sorted-pop pressure))))))))
 
 (def report-data "A map of things to report to the GUI" (atom nil))
 (declare server>gui-notify-new-gen)
@@ -551,7 +524,7 @@
               :elapsed-time (int (/ (- (System/currentTimeMillis) start-time) 1000))
               :best-error (:err best)
               :id-of-best (:id best)
-              :median-error (:err (nth pop (int (/ (:pop-size +gp-params+) 2))))
+              :median-error (:err (nth pop (int (/ (gp-param :pop-size) 2))))
               :average-pn-size (pnu/avg (map #(-> % :pn pnu/pn-size) pop))})))
   pop)
 
@@ -575,13 +548,8 @@
                   (dissoc :M2Mp :initial-marking :Q :steady-state))))
 
 ;;;==================== Diagnostics ========================================
-(defn debug-initial-pop []
-  (reset-all!)
-  (reset! +pop+ (initial-pop +problem+))
-  true)
-
 ;;; POD Problem with this in that it doesn't save :visible?
-(defn read-a-pop []
+#_(defn read-a-pop []
   (reset! +pop+
           (map (fn [ix]
                  (as-> (pnml/read-pnml (str "data/pops/initial-" ix ".xml")) ?i
@@ -589,7 +557,7 @@
                    (eval-inv ?i)))
                (range 100))))
 
-(defn write-a-pop
+#_(defn write-a-pop
   "Return a population of the argument problem sorted by error.
    The best individual in this population is data/initial-1.xml."
   [problem]
@@ -600,7 +568,7 @@
            :positions (:geom problem))
          (reset! +pop+ (-> problem initial-pop sort-by-error)))))
 
-(defn write-gen
+#_(defn write-gen
   "Write a population as 'data/gen-<gen>/individual-n.xml'"
   [popu gen]
   (dotimes [n (count popu)]
@@ -609,9 +577,9 @@
       (pnml/write-pnml
        (nth popu n)
        :file filename
-       :positions (:geom +problem+)))))
+       :positions (pr-param :geom)))))
 
-(defn diag-eval-pop
+#_(defn diag-eval-pop
   "Return score and compute times for each individual in the population, updating +pop+."
   []
   (let [initial-start-time (System/currentTimeMillis)]
@@ -725,19 +693,19 @@
 (ws/register-method
   :sinet/get-individual     
   (fn [{:as ev-msg :keys [?data ?reply-fn]}]
-    (reset! +diag+ ev-msg)
-    (if (empty? @+pop+)
-      (log/info "No population in get-individual!")
-      (let [pn-index  ?data]
-        (println "get-individual: " pn-index)
-        (when ?reply-fn
-          (when (and (>= pn-index 0) (< pn-index (count @+pop+)))
-            (?reply-fn (-> (nth @+pop+ pn-index) inv-geom :pn clean-pn-for-transmit))))))))
+    (let [pop (-> (app-info) :pop)]
+      (if (empty? pop)
+        (log/info "No population in get-individual!")
+        (let [pn-index  ?data]
+          (println "get-individual: " pn-index)
+          (when ?reply-fn
+            (when (and (>= pn-index 0) (< pn-index (count pop)))
+              (?reply-fn (-> (nth pop pn-index) inv-geom :pn clean-pn-for-transmit)))))))))
 
 (ws/register-method
  :sinet/evolve
  (fn [ev-msg]
-   (evolve +problem+)))
+   (evolve (-> (app-info) :problem))))
 
 (defn server>gui-notify-new-gen [report])
 ;;;(server>gui-push-inv (nth @+pop+ 1))
@@ -754,4 +722,4 @@
 ;;; POD should be start of component start. Useful for GUI.
 ;;; Not defonce
 ;(when (empty? @+pop+)
-;  (reset! +pop+ (-> +problem+ initial-pop sort-by-error)))
+;  (reset! +pop+ (-> (app-info) :problem initial-pop sort-by-error)))

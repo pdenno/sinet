@@ -65,7 +65,7 @@
             {:keys [ch-recv send-fn connected-uids
                     ajax-post-fn ajax-get-or-ws-handshake-fn]}
             (sente/make-channel-socket! sente-http/http-kit-adapter {:packer :edn})]
-        (log/info "WebSocket connection started") ; POD was log/debug
+        (log/debug "WebSocket connection started")
         (assoc component
           :ch-recv ch-recv
           :connected-uids connected-uids
@@ -75,8 +75,9 @@
           (->WSRingHandlers ajax-post-fn ajax-get-or-ws-handshake-fn)))))
   (stop [component]
     (when ch-recv (async/close! ch-recv))
-    (log/info "WebSocket connection stopped") ; POD was log/debug
-    (:stop-the-thing component)
+    (log/debug "WebSocket connection stopped")
+    ;; stop is called from start; in that case, stop-fn won't be set.
+    (when-let [stop-fn (:stop-the-thing component)] (stop-fn)) 
     (assoc component
       :ch-recv nil :connected-uids nil :send-fn nil :ring-handlers nil)))
 

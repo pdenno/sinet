@@ -1,4 +1,4 @@
-(ns gov.nist.sinet.user
+(ns user
   (:require
    [clojure.java.io :as io]
    [clojure.java.javadoc :refer [javadoc]]
@@ -13,10 +13,12 @@
    [gov.nist.sinet.config :as config]
    [gov.nist.sinet.system :as system]))
 
+;; See http://thinkrelevance.com/blog/2013/06/04/clojure-workflow-reloaded
+
 (def system nil)
 
 (defn init []
-  (alter-var-root #'system (fn [huh?] (system/system (config/get-config))))) ; POD added huh?
+  (alter-var-root #'system (fn [_] (system/system (config/get-config))))) 
 
 (defn start []
   (alter-var-root #'system component/start))

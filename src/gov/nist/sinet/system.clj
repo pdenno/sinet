@@ -8,4 +8,4 @@
   (component/system-map
    :ws-connection (ws/new-ws-connection)
    :http-server (component/using (server/new-http-server (:port config)) [:ws-connection])
-   :app (component/using (app/new-app) [:ws-connection]))) ; POD GP goes here!
+   :app (component/using (app/new-app) [:ws-connection])))
