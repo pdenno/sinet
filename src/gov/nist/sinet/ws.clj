@@ -3,7 +3,8 @@
             [com.stuartsierra.component :as component]
             [clojure.core.async :as async]
             [taoensso.sente.server-adapters.http-kit :as sente-http]
-            [taoensso.sente :as sente]))
+            [taoensso.sente :as sente]
+            [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp)]))
 
 (def ping-counts (atom 0))
 
@@ -26,7 +27,7 @@
 
 ;; Wrap for logging, catching, etc.:
 (defn  event-msg-handler* [{:as ev-msg :keys [id ?data event]}]
-  (println "wrapper, id = " id)
+  ;(println "wrapper, id = " id)
   (if (contains? @event-methods id)
     (do ;(log/info (str "event-method " id))
         ((get @event-methods id) ev-msg))
@@ -89,7 +90,10 @@
 (defn ring-handlers [ws-connection]
   (:ring-handlers ws-connection))
 
-;;; The following is used in system.clj
+(def +ws+ (atom nil))
+
+;;; POD The following is used in system.clj.
+;;; I add the atom because I'm sort of lost as to how component works!
 (defn new-ws-connection []
   (map->WSConnection {}))
 

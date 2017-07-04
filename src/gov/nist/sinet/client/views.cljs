@@ -47,7 +47,7 @@
    [:strong "Console"]
    [:textarea {:value @ws/output-atom :readOnly true
                :on-change (fn [e] (aset e "scrollTop" (.-scrollHeight e))) ; POD does nothing
-               :style {:width "100%" :height "200px"}}]])
+               :style {:width "100%" :height "200px" :font-size "small"}}]])
 
 (quil/defsketch best-pn 
   :host "best-pn"
@@ -60,32 +60,35 @@
 
 (defn main [data]
   (view-pop @viewing-pn)
-  [:body {:id "myPage" :data-spy "scroll" :data-target=".navbar" :data-offset="60"}
-   [:nav {:class "navbar navbar-default navbar-fixed-top"}
+  [:body {:id "myPage" :data-spy "scroll" :data-target ".navbar" :data-offset "60"}
+   [:nav {:class "navbar navbar-default navbar-fixed-top"
+          :style {:margin-bottom "0" :background-color "#f4511e" :z-index "9999"
+                  :border "0" :font-size "14px" :line-height "1.42857143" 
+                  :letter-spacing "4px" :border-radius "0"}}
     [:div {:class "container"}
      [:div {:class "navbar-header"}
-      [:button {:type "button" :class "navbar-toggle" :data-toggle "collapse" :data-target "#myNavbar"}
+      [:button {:type "button" :class "navbar-toggle" :data-toggle "collapse" :data-target "#myNavbar" :style {:color "#ffffff"}} ; ditto
        [:span {:class "icon-bar"}]
        [:span {:class "icon-bar"}]
        [:span {:class "icon-bar"}]]
-      [:a {:class "navbar-brand" :href "#myPage"} "Logo" ]]
-     [:div {:class "collapse navbar-collapse" :id "myNavbar"}
-      [:ul {:class "nav navbar-nav navbar-right"}
-       [:li [:a {:href "#gp"}GP]]
-       [:li [:a {:href "#gpparams"}GP Parameters]]
-       [:li [:a {:href "#patterns"}Message Patterns]]]]]]
-  [:div {:class "container-fluid"}
-   [:div {:class "jumbotron text-center"} 
-    [:h1 "Sinet"]
-    [:p "System Identification for Smart Manufacturing"]]
-   [:div {:class "row"}
-    [drawing-area]
-    [buttons]]
-   [:div {:class "row"}
-    [console-area]]
-   [:div {:class "row"}
-    [:div {:class "btn-group btn-group-sm"}
-     [:button {:class "btn btn-primary" :on-click ws/test-socket-event} "Send Message Event"]
-     [:button {:class "btn btn-primary" :on-click ws/test-socket-callback} "Send Message Callback"]]]]])
+      [:a {:class "navbar-brand" :href "#myPage" :style {:color "#ffffff"}} "SINET" ]] 
+     [:div {:class "collapse navbar-collapse" :id "myNavbar"} 
+      [:ul {:class "nav navbar-nav navbar-right"} 
+       [:li [:a {:href "#gp"}"GP"]]
+       [:li [:a {:href "#gpparams"}"GP Parameters"]]
+       [:li [:a {:href "#patterns"}"Message Patterns"]]]]]]
+    [:div {:class "jumbotron text-center" :style {:background-color "#f4511e" :color "#ffffff"}}
+     [:h1 "Sinet"]
+     [:p "System Identification for Smart Manufacturing"]]
+   [:div {:class "container-fluid"}
+    [:div {:class "row"}
+     [drawing-area]
+     [buttons]]
+    [:div {:class "row"}
+     [console-area]]
+    [:div {:class "row"}
+     [:div {:class "btn-group btn-group-sm"}
+      [:button {:class "btn btn-primary" :on-click ws/test-socket-event} "Send Message Event"]
+      [:button {:class "btn btn-primary" :on-click ws/test-socket-callback} "Send Message Callback"]]]]])
 
 

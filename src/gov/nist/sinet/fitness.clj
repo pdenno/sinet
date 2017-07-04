@@ -11,12 +11,6 @@
 
 (def +diag+ (atom nil))
 
-(defn preprocess-log
-  "Add line numbers. This is used by hand on the datafile."
-  [data]
-  (reduce (fn [data n] (assoc-in data [:log n :line] n))
-          data (range (count (:log data)))))
-
 (defn scada-gather-job
   "Return every mention of of job-id in chronological order."
   [data job-id]
@@ -65,7 +59,7 @@
   "Compute the problem's SCADA patterns. It is a vector of maps with keys
    (:id :form :njobs :relations). Run once per problem."
   [log]
-  (as-> (:log log) ?pats ; POD fix this! All this preprocessing
+  (as-> log ?pats 
     (all-scada-patterns ?pats)
     (trim-patterns ?pats 5 5)
     (map #(as-> % ?pat
@@ -219,9 +213,12 @@
 (defn avg-scada-process-steps
   "Calculate the weighted average number of steps in a SCADA pattern."
   [patterns]
-  (let [njobs (apply + (map #(:njobs %) patterns))]
-    (/ (apply + (map #(* (/ (:njobs %) njobs) (count (:form %))) patterns))
-       (count patterns))))
+  (let [npat (count patterns)]
+    (when (zero? npat)
+      (throw (ex-info "Insufficient data to find a pattern" {})))
+    (let [njobs (apply + (map #(:njobs %) patterns))]
+      (/ (apply + (map #(* (/ (:njobs %) njobs) (count (:form %))) patterns))
+         npat))))
 
 ;;; +1 for every precedence constraint violated. +1 for each act not manifest in the QPN log. 
 ;;; Will need something more for loops, but we'll get to that later.

@@ -5,7 +5,10 @@
             [gov.nist.sinet.config :as config]
             [gov.nist.sinet.system :refer [system]]))
 
+(def +system+ (atom nil))
+
 (defn -main [& args]
-  (let [config (config/get-config)]
-    (component/start (system config))
-    (log/info "Sinet started")))
+  (let [config (config/get-config)
+        system (component/start (system config))]
+    (log/info "Sinet started")
+    (reset! +system+ system)))

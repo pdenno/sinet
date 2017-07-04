@@ -28,7 +28,8 @@
                  [gov.nist/spntools          "0.1.0-SNAPSHOT" :exclusions [org.clojure/clojure]]
                  [quil                       "2.6.0"]
                  [reagent                    "0.7.0"]
-                 [org.webjars/bootstrap "4.0.0-alpha"]]
+                 [org.webjars/bootstrap      "3.3.7"]
+                 #_[org.webjars/bootstrap "4.0.0-alpha"]]
 
   :plugins [[lein-figwheel "0.5.10"]
             [lein-cljsbuild "1.1.4"]]

@@ -77,13 +77,13 @@
 ;;;     and then of course, get the wiring correct. 
 ;;;     Each transition in the initial population will be randomly given one of the four functions
 ;;;;    (from those that not already chosen). Mutations will move them around. etc.
-(load-file "data/SCADA-logs/scada-f0.clj") ; defines fit/scada-log-f0
+;;(load-file "data/SCADA-logs/scada-f0.clj") ; defines fit/scada-log-f0
 (def +problem+
   {:visible-places [:buffer :m1-blocked :m1-busy :m2-busy :m2-starved]
    :use-cpus (.availableProcessors (Runtime/getRuntime)) ; counts hyperthreading apparently
    :scada-events [:bj :aj :ej :sm] 
    :visible-transitions [:m1-complete-job :m1-start-job :m2-complete-job :m2-start-job]
-   :scada-patterns (fit/scada-patterns fit/scada-log-f0)
+;   :scada-patterns (fit/scada-patterns fit/scada-log-f0)
    :data-source :ignore #_+m2-11+}) ; POD not yet dynamic, of course.
 
 (defn add-extra-nodes
@@ -742,6 +742,7 @@
 (defn server>gui-notify-new-gen [report])
 ;;;(server>gui-push-inv (nth @+pop+ 1))
 ;;; POD So far, this one is just for debugging. 
+
 #_(defn server>gui-notify-new-gen
   "Push Petri net (with its geometry) to the GUI."
   [report]
@@ -752,5 +753,5 @@
 
 ;;; POD should be start of component start. Useful for GUI.
 ;;; Not defonce
-(when (empty? @+pop+)
-  (reset! +pop+ (-> +problem+ initial-pop sort-by-error)))
+;(when (empty? @+pop+)
+;  (reset! +pop+ (-> +problem+ initial-pop sort-by-error)))
