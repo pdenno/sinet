@@ -37,5 +37,3 @@
     (run)
     (log/info "Sinet started")
     system))
-
-

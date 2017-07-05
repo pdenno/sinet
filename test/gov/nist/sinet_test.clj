@@ -2,13 +2,13 @@
   (:require [clojure.test :refer :all]
             [gov.nist.spntools.util.reach :as pnr]
             [gov.nist.sinet.gp :as gp :refer :all]
-            [gov.nist.sinet.fitness :as fit :refer (scada-log-f0 scada-patterns calc-process-disorder qpn-m2-bas)]))
+            [gov.nist.sinet.fitness :as fit #_:refer #_(scada-log-f0 scada-patterns calc-process-disorder qpn-m2-bas)]))
 
-(load-file "data/SCADA-logs/scada-f0.clj") ; defines fit/scada-log-f0
-(load-file "data/test-individuals/test-m2-bas.clj") ; defines (in .gp) test-m2-bas individual (a perfect individual for scada-log-f0)
-(load-file "data/QPN-logs/qpn-m2-bas.clj") ; defines fit/qpn-m2-bas (a log for the perfect individual above)
+#_(load-file "data/SCADA-logs/scada-f0.clj") ; defines fit/scada-log-f0
+#_(load-file "data/test-individuals/test-m2-bas.clj") ; defines (in .gp) test-m2-bas individual (a perfect individual for scada-log-f0)
+#_(load-file "data/QPN-logs/qpn-m2-bas.clj") ; defines fit/qpn-m2-bas (a log for the perfect individual above)
 
-(deftest scada-pattern-disorder
+#_(deftest scada-pattern-disorder
   (testing "scada-pattern-generation-and-qpn-disorder"
     (let [pats (as-> (:log fit/scada-log-f0) ?pats
                  (fit/scada-patterns ?pats)

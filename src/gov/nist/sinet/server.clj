@@ -9,6 +9,8 @@
             [org.httpkit.server :refer (run-server)]
             [gov.nist.sinet.ws :as ws]))
 
+(def +diag+ (atom nil))
+
 (defn handler [ajax-post-fn ajax-get-or-ws-handshake-fn]
   (routes
    (GET  "/"     _   (clojure.java.io/resource "index.html"))
@@ -41,7 +43,7 @@
 
             server-stop (run-server (app handler) {:port port})]
         (log/debug "HTTP server started")
-        (assoc component :server-stop server-stop))))
+        (assoc component :server-stop server-stop)))) ; <=== POD huh?
   (stop [component]
     (when server-stop (server-stop))
     (log/debug "HTTP server stopped")

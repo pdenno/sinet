@@ -31,7 +31,8 @@
 (defn update-pop! [pop]
   (alter-var-root
    (resolve 'gov.nist.sinet.run/system)
-   #(assoc-in % [:app :pop] pop)))
+   #(assoc-in % [:app :pop] pop))
+  pop)
 
 (defn gp-param [name]
   (-> (app-info) :gp-params name))
@@ -462,6 +463,7 @@
   (reset! +log+ []))
 
 (declare evolve validate-gp-params report-gen make-next-gen write-gen)
+;(defn initial-pop [problem pop-size eden-dist eden-mutation-cnt]
 
 (defn evolve
   "Toplevel: Starting with a random population (create one if given just one arg), 
@@ -472,9 +474,10 @@
   (println "Starting evolution...")
   (let [start-time (System/currentTimeMillis)]
     (loop [gen 0
-           pop (-> problem initial-pop)]
+           pop (initial-pop (:problem (app-info)) (gp-param :pop-size)
+                            (gp-param :eden-dist) (gp-param :eden-mutation-cnt))]
       (as-> pop ?pop
-        (sort-by-error ?pop (pr-param :scada-patterns) (pr-param :no-new-jobs-penalty)) ; runs the fitness function
+        (sort-by-error ?pop (pr-param :scada-patterns) (gp-param :no-new-jobs-penalty)) ; runs the fitness function
         (update-pop! ?pop)
         (report-gen ?pop gen start-time)
         (cond (< (:err (first ?pop)) 0.1) ; good enough to count as success (POD :gp-param+)
@@ -547,110 +550,6 @@
                   pn/steady-state-props
                   (dissoc :M2Mp :initial-marking :Q :steady-state))))
 
-;;;==================== Diagnostics ========================================
-;;; POD Problem with this in that it doesn't save :visible?
-#_(defn read-a-pop []
-  (reset! +pop+
-          (map (fn [ix]
-                 (as-> (pnml/read-pnml (str "data/pops/initial-" ix ".xml")) ?i
-                   (map->Inv {:pn ?i :id ix :history []})
-                   (eval-inv ?i)))
-               (range 100))))
-
-#_(defn write-a-pop
-  "Return a population of the argument problem sorted by error.
-   The best individual in this population is data/initial-1.xml."
-  [problem]
-  (let [pnum (atom 0)]
-    (map #(pnml/write-pnml
-           (:pn %)
-           :file (str "data/junk/initial-" (:id %) ".xml")
-           :positions (:geom problem))
-         (reset! +pop+ (-> problem initial-pop sort-by-error)))))
-
-#_(defn write-gen
-  "Write a population as 'data/gen-<gen>/individual-n.xml'"
-  [popu gen]
-  (dotimes [n (count popu)]
-    (let [filename (str "data/pops/gen-" gen "/individual-" (inc n) ".xml")]
-      (clojure.java.io/make-parents filename)
-      (pnml/write-pnml
-       (nth popu n)
-       :file filename
-       :positions (pr-param :geom)))))
-
-#_(defn diag-eval-pop
-  "Return score and compute times for each individual in the population, updating +pop+."
-  []
-  (let [initial-start-time (System/currentTimeMillis)]
-    (doseq [inv @+pop+]
-      (let [start-time (System/currentTimeMillis)]
-        (cl-format *out* "~%Individual ~A err: ~A time: ~A"
-                   (:id inv)
-                   (do (swap! +pop+ #(assoc % (:id inv) (-> inv eval-inv i-error)))
-                       (if (:err inv) (cl-format nil "~8,3F" (:err inv)) "NA"))
-                   (/ (- (System/currentTimeMillis) start-time) 1000.0))))
-    (cl-format *out* "~%Complete execution time: ~A"
-               (/ (- (System/currentTimeMillis) initial-start-time) 1000.0))))
-
-;;;===================================================================================
-;;;============================= Two machine 1 buffer spot ===========================
-;;;===================================================================================
-
-;;; Rates :m1 1.0, :m2 1.0  data/m2-inhib-bbs-balanced.xml
-(def +m2-11+
-  {:buffer     0.33333
-   :m1-blocked 0.33333
-   :m1-busy    0.66667
-   :m2-busy    0.66667
-   :m2-starved 0.33333})
-
-;;; Rates :m1 1.4, :m2 0.89  data/m2-inhib-bbs.xml
-(def +m2-1489+
-  {:buffer     0.49023
-   :m1-blocked 0.49023
-   :m1-busy    0.50977
-   :m2-busy    0.80188
-   :m2-starved 0.19812})
-
-;;; POD these are starvation values for :m2 on MJPdes/data/submodel-1.clj.
-;;; Unlike LS's model, I don't have pairs of (x, f(x)). These are just f(x)
-;;; for x = (and (feed-buffer-empty? <machine>) (not (busy? <machine>))).
-#_(def +target-data+ ; Here is one of the values from data/submodel-1-out.clj.
-  {:TP 0.8616667,
-   :number-of-jobs 15510,
-   :jobmix {:jobType1 {:w {:m1 1.0, :m2 1.0}, :portion 1.0}},
-   :avg-buffer-occupancy {:b1 1.5226589467929488},
-   :status nil,
-   :runtime 12.36,
-   :starved {:m1 0.0, :m2 0.03542190667446635},
-   :observed-residence-time 4.046157396269706,
-   :blocked {:m1 0.0, :m2 0.0},
-   :bottleneck-machine :m1,
-   :process-id 0})
-
-#_(map->Model
- {:line
-  {:m1 (map->ExpoMachine {:lambda 0.1 :mu 0.9 :W 1.0})
-   :b1 (map->Buffer {:N 3})
-   :m2 (map->ExpoMachine {:lambda 0.1 :mu 0.9 :W 1.0})}
-  :number-of-simulations 20
-  :topology [:m1 :b1 :m2]
-  :entry-point :m1
-  :params {:warm-up-time 2000 :run-to-time 20000}
-  :jobmix {:jobType1 (map->JobType {:portion 1.0 :w {:m1 1.0, :m2 1.0}})}})
-
-#_(def submodel-1
-  (mjp/map->Model
-   {:line
-    {:m1 (mjp/map->ExpoMachine {:lambda 0.1 :mu 0.9 :W 1.0})
-     :b1 (mjp/map->Buffer {:N 3})
-     :m2 (mjp/map->ExpoMachine {:lambda 0.1 :mu 0.9 :W 1.0})}
-    :number-of-simulations 1
-    :topology [:m1 :b1 :m2]
-    :entry-point :m1
-    :params {:warm-up-time 2000 :run-to-time 20000} ; Was 20000 on training.
-    :jobmix {:jobType1 (mjp/map->JobType {:portion 1.0 :w {:m1 1.0, :m2 1.0}})}}))
 
 (defn print-inv [p writer]
   (.write writer (cl-format nil "#Inv [id=~S, err=~A]"
@@ -707,19 +606,12 @@
  (fn [ev-msg]
    (evolve (-> (app-info) :problem))))
 
-(defn server>gui-notify-new-gen [report])
-;;;(server>gui-push-inv (nth @+pop+ 1))
-;;; POD So far, this one is just for debugging. 
-
-#_(defn server>gui-notify-new-gen
+(defn server>gui-notify-new-gen
   "Push Petri net (with its geometry) to the GUI."
   [report]
-  (let [uids (ws-connection :connected-uids )] ; <===================================
+  (let [connect (-> (app-info) :ws-connection)
+        uids (:connected-uids connect)]
     (if-let [uid (-> @uids :any first)]
-      (ws/send! uid [:sinet/new-generation report])
+      (ws/send! connect uid [:sinet/new-generation report])
       (log/info "notify-new-gen failed -- BTW using log/debug"))))
 
-;;; POD should be start of component start. Useful for GUI.
-;;; Not defonce
-;(when (empty? @+pop+)
-;  (reset! +pop+ (-> (app-info) :problem initial-pop sort-by-error)))

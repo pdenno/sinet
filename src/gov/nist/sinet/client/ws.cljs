@@ -1,12 +1,14 @@
 (ns gov.nist.sinet.client.ws
-  (:require [taoensso.encore :as encore :refer-macros (have have?)] ; POD two logging facilities
+  (:require [clojure.string :as str]
+            [taoensso.encore :as encore :refer-macros (have have?)] ; POD two logging facilities
             [taoensso.timbre :as timbre :refer-macros (tracef debugf infof warnf errorf)] ; POD two logging facilities
             [taoensso.sente :as sente]
-            [reagent.core :as rea]))
+            [reagent.core :as reagent]))
 
 (timbre/set-level! :error) ; :trace :debug etc. for more logging
 
-(def output-atom (rea/atom "Intentionally blank"))
+(defonce output-atom (reagent/atom "Intentionally blank"))
+(defonce report-atom (reagent/atom {}))
 
 (def output-el (.getElementById js/document "output"))
 (defn ->output! [fmt & args]
@@ -43,7 +45,7 @@
   (->output! "Pushed event from server: %s " (first ?data))
   (let [msg-type (first ?data)]
     (cond 
-      (= msg-type :sinet/new-generation) (->output! "report= %s" ?data)
+      (= msg-type :sinet/new-generation) (reset! report-atom (second ?data))
       (= msg-type :sinet/event) (->output! "Event from Sinet: %s" (second ?data)))))
 
 (defn event-msg-handler* [{:as ev-msg :keys [id ?data event]}]

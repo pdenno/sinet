@@ -81,7 +81,7 @@
     (assoc component
       :ch-recv nil :connected-uids nil :send-fn nil :ring-handlers nil)))
 
-(defn send! [ws-connection user-id event]
+(defn send!  [ws-connection user-id event]
   ((:send-fn ws-connection) user-id event))
 
 (defn broadcast! [ws-connection event]
@@ -97,5 +97,3 @@
 ;;; I add the atom because I'm sort of lost as to how component works!
 (defn new-ws-connection []
   (map->WSConnection {}))
-
-
