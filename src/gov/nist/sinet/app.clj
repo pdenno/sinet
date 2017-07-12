@@ -66,6 +66,7 @@
    :scada-patterns (-> "data/SCADA-logs/scada-f0-vec.clj" load-scada fit/scada-patterns)
    :data-source :ignore #_+m2-11+}) ; POD not yet dynamic, of course.
 
+;;; I *think* that start and stop will reset the component to what is returned here. 
 (defrecord App [ws-connection]
   component/Lifecycle
   (start [component]
@@ -75,8 +76,7 @@
       (assoc ?c :pop (as-> (gp/initial-pop (:problem ?c)
                                            (-> ?c :gp-params :pop-size)
                                            (-> ?c :gp-params :eden-dist)
-                                           (-> ?c :gp-params :eden-mutation-cnt))
-                         ?pop 
+                                           (-> ?c :gp-params :eden-mutation-cnt)) ?pop
                        (gp/sort-by-error ?pop
                                          (-> ?c :problem :scada-patterns)
                                          (-> ?c :gp-params :no-new-jobs-penalty))))
@@ -84,6 +84,8 @@
   (stop [component]
     component))
 
-(defn new-app []
- (map->App {}))
+(defn new-app [ws-connection]
+  (if ws-connection
+    (map->App {:ws-connection ws-connection})
+    (log/debug "No ws-connection on new-app!")))
 

@@ -37,8 +37,6 @@
     (js/console.log "Channel socket successfully established!")
     (js/console.log "Channel socket state change: %s" (pr-str new-ev-msg))))
 
-(def viewing-pn "What PN is displayed" (atom -1))
-
 ;;; This is for things pushed from server
 (defmethod event-msg-handler :chsk/recv
   [{:as ev-msg :keys [?data]}]
@@ -47,6 +45,11 @@
     (cond 
       (= msg-type :sinet/new-generation) (reset! report-atom (second ?data))
       (= msg-type :sinet/event) (->output! "Event from Sinet: %s" (second ?data)))))
+
+(defmethod event-msg-handler :chsk/handshake
+  [{:as ev-msg :keys [?data]}]
+  (let [[?uid ?csrf-token ?handshake-data] ?data]
+    (->output! "Handshake: %s" ?data)))
 
 (defn event-msg-handler* [{:as ev-msg :keys [id ?data event]}]
   (event-msg-handler ev-msg))

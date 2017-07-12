@@ -11,11 +11,12 @@
    [com.stuartsierra.component :as component]
    [clojure.tools.namespace.repl :refer [refresh refresh-all]]
    [gov.nist.sinet.config :as config]
-   [gov.nist.sinet.system :as system]))
+   [gov.nist.sinet.system :as system]
+   [gov.nist.sinet.run :as run :refer [system]]))
+
+;;; POD LOOK AT run.clj NOT THIS <------------------------------------------------------
 
 ;; See http://thinkrelevance.com/blog/2013/06/04/clojure-workflow-reloaded
-
-(def system nil)
 
 (defn init []
   (alter-var-root #'system (fn [_] (system/system (config/get-config))))) 

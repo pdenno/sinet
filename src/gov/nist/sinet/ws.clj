@@ -8,6 +8,13 @@
 
 (def ping-counts (atom 0))
 
+;;;  ~/Documents/clojure/sente/src/taoensso/sente.cljc:
+;;;  NB performance note: since your `event-msg-handler` fn will be executed
+;;;  within a simple go block, you'll want this fn to be ~non-blocking
+;;;  (you'll especially want to avoid blocking IO) to avoid starving the
+;;;  core.async thread pool under load. To avoid blocking, you can use futures,
+;;;  agents, core.async, etc. as appropriate.
+
 ; Dispatch on event-id
 (defn- event-msg-handler-dispatch [event]
   (when-not (= (:id event) :chsk/ws-ping)
@@ -56,30 +63,40 @@
 
 (defrecord WSRingHandlers [ajax-post-fn ajax-get-or-ws-handshake-fn])
 
-(defrecord WSConnection [ch-recv connected-uids send-fn ring-handlers]
+(defn sinet-ws-error-handler
+  [e event-message]
+  (log/debug (str "Nothing to see here e= " e))
+  (log/debug (str "Nothing to see here msg= " event-message))
+  nil)
+
+(defrecord WSConnection [ch-recv connected-uids send-fn ring-handlers stop-fn]
   component/Lifecycle
   (start [component]
-    (if (and ch-recv connected-uids send-fn ring-handlers)
+    (if (and ch-recv connected-uids send-fn ring-handlers) ; this is what rente has
       component
       (let [component (component/stop component)
             {:keys [ch-recv send-fn connected-uids
                     ajax-post-fn ajax-get-or-ws-handshake-fn]}
             (sente/make-channel-socket! sente-http/http-kit-adapter {:packer :edn})]
         (log/debug "WebSocket connection started")
+        (when-not ch-recv (log/debug "No ch-recv !"))
+        (when-not event-msg-handler* (log/debug "No event-msg handler ?!?"))
         (assoc component
-          :ch-recv ch-recv
-          :connected-uids connected-uids
-          :send-fn send-fn
-          :stop-the-thing (sente/start-chsk-router! ch-recv event-msg-handler*)
-          :ring-handlers
-          (->WSRingHandlers ajax-post-fn ajax-get-or-ws-handshake-fn)))))
+               :ch-recv ch-recv
+               :connected-uids connected-uids
+               :send-fn send-fn
+               :ring-handlers
+               (->WSRingHandlers ajax-post-fn ajax-get-or-ws-handshake-fn)
+               :stop-fn (sente/start-server-chsk-router!
+                         ch-recv
+                         event-msg-handler*
+                         :error-handler sinet-ws-error-handler)))))
   (stop [component]
     (when ch-recv (async/close! ch-recv))
     (log/debug "WebSocket connection stopped")
-    ;; stop is called from start; in that case, stop-fn won't be set.
-    (when-let [stop-fn (:stop-the-thing component)] (stop-fn)) 
+    (if stop-fn (stop-fn) (log/debug "WS did not have a stop-fn!"))
     (assoc component
-      :ch-recv nil :connected-uids nil :send-fn nil :ring-handlers nil)))
+           :ch-recv nil :stop-fn nil :connected-uids nil :send-fn nil :ring-handlers nil)))
 
 (defn send!  [ws-connection user-id event]
   ((:send-fn ws-connection) user-id event))
@@ -91,9 +108,16 @@
 (defn ring-handlers [ws-connection]
   (:ring-handlers ws-connection))
 
-(def +ws+ (atom nil))
-
-;;; POD The following is used in system.clj.
-;;; I add the atom because I'm sort of lost as to how component works!
+;;; This is used in system.clj:
 (defn new-ws-connection []
-  (map->WSConnection {}))
+  (let [{:keys [ch-recv send-fn connected-uids
+                ajax-post-fn ajax-get-or-ws-handshake-fn]}
+        (sente/make-channel-socket! sente-http/http-kit-adapter {:packer :edn})]
+    (log/debug "WebSocket connection started")
+    (map->WSConnection {:ch-recv ch-recv
+                        :connected-uids connected-uids
+                        :send-fn send-fn
+                        :ring-handlers
+                        (->WSRingHandlers ajax-post-fn ajax-get-or-ws-handshake-fn)
+                        :stop-fn (sente/start-chsk-router! ch-recv event-msg-handler*)})))
+

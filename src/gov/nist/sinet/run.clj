@@ -8,7 +8,7 @@
 
 (defonce system nil)
 
-;;; These are used in development and production.
+;;; These are used in development AND production.
 (defn init []
   (alter-var-root #'system (fn [_] (system/system (config/get-config))))) 
 
@@ -25,9 +25,9 @@
 
 (defn reset []
   (stop)
-  (refresh :after 'user/run))
+  (refresh :after 'gov.nist.sinet.run/run))
 
-;;; POD This is essential to geting past component!
+;;; POD This is essential to getting past component!
 (defn app-info []
   (:app system))
 

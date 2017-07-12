@@ -23,13 +23,14 @@
                  [com.taoensso/sente         "1.11.0"]
 
                  [reagent                    "0.7.0"]
+                 [reagent-forms              "0.5.29"]
                  [org.webjars/bootstrap      "3.3.7"] ; "4.0.0-alpha" had problems with menu
                  [quil                       "2.6.0"]
                  
 ;                [gov.nist/MJPdes            "0.1.0-SNAPSHOT"]
                  [gov.nist/spntools          "0.1.0-SNAPSHOT" :exclusions [org.clojure/clojure]]]
 
-  :plugins [[lein-figwheel "0.5.10"]
+  :plugins [[lein-figwheel "0.5.11"]
             [lein-cljsbuild "1.1.4"]]
   :hooks [leiningen.cljsbuild]
   
@@ -52,9 +53,9 @@
              :dev [:dev-config
                    {:dependencies [[org.clojure/tools.namespace "0.2.10"]
                                    [com.cemerick/piggieback "0.2.2"] 
-                                   [figwheel "0.5.10"]
-                                   [figwheel-sidecar "0.5.10"]]
-                    :plugins [[lein-figwheel "0.5.10"]
+                                   [figwheel "0.5.11"]
+                                   [figwheel-sidecar "0.5.11"]]
+                    :plugins [[lein-figwheel "0.5.11"]
                               [lein-environ "1.0.1"]]
                               
                     :source-paths ["dev"] ;...now it is on the path. 
@@ -82,9 +83,3 @@
   :aliases  {"start-repl" ["do" "clean," "cljsbuild" "once," "repl" ":headless"]
              "start"      ["do" "clean," "cljsbuild" "once," "run"]
              "package"    ["with-profile" "prod" "do" "clean" ["cljsbuild" "once"]]})
-
-
-
-
-
-

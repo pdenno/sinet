@@ -35,20 +35,27 @@
     (if server-stop
       component
       (let [component (component/stop component)
-
             {:keys [ajax-post-fn ajax-get-or-ws-handshake-fn]}
             (ws/ring-handlers ws-connection)
-
             handler (handler ajax-post-fn ajax-get-or-ws-handshake-fn)
-
             server-stop (run-server (app handler) {:port port})]
         (log/debug "HTTP server started")
-        (assoc component :server-stop server-stop)))) ; <=== POD huh?
+        (assoc component :server-stop server-stop))))
   (stop [component]
-    (when server-stop (server-stop))
+    (if server-stop
+      (server-stop)
+      (log/debug "Not HTTP server on component stop!"))
     (log/debug "HTTP server stopped")
     (assoc component :server-stop nil)))
 
-;;; This is used in system.clj
-(defn new-http-server [port]
-  (map->HttpServer {:port port}))
+;;; This is used in system.clj:
+(defn new-http-server [port ws-connection]
+  (if ws-connection
+    (let [{:keys [ajax-post-fn ajax-get-or-ws-handshake-fn]}
+          (ws/ring-handlers ws-connection)
+          handler (handler ajax-post-fn ajax-get-or-ws-handshake-fn)
+          server-stop (run-server (app handler) {:port port})]
+      (log/debug "HTTP server started")
+      (map->HttpServer {:port port
+                        :server-stop server-stop}))
+    (log/debug "No ws-connection on new-http-server!")))

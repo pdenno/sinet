@@ -24,7 +24,7 @@
 ;;;       - DONE (enough): Probably need more than one Eden individual for diversity (backwards, multi-loops etc).
 ;;;       - GSPN: Maybe I shouldn't care about absorbing states?
 
-;;; POD Two nasty functions...
+;;; Two functions for viewing/updating system state:
 (defn app-info []
   ((resolve 'gov.nist.sinet.run/app-info)))
 
@@ -462,24 +462,24 @@
   (pnu/reset-ids! {})
   (reset! +log+ []))
 
-(declare evolve validate-gp-params report-gen make-next-gen write-gen)
-;(defn initial-pop [problem pop-size eden-dist eden-mutation-cnt]
+(declare evolve validate-gp-params push-report make-next-gen write-gen)
+
+(def evolve-paused? (atom false))
 
 (defn evolve
   "Toplevel: Starting with a random population (create one if given just one arg), 
    sort, select, check for a solution and produce a new population."
-  [problem]
+  [pop-in]
   (reset-all!)
   (validate-gp-params nil) ; needs integration with system. 
   (println "Starting evolution...")
   (let [start-time (System/currentTimeMillis)]
     (loop [gen 0
-           pop (initial-pop (:problem (app-info)) (gp-param :pop-size)
-                            (gp-param :eden-dist) (gp-param :eden-mutation-cnt))]
+           pop pop-in]
       (as-> pop ?pop
         (sort-by-error ?pop (pr-param :scada-patterns) (gp-param :no-new-jobs-penalty)) ; runs the fitness function
         (update-pop! ?pop)
-        (report-gen ?pop gen start-time)
+        (push-report ?pop gen start-time)
         (cond (< (:err (first ?pop)) 0.1) ; good enough to count as success (POD :gp-param+)
               (do (println "Success!") (first ?pop)),
               (= gen (gp-param :max-gens))
@@ -511,24 +511,23 @@
            (subvec (vec pop) 0 pop-size)
            (recur (conj pop (select sorted-pop pressure))))))))
 
-(def report-data "A map of things to report to the GUI" (atom nil))
 (declare server>gui-notify-new-gen)
 
-(defn report-gen
+(defn report-map [pop gen start-time]
+  (let [best (first pop)]
+    {:generation gen
+     :pop-size (count pop)
+     :total-mutations (reduce + 0 (map #(count (:history %)) pop))
+     :elapsed-time (int (/ (- (System/currentTimeMillis) start-time) 1000))
+     :best-error (:err best)
+     :id-of-best (:id best)
+     :median-error (:err (nth pop (int (/ (gp-param :pop-size) 2))))
+     :average-pn-size (pnu/avg (map #(-> % :pn pnu/pn-size) pop))}))
+
+(defn push-report
   "Set the report-data atom to new data and notify the server"
   [pop gen start-time]
-  (println "Gen=" gen)
-  (let [best (first pop)]
-    (server>gui-notify-new-gen
-     (reset! report-data
-             {:generation gen
-              :pop-size (count pop)
-              :total-mutations (reduce + 0 (map #(count (:history %)) pop))
-              :elapsed-time (int (/ (- (System/currentTimeMillis) start-time) 1000))
-              :best-error (:err best)
-              :id-of-best (:id best)
-              :median-error (:err (nth pop (int (/ (gp-param :pop-size) 2))))
-              :average-pn-size (pnu/avg (map #(-> % :pn pnu/pn-size) pop))})))
+  (server>gui-notify-new-gen (report-map pop gen start-time))
   pop)
 
 (defn validate-gp-params [params]
@@ -566,9 +565,11 @@
 ;;;===========================================================
 ;;; Communication with the client
 ;;;===========================================================
-(defn clean-pn-for-transmit [pn]
-  "Sente can't send functions, at least."
-  (as-> pn ?pn
+(defn clean-inv-for-transmit [inv]
+  "Sente can't send functions, can't send records, at least. Add error and history."
+  (as-> (:pn inv) ?pn
+    (assoc  ?pn :error (:error inv))
+    (assoc  ?pn :history (:history inv))
     (update ?pn :transitions (fn [t] (vec (map #(dissoc % :fn) t))))))
 
 (defn inv-geom
@@ -599,12 +600,18 @@
           (println "get-individual: " pn-index)
           (when ?reply-fn
             (when (and (>= pn-index 0) (< pn-index (count pop)))
-              (?reply-fn (-> (nth pop pn-index) inv-geom :pn clean-pn-for-transmit)))))))))
+              (?reply-fn (-> (nth pop pn-index) inv-geom clean-inv-for-transmit)))))))))
 
 (ws/register-method
  :sinet/evolve
  (fn [ev-msg]
-   (evolve (-> (app-info) :problem))))
+   (evolve (-> (app-info) :pop))))
+
+;;; POD this always asks for generation 0, 
+(ws/register-method
+ :sinet/get-report
+ (fn [_]
+   (report-map (:pop (app-info)) 0 (System/currentTimeMillis))))
 
 (defn server>gui-notify-new-gen
   "Push Petri net (with its geometry) to the GUI."

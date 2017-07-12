@@ -5,7 +5,8 @@
             [gov.nist.sinet.app :as app]))
 
 (defn system [config]
-  (component/system-map
-   :ws-connection (ws/new-ws-connection)
-   :http-server (component/using (server/new-http-server (:port config)) [:ws-connection])
-   :app (component/using (app/new-app) [:ws-connection])))
+  (let [ws-connection (ws/new-ws-connection)]
+    (component/system-map
+     :ws-connection ws-connection
+     :http-server (component/using (server/new-http-server (:port config) ws-connection) [:ws-connection])
+     :app (component/using (app/new-app ws-connection) [:ws-connection]))))
