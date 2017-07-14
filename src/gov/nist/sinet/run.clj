@@ -4,7 +4,8 @@
             [com.stuartsierra.component :as component]
             [clojure.tools.namespace.repl :refer [refresh refresh-all]]
             [gov.nist.sinet.config :as config]
-            [gov.nist.sinet.system :as system]))
+            [gov.nist.sinet.system :as system]
+            [gov.nist.sinet.gp :as gp :refer-only (start-evolve-loop!)]))
 
 (defonce system nil)
 
@@ -21,7 +22,9 @@
 
 (defn run []
   (init)
-  (start))
+  (start)
+  (gp/start-evolve-loop!)
+  system)
 
 (defn reset []
   (stop)

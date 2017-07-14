@@ -20,7 +20,7 @@
                  [compojure                  "1.6.0"]
                  [http-kit                   "2.2.0"]
 
-                 [com.taoensso/sente         "1.11.0"]
+                 [com.taoensso/sente         "1.11.0-POD"] ; POD
 
                  [reagent                    "0.7.0"]
                  [reagent-forms              "0.5.29"]

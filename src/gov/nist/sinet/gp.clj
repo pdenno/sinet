@@ -3,6 +3,7 @@
   {:author "Peter Denno"}
   (:require [clojure.tools.logging :as log]
             [clojure.pprint :refer (cl-format pprint)]
+            [clojure.core.async :as async :refer [>! <! >!! <!! go-loop chan]]
             [gov.nist.spntools.core :as pn :refer :all]
             [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp pn-ok-> as-pn-ok->)]
             [gov.nist.spntools.util.reach :as pnr :refer (reachability)]
@@ -169,22 +170,25 @@
     (when (not-empty arcs)
       (nth arcs (rand-int (count arcs))))))
 
-(declare mutate-m reset-all! eval-pn)
+(declare mutate-m eval-pn)
 
 ;;; POD This could eliminate a good individual. Needs thought.
-;;; Mutate now as the COMPLETE pn computation (through to steady-state) NEEDS THOUGHT!
 (defn mutate
   "mutate the individual"
   ([inv] (mutate inv :pick-fn rand-mute-key)) ; no args to r-m defaults to :mutation-dist
   ([inv & {:keys [pick-fn force] :or {pick-fn rand-mute-key}}]
-   (mutate-m inv :pick-fn pick-fn :force force)))
+   (loop [n 5] ; POD five
+     (let [inv? (mutate-m inv :pick-fn pick-fn :force force)]
+       ;; Try 5 times to mutate; POD this skews things!
+       (if (or (pnu/pn? (:pn inv?)) (<= n 0))
+         inv?
+         (recur (dec n)))))))
 
 (defn- mutate-m-dispatch [inv & {:keys [pick-fn force]
                                 :or {pick-fn rand-mute-key}}]
   (let [answer (or force (pick-fn))]
     (when-not (pnu/pn? (:pn inv))
-      (pnu/break "last mutation failed."))
-    ;(println "answer =" answer)
+      (log (str "last mutation failed:" inv)))
     answer))
 
 (defmulti mutate-m #'mutate-m-dispatch)
@@ -455,80 +459,85 @@
     (nth population
          (apply min (repeatedly tournament-size #(rand-int size))))))
 
-(defn reset-all! []
+(defn reset-spntools! []
   (reset! pnr/+k-bounded+ (gp-param :pn-k-bounded))
   (reset! pnr/+max-rs+ (gp-param :pn-max-rs))
   (reset! pn/+max-states+ (gp-param :pn-max-states))
   (pnu/reset-ids! {})
-  (reset! +log+ []))
+  (reset! +log+ [])) ; POD FIX THIS!
 
-(declare evolve validate-gp-params push-report make-next-gen write-gen)
+(declare validate-gp-params push-report)
 
-(def evolve-paused? (atom false))
-
-(defn evolve
+(defn evolve-sort
   "Toplevel: Starting with a random population (create one if given just one arg), 
    sort, select, check for a solution and produce a new population."
-  [pop-in]
-  (reset-all!)
-  (validate-gp-params nil) ; needs integration with system. 
-  (println "Starting evolution...")
-  (let [start-time (System/currentTimeMillis)]
-    (loop [gen 0
-           pop pop-in]
-      (as-> pop ?pop
-        (sort-by-error ?pop (pr-param :scada-patterns) (gp-param :no-new-jobs-penalty)) ; runs the fitness function
-        (update-pop! ?pop)
-        (push-report ?pop gen start-time)
-        (cond (< (:err (first ?pop)) 0.1) ; good enough to count as success (POD :gp-param+)
-              (do (println "Success!") (first ?pop)),
-              (= gen (gp-param :max-gens))
-              (do (println "Stopped at max-gen.") false)
-              :else
-              (recur
-               (inc gen)
-               (as-> ?pop ?p
-                 ;;(vec (map (fn [inv] (update inv :pn #(dissoc % :avg-tokens-on-place))) ?p))
-                 (make-next-gen ?p :gen gen))))))))
+  [pop]
+  (as-> pop ?pop
+    (sort-by-error ?pop (pr-param :scada-patterns) (gp-param :no-new-jobs-penalty)) ; runs the fitness function
+    (update-pop! ?pop)))
+
 
 ;;; Lee Spector's original were:
 ;;;   Basic eqn    - 1/2  mutate, 1/4  cross over, 1/4 untouched,   selection pressure 7
 ;;;   Weather n    - 1/2  mutate, 1/4  cross over, 1/4 untouched,   selection pressure 7
 ;;;   even parity  - 1/10 mutate  8/10 cross over, 1/10 untouched,  selection pressure 5
-(defn make-next-gen [sorted-pop & {:keys [gen] :or {gen -1}}]
+(defn make-next-gen [world]
   "Compute the next generation, a combination of tournament selection, mutations and crossover
    of tournament winners, and elite individuals."
   (let [e-cnt (gp-param :elite-individuals)
         pop-size (gp-param :pop-size)
         pressure (gp-param :select-pressure)]
-    ;;(write-gen sorted-pop gen)
-    (as-> sorted-pop ?spop
-      (into (subvec ?spop 0 e-cnt)
-            (repeatedly (* 7/8 pop-size) #(mutate (select ?spop pressure))))
-       ;;(repeatedly (* 2/8 (gp-param :pop-size)) #(crossover (select ?spop 7) (select ?spop 7)))
-       (loop [pop ?spop]
-         (if (>= (count pop) pop-size)
-           (subvec (vec pop) 0 pop-size)
-           (recur (conj pop (select sorted-pop pressure))))))))
+    (assoc world :pop
+           (as-> (:pop world) ?spop
+             (into (subvec ?spop 0 e-cnt)
+                   (repeatedly (* 7/8 pop-size) #(mutate (select ?spop pressure)))) ; POD gp-param
+             ;;(repeatedly (* 2/8 (gp-param :pop-size)) #(crossover (select ?spop 7) (select ?spop 7)))
+             (loop [pop ?spop]
+               (if (>= (count pop) pop-size)
+                 (subvec (vec pop) 0 pop-size)
+                 (recur (conj pop (select (:pop world) pressure)))))))))
 
-(declare server>gui-notify-new-gen)
-
-(defn report-map [pop gen start-time]
-  (let [best (first pop)]
-    {:generation gen
+;;;============== Reporting =====================================
+(defn report-map [world]
+  (let [pop (:pop world)
+        best (first pop)]
+    {:generation (:gen world)
+     :state (:state world)
      :pop-size (count pop)
      :total-mutations (reduce + 0 (map #(count (:history %)) pop))
-     :elapsed-time (int (/ (- (System/currentTimeMillis) start-time) 1000))
+     :elapsed-time (int (/ (- (System/currentTimeMillis) (:start-time world)) 1000))
      :best-error (:err best)
      :id-of-best (:id best)
      :median-error (:err (nth pop (int (/ (gp-param :pop-size) 2))))
      :average-pn-size (pnu/avg (map #(-> % :pn pnu/pn-size) pop))}))
 
+(defn client?
+  "Returns true if there is a web client."
+  []
+  (-> (app-info) :ws-connection :connected-uids deref :any first))
+
+(declare server>client-notify-new-gen)
+
 (defn push-report
   "Set the report-data atom to new data and notify the server"
-  [pop gen start-time]
-  (server>gui-notify-new-gen (report-map pop gen start-time))
+  [world]
+  (server>client-notify-new-gen (report-map world))
   pop)
+
+(def +log+ (atom []))
+(defn log [msg] (swap! +log+ conj msg))
+
+(defn log-report
+  [world]
+  (-> world report-map log))
+
+(defn report-gen
+  "Either log results or send them to a client. Doesn't touch world"
+  [world]
+  (if (client?)
+    (push-report world)
+    (log-report world))
+  world)
 
 (defn validate-gp-params [params]
   #_(when (not (< 0.9999 (reduce + 0 (map second (:mutation-types params))) 1.0001))
@@ -548,7 +557,6 @@
                   pn/Q-matrix
                   pn/steady-state-props
                   (dissoc :M2Mp :initial-marking :Q :steady-state))))
-
 
 (defn print-inv [p writer]
   (.write writer (cl-format nil "#Inv [id=~S, err=~A]"
@@ -597,28 +605,116 @@
       (if (empty? pop)
         (log/info "No population in get-individual!")
         (let [pn-index  ?data]
-          (println "get-individual: " pn-index)
+          (println "get-individual:" pn-index)
           (when ?reply-fn
             (when (and (>= pn-index 0) (< pn-index (count pop)))
               (?reply-fn (-> (nth pop pn-index) inv-geom clean-inv-for-transmit)))))))))
 
+
+(defn evolve-chan [] (-> (app-info) :gp-system :evolve-chan))
+(defn pause-evolve? [] (-> (app-info) :gp-system :pause-evolve?))
+
 (ws/register-method
- :sinet/evolve
+ :sinet/evolve-run
  (fn [ev-msg]
-   (evolve (-> (app-info) :pop))))
+   (>!! (evolve-chan) "init")
+   (>!! (evolve-chan) "continue")))
+
+ (ws/register-method
+  :sinet/evolve-continue
+  (fn [ev-msg]
+    (>!! (evolve-chan) "continue")))
+
+ (ws/register-method
+  :sinet/evolve-pause
+  (fn [ev-msg]
+    (>!! (evolve-chan) "pause")))
 
 ;;; POD this always asks for generation 0, 
-(ws/register-method
+#_(ws/register-method
  :sinet/get-report
  (fn [_]
    (report-map (:pop (app-info)) 0 (System/currentTimeMillis))))
 
-(defn server>gui-notify-new-gen
-  "Push Petri net (with its geometry) to the GUI."
+(defn server>client-notify-new-gen
+  "Push report of new generation to the client."
   [report]
   (let [connect (-> (app-info) :ws-connection)
         uids (:connected-uids connect)]
     (if-let [uid (-> @uids :any first)]
       (ws/send! connect uid [:sinet/new-generation report])
-      (log/info "notify-new-gen failed -- BTW using log/debug"))))
+      (println "notify-new-gen failed "))))
+
+(defn evolve-success? [world]
+  (cond (< (-> world :pop first :err) 0.1) ; good enough to count as success (POD :gp-param+)
+        (assoc world :state :success), 
+        (>= (:gen world) (gp-param :max-gens))
+        (assoc world :state :failure),         
+        :else (assoc world :state :continue)))
+
+(defn evolve-init
+  "Set up world map and initial population."
+  []
+  (println "evolve-init...")
+  (let [world (as-> {} ?w
+                (assoc ?w :gen 0)
+                (assoc ?w :state :init)
+                (assoc ?w :start-time (System/currentTimeMillis))
+                (assoc ?w :pop (initial-pop (:problem (app-info))
+                                            (gp-param :pop-size)
+                                            (gp-param :eden-dist)
+                                            (gp-param :eden-mutation-cnt))))]
+    (update-pop! (:pop world))
+    world))
+
+(defn evolve-continue
+  "Loop through generations until success, failure or paused."
+  [world prom]
+  (println "evolve-continue...")
+  ;;(log {:defn evolve-continue :world world})
+  (loop [w world]
+    (as-> w ?w
+      (assoc ?w :state :running)
+      (update ?w :pop #(sort-by-error
+                        %
+                        (pr-param :scada-patterns)
+                        (gp-param :no-new-jobs-penalty)))
+      (do (update-pop! (:pop ?w)) ?w)
+      (update ?w :gen inc)
+      (evolve-success? ?w)
+      (report-gen ?w)
+      (cond @(pause-evolve?) ?w, 
+            (= (:state ?w) :failure) (deliver prom ?w), 
+            (= (:state ?w) :success) (deliver prom ?w), 
+            :else
+            (recur (make-next-gen ?w))))))
+
+;;; (>!! (evolve-chan) "init")
+;;; (>!! (evolve-chan) "continue")
+(defn start-evolve-loop!
+  []
+  (reset! +log+ [])
+  (async/go-loop [world {}]
+    (let [msg (<! (evolve-chan))]
+      (log (str "msg =" msg))
+      (as-> world ?w
+        (cond (= msg "init")
+              (if (not= (:state ?w) :init) (evolve-init) ?w),
+              (= msg "continue")
+              (let [p (promise)]
+                (evolve-continue ?w p)
+                (deref p (* 1000 (gp-param :timeout-secs)) {:state :timeout})),
+              (= msg "pause")
+              (do (println "evolve-pause...")
+                  (reset! (pause-evolve?) true) ?w))
+        (if (or (= :close (:state ?w)) (= :timeout (:state ?w)))
+          (log ?w)
+          (recur ?w))))))
+
+(defn reset
+  []
+  ((resolve 'gov.nist.sinet.run/reset)))
+
+
+    
 

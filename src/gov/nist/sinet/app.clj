@@ -2,6 +2,7 @@
   (:require [clojure.tools.logging :as log]
             [clojure.edn :as edn]
             [clojure.pprint :refer (pprint)]
+            [clojure.core.async :as async :refer [>! <! >!! <!! go-loop chan]]
             [com.stuartsierra.component :as component]
             [gov.nist.sinet.fitness :as fit]
             [gov.nist.sinet.gp :as gp]))
@@ -52,6 +53,7 @@
    :crossover-to-mutation-ratio 0.5
    :select-pressure 70 ; POD not normalized to pop-size
    :elite-individuals 3
+   :timeout-secs 60
    :no-new-jobs-penalty 1.00001
    :crossover-keeps-parents? true ; NYI
    :initial-mutations 10  ; max number of times to mutate eden individuals to create first generation.
@@ -66,22 +68,17 @@
    :scada-patterns (-> "data/SCADA-logs/scada-f0-vec.clj" load-scada fit/scada-patterns)
    :data-source :ignore #_+m2-11+}) ; POD not yet dynamic, of course.
 
+(defn gp-system []
+  {:evolve-chan (async/chan)
+   :pause-evolve? (atom false)})
+
 ;;; I *think* that start and stop will reset the component to what is returned here. 
 (defrecord App [ws-connection]
   component/Lifecycle
   (start [component]
-    (as-> component ?c
-      (assoc ?c :gp-params gp-params :problem problem)
-      ;; POD This will go away someday. 
-      (assoc ?c :pop (as-> (gp/initial-pop (:problem ?c)
-                                           (-> ?c :gp-params :pop-size)
-                                           (-> ?c :gp-params :eden-dist)
-                                           (-> ?c :gp-params :eden-mutation-cnt)) ?pop
-                       (gp/sort-by-error ?pop
-                                         (-> ?c :problem :scada-patterns)
-                                         (-> ?c :gp-params :no-new-jobs-penalty))))
-      ?c))
+    (assoc component :gp-params gp-params :problem problem :gp-system (gp-system)))
   (stop [component]
+    (async/close! (-> component :gp-system :evolve-chan))
     component))
 
 (defn new-app [ws-connection]

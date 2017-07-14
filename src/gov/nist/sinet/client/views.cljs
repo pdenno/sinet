@@ -8,13 +8,13 @@
             [reagent.core :as reagent]))
 
 (defn pretty-val 
-  "cljs: (cl-format nil '~5,3f' nil) --> 0.000"
+  "cljs: (cl-format nil '~5,3f' nil) --> 0.000."
   [val]
   (cond (number? val)
         (if (== 0 (rem val 1))
           (str val)
           (cl-format nil "~5,3f" val))
-        (empty? val) "nil"
+        (and (coll? val) (empty? val)) "nil"
         :else (str val)))
 
 (defn nav []
@@ -45,15 +45,25 @@
                 (->output! "Received PN  %s (it's Inv.id) " (:id cb-reply))
                 (reset! +display-pn+ cb-reply))))
 
-(defn start-evolve
-  [{:as args}]
-  (ws/->output! "Starting evolution...")
-  (ws/chsk-send! [:sinet/evolve {:status :best-wishes}]))
+(def evolve-state (reagent/atom false))
 
-(defn pause-evolve
+(defn evolve-run
   [{:as args}]
-  (ws/->output! "Starting evolution...")
-  (ws/chsk-send! [:sinet/pause-evolve {:status :best-wishes}]))
+  (ws/->output! "evolve-run...")
+  (reset! evolve-state :running)
+  (ws/chsk-send! [:sinet/evolve-run {:status :best-wishes}]))
+
+(defn evolve-continue
+  [{:as args}]
+  (ws/->output! "evolve-continue...")
+  (reset! evolve-state :running)
+  (ws/chsk-send! [:sinet/evolve-continue {:status :best-wishes}]))
+
+(defn evolve-pause
+  [{:as args}]
+  (ws/->output! "evolve-pause...")
+  (reset! evolve-state :paused)
+  (ws/chsk-send! [:sinet/evolve-pause {:status :best-wishes}]))
 
 (defn quil-pn
   "Form-3 component for quil Petri net"
@@ -85,8 +95,6 @@
     [:div {:class "row"} [buttons]]
     [:div {:class "row"} [report]]]])
 
-(def evolving? (reagent/atom false))
-
 (defn buttons []
   [:div {:class "container"}
    [:div {:class "row"} [:strong "GP Control"]]
@@ -103,11 +111,20 @@
    [:div {:class "row"}
     [:div {:class "btn-group btn-group-sm"}
      [:button {:class "btn btn-primary"
-               :disabled @evolving?
-               :on-click start-evolve} "Evolve"]
+               :disabled (= @evolve-state :running)
+               :on-click evolve-run} "Run"]
      [:button {:class "btn btn-primary"
-               :disabled (not @evolving?)
-               :on-click pause-evolve} "Pause Evolve"]]]])
+               :disabled (not (= @evolve-state :running))
+               :on-click evolve-pause} "Pause"]
+     [:button {:class "btn btn-primary"
+               :disabled (not (= @evolve-state :paused))
+               :on-click evolve-continue} "Continue"]]]])
+
+(add-watch report-atom
+           :watcher
+           (fn [key atom old-state new-state]
+             (reset! viewing-pop-index 0)
+             (view-pop 0)))
 
 (defn report []
   [:div {:class "container"}
@@ -157,13 +174,9 @@
      [drawing-area]
      [buttons-report]]
     [:div {:class "row"}
-     [console-area]]
-    #_[:div {:class "row"}
-     [:div {:class "btn-group btn-group-sm"}
-      [:button {:class "btn btn-primary" :on-click ws/test-socket-event} "Send Message Event"]
-      [:button {:class "btn btn-primary" :on-click ws/test-socket-callback} "Send Message Callback"]]]]])
+     [console-area]]]])
 
-(ws/chsk-send!
+#_(ws/chsk-send!
  [:sinet/get-report {:gen 0}] 2000
  (fn [cb-reply]
    (->output! "Received GenerationReport ")

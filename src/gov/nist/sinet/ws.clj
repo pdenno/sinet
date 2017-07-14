@@ -18,7 +18,7 @@
 ; Dispatch on event-id
 (defn- event-msg-handler-dispatch [event]
   (when-not (= (:id event) :chsk/ws-ping)
-    (log/info (str "dispatch, event id =" (:id event))))
+    (log/debug (str "dispatch, event id =" (:id event))))
   (:id event))
 
 ;;; Sente event handlers
@@ -34,11 +34,10 @@
 
 ;; Wrap for logging, catching, etc.:
 (defn  event-msg-handler* [{:as ev-msg :keys [id ?data event]}]
-  ;(println "wrapper, id = " id)
+  (log/debug (str "dispatch, event id =" (:id event)))
   (if (contains? @event-methods id)
-    (do ;(log/info (str "event-method " id))
-        ((get @event-methods id) ev-msg))
-  (event-msg-handler ev-msg)))
+    ((get @event-methods id) ev-msg)
+    (event-msg-handler ev-msg)))
 
 (defmethod event-msg-handler :chsk/ws-ping
   [_]
@@ -63,11 +62,13 @@
 
 (defrecord WSRingHandlers [ajax-post-fn ajax-get-or-ws-handshake-fn])
 
-(defn sinet-ws-error-handler
-  [e event-message]
-  (log/debug (str "Nothing to see here e= " e))
-  (log/debug (str "Nothing to see here msg= " event-message))
-  nil)
+(defn my-ws-error-handler
+  "Errors only seem to occur when I'm trying to stop it with component/stop"
+  [ch-recv]
+  (fn [e event-message]
+    (when ch-recv
+      (repeatedly 10 #(async/take! ch-recv identity))
+      (async/close! ch-recv))))
 
 (defrecord WSConnection [ch-recv connected-uids send-fn ring-handlers stop-fn]
   component/Lifecycle
@@ -90,9 +91,11 @@
                :stop-fn (sente/start-server-chsk-router!
                          ch-recv
                          event-msg-handler*
-                         :error-handler sinet-ws-error-handler)))))
+                         :error-handler (my-ws-error-handler ch-recv))))))
   (stop [component]
-    (when ch-recv (async/close! ch-recv))
+    (when ch-recv
+      (repeatedly 10 #(async/take! ch-recv identity))
+      (async/close! ch-recv))
     (log/debug "WebSocket connection stopped")
     (if stop-fn (stop-fn) (log/debug "WS did not have a stop-fn!"))
     (assoc component
