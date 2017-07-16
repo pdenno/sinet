@@ -19,7 +19,7 @@
 
 (defn nav []
   [:nav {:class "navbar navbar-default navbar-fixed-top"
-         :style {:margin-bottom "0" :background-color "#f4511e" :z-index "9999"
+         :style {:margin-bottom "0" :background-color "#330066" :z-index "9999"
                  :border "0" :font-size "14px" :line-height "1.42857143" 
                  :letter-spacing "4px" :border-radius "0"}}
    [:div {:class "container"}
@@ -32,7 +32,7 @@
     [:div {:class "collapse navbar-collapse" :id "myNavbar"} 
      [:ul {:class "nav navbar-nav navbar-right"} 
       [:li [:a {:href "#gp"}"GP"]]
-      [:li [:a {:href "#gpparams"}"GP Parameters"]]
+      [:li [:a {:href "#params"}"Parameters"]]
       [:li [:a {:href "#patterns"}"Message Patterns"]]]]]])
 
 (def viewing-pop-index (reagent/atom 0))
@@ -103,20 +103,20 @@
    [:div {:class "row"} "Error: " (pretty-val (:error @+display-pn+))]
    [:div {:class "row"}
     [:div {:class "btn-group btn-group-sm"}
-     [:button {:class "btn btn-primary"
+     [:button {:class "btn btn-primary" :style {:background-color "#CC0066"}
                :on-click (fn [] (view-pop (swap! viewing-pop-index inc)))} "Pop+"]
-     [:button {:class "btn btn-primary"
+     [:button {:class "btn btn-primary" :style {:background-color "#CC0066"}
                :disabled (<= @viewing-pop-index 0)
                :on-click (fn [] (view-pop (swap! viewing-pop-index dec)))} "Pop-"]]]
    [:div {:class "row"}
     [:div {:class "btn-group btn-group-sm"}
-     [:button {:class "btn btn-primary"
+     [:button {:class "btn btn-primary" :style {:background-color "#CC0066"}
                :disabled (= @evolve-state :running)
                :on-click evolve-run} "Run"]
-     [:button {:class "btn btn-primary"
+     [:button {:class "btn btn-primary" :style {:background-color "#CC0066"}
                :disabled (not (= @evolve-state :running))
                :on-click evolve-pause} "Pause"]
-     [:button {:class "btn btn-primary"
+     [:button {:class "btn btn-primary" :style {:background-color "#CC0066"}
                :disabled (not (= @evolve-state :paused))
                :on-click evolve-continue} "Continue"]]]])
 
@@ -162,11 +162,14 @@
     :mouse-wheel draw/pn-wheel-fn
     :size [900 500])) ; POD This is used in pnml/rescale. I need a solution for getting it here! (component?)
 
+;;; Loughborough Purple:  Pantone 269 C #472267 (71,51,103), Websafe, #330066 
+;;; Loughborough Magenta: Pantone 220 C #8F004F (143,0,79)   Websafe, #CC0066
+;;; Orange "#f4511e" 
 (defn main [data]
   ;(js/setTimeout #(view-pop @viewing-pop-index) 2000) ; POD I'm looking for a ":on-redisplay" sort of thing. 
   [:div {:id "myPage" :data-spy "scroll" :data-target ".navbar" :data-offset "60"} ; was :body. Could probably go back!
    [nav]
-   [:div {:class "jumbotron text-center" :style {:background-color "#f4511e" :color "#ffffff"}}
+   [:div {:class "jumbotron text-center" :style {:background-color "#330066" :color "#ffffff"}} ; 
     [:h1 "Sinet"]
     [:p "System Identification for Smart Manufacturing"]]
    [:div {:class "container-fluid"}
