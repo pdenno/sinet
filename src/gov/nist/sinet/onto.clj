@@ -4,81 +4,261 @@
   (:require [clojure.pprint :refer (cl-format pprint)]
             [clojure.walk :refer-only (prewalk prewalk-demo)]
             [clojure.zip :as zip]
-            [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp)]
             [tawny.owl :as owl]
             [tawny.query :as query]
+            [tawny.render]
             [tawny.read :as rowl]
-            [tawny.lookup :as look]))
+            [tawny.lookup :as look])
+  (:import
+   (org.semanticweb.owlapi.model
+    HasIRI
+    OWLAxiom
+    OWLEntity
+    OWLObject
+    OWLOntologyManager OWLOntology IRI
+    OWLClassExpression OWLClass OWLAnnotation
+    OWLIndividual OWLDatatype
+    OWLObjectPropertyExpression
+    OWLNamedObject OWLOntologyID)
+   [org.semanticweb.owlapi.search EntitySearcher]))
 
-(owl/defontology sinet-onto
-  :iri "http://modelmeth.nist.gov/sinet"
-  :prefix "sinet:"
-  :comment "An example ontology using my stuff"
-  :versioninfo "Unreleased Version")
+(def diag (atom nil))
+
+(def ontologies "A list of the ontologies used in this project"
+  ["http://modelmeth.nist.gov/ontologies/pizza/pizza.owl"
+   "http://www.linkedmodel.org/schema/dtype"
+   "http://www.linkedmodel.org/schema/vaem"
+   "http://qudt.org/2.0/schema/qudt"
+   "http://modelmeth.nist.gov/modeling"
+   "http://modelmeth.nist.gov/operations"])
+
+(def manager (owl/owl-ontology-manager))
+
+(defn clear-ontos
+  "Remove all the ontologies"
+  []
+  (map #(owl/remove-ontology-maybe (OWLOntologyID. (owl/iri %))) ontologies))
 
 (defn read-onto-files []
+  (repeatedly 5 clear-ontos) ; Don't ask; I don't know.
+  #_(rowl/read :iri "http://modelmeth.nist.gov/ontologies/pizza/pizza.owl"
+             :namespace (create-ns 'pizza) ; POD for experimenting
+             :location (clojure.java.io/file "resources/pizza.owl"))
   (rowl/read :iri "http://www.linkedmodel.org/schema/dtype"
-             :namespace (create-ns 'onto.dtype)
+             :namespace (create-ns 'onto) ; was onto.dtype
              :location (clojure.java.io/file "resources/dtype.owl"))
   (rowl/read :iri "http://www.linkedmodel.org/schema/vaem"
-             :namespace (create-ns 'onto.vaem)
+             :namespace (create-ns 'onto) ; was onto.vaem
              :location (clojure.java.io/file "resources/vaem.owl"))
   (rowl/read :iri "http://qudt.org/2.0/schema/qudt"
-             :namespace (create-ns 'onto.qudt)
+             :namespace (create-ns 'onto) ; was onto.qudt
              :location (clojure.java.io/file "resources/SCHEMA_QUDT-v2.0.ttl"))
   (rowl/read :iri "http://modelmeth.nist.gov/modeling"
-             :namespace (create-ns 'onto.model)
+             :namespace (create-ns 'onto.model)  ; was onto.model
              :location (clojure.java.io/file "resources/modeling.ttl"))
   #_(rowl/read :iri "http://modelmeth.nist.gov/operations"
              :namespace (create-ns 'onto.ops)
              :location (clojure.java.io/file "resources/operations.ttl")))
 
+(read-onto-files)
+
+(def onto-namespace "The name of the current ontology namespace"
+  (atom 'onto.model))
+
+(defn unscrew-tawny-annotations
+  "Some are (:comment <pairs>). Some are (:annotation code-iri <pairs>)"
+  [tawny-notes]
+  (vec
+   (map #(let [original %]
+           (as-> original ?note
+               (cond (= (first ?note) :comment) (second ?note),
+                     (= (first ?note) :annotation ) (-> ?note rest rest first))
+               (apply hash-map ?note)
+               (assoc ?note :otype (first original))))
+        tawny-notes)))
+
+(defn thing-map
+  "Return a map of information about the class. See also query/into-map-with"
+  [thing]
+  (reset! diag thing)
+  (as-> (apply hash-map (tawny.render/as-form thing :keyword true)) ?map
+    (assoc ?map :short-name (short-name thing)) ; POD (or label)
+    (assoc ?map :var (get obj2var-map thing)) ; POD flatten is 'sort of' right.
+    (assoc ?map :notes (unscrew-tawny-annotations (:annotation ?map)))))
+
+;;; POD I expected this to be http://modelmeth.nist.gov/modeling#clojureCodeNote
+(def ^:const code-iri "Used to identify clojure notes from thing-mapped objects."
+  (list :iri "http://modelmeth.nist.gov/modeling#clojureCode"))
+
+(defn clojure-code
+  "Return any http://modelmeth.nist.gov/modeling#clojureCode annotation"
+  [thing]
+  (some #(when (and (= (:otype %) :annotation)
+                    (= (:type %) code-iri))
+           (:literal %))
+        (-> thing thing-map :notes)))
+
+(def tawny-types [:tawny.owl/class :tawny.owl/individual :tawny.owl/property
+                  :tawny.owl/object-property :tawny.owl/data-property])
+
+;;; POD needs to return true if a supertype is ignored. 
+(defn ignore?
+  "Returns true if the tawny thing has a clojure {:priority :ignore}"
+  [thing]
+  (if (some #(= (owl/guess-type (owl/get-current-ontology) thing) %) tawny-types)
+    (when-let [code (clojure-code thing)]
+      (= :ignore (:priority (read-string code))))
+    true))
+
+(def var2obj-map 
+  (let [ks (remove #(ignore? (var-get %))
+                   (vals (ns-interns @onto-namespace)))
+        vs (map var-get ks)]
+    (zipmap ks vs)))
+
+(def obj2var-map
+  (clojure.set/map-invert var2obj-map))
+
 (defn short-name [node]
   (->> node
        look/named-entity-as-string
        (re-matches #".*\#(.*)")
-       second
-       keyword))
+       second))
 
 (def onto-index "Define the parent/child relationship as a map."
-  (reduce (fn [index node]
-            (assoc index (short-name node)
-                   (map short-name
-                        (owl/direct-subclasses node))))
-          {}
-          (conj (owl/subclasses onto.model/Abstract)
-                onto.model/Abstract)))
-
-(def diag (atom nil))
+  (let [m (reduce (fn [index node]
+                    (assoc index (get obj2var-map node)
+                           (map #(get obj2var-map %)
+                                (owl/direct-subclasses node))))
+                  {}
+                  (conj (owl/subclasses onto.model/Abstract)
+                        onto.model/Abstract))]
+    (as-> m ?map
+      (dissoc ?map nil)
+      (reduce (fn [m k] (update m k #(vec (filter identity %))))
+              ?map
+              (keys ?map)))))
 
 (defn next-paths
   "Return all paths one-step further than the argument, if any."
   [path]
-  (reset! diag {:path path})
   (if (empty? path)
     []
-    (vec (map #(conj path %) (vec ((last path) onto-index))))))
+    (vec (map #(conj path %) (vec (get onto-index (last path)))))))
 
+;;(onto-root-map {} [[#'onto.model/Abstract]])))
+(defn onto-root-map
+  "Define the ontology root structure as a nested map."
+  [accum paths]
+  (if (empty? paths)
+    accum
+    (recur
+     (assoc-in accum (first paths) {})
+     (let [nexts (next-paths (first paths))]
+       (if (empty? nexts)
+         (vec (next paths))
+         (into nexts (vec (next paths))))))))
 
-;;(onto-root [[:Abstract]])
-(defn onto-root
-  "Define the ontology root structure for a zipper. It is a nested map."
-  [p]
-  (loop [accum {}
-         paths p]
-    (if (empty? paths)
-      accum
-      (recur
-       (assoc-in accum (first paths) {})
-       (conj (next-paths (first paths)) (vec (rest paths)))))))
+(defn vectify
+  "Turn a nested map like that from onto-root-map into a nested vector
+   where every var leaf is followed by a vector representing its subclasses 
+   (could be empty)."
+  [nested-map]
+  (clojure.walk/prewalk
+   #(if (var? %)
+      %
+      (vec (interleave (keys %) (vals %))))
+   nested-map))
 
-;;; POD Might need more work. Switched to {} (in my mind). 
-(def onto-zipper
-  (zip/zipper
-   (fn [obj] (and obj (not-empty (owl/direct-subclasses obj)))) ; branch? function
-   (fn [obj] (owl/direct-subclasses obj)) ; children function
-   (fn [node children] children)
-   (onto-root [[:Abstract]])))
+(def onto-root "Defines the vector thing suitable for zipping for LaTeX processing."
+  (vectify (onto-root-map {} [[#'onto.model/Abstract]])))
+
+#_(def onto-root
+  [#'onto.model/Abstract
+   [#'onto.model/UncertaintySource
+    [#'onto.model/ModelPropertyMeasurementUncertainty []]
+    #'onto.model/Modifier
+    []]])
+
+;;;============== Rendering ===============================================
+(defn zip-depth
+  "Return the depth of the location."
+  [loc]
+  (loop [loc loc
+         depth 0]
+    (if (not (zip/up loc))
+      depth
+      (recur (zip/up loc) (inc depth)))))
+
+(defn latex-leaf-nodes
+  "Return the onto vector structure with thing-maps replacing vars."
+  [onto-vec]
+  (loop [loc (-> onto-vec zip/vector-zip zip/down)]
+    (as-> loc ?loc
+      (if (var? (zip/node ?loc))
+        (zip/edit ?loc #(-> (thing-map (var-get %))
+                            (assoc :depth (dec (zip-depth ?loc))))) ; POD why dec?
+        ?loc)
+      (zip/next ?loc)
+      (if (zip/end? ?loc)
+        (zip/root ?loc)
+        (recur ?loc)))))
+
+(defn subsub [n]
+  (apply str (repeat n "sub")))
+
+(defn comment [tmap]
+  (some #(when (= (:otype %) :comment) (:literal %))
+        (:notes tmap)))
+
+(def chilun (atom nil))
+
+;;; POD NYI
+(defn place-concepts-first
+  "Sort concepts (thing-maps) before branches"
+  [children]
+  {:concepts (filter map? children)
+   :sections (remove map? children)})
+
+(defn write-concepts [tmap-list]
+  (if (second tmap-list)
+    (do (println "\\begin{description}")
+        (map #(println (cl-format nil "   \\item[~A] ~A"
+                                  (:short-name %) (comment %))))
+        (println "\\end{description}"))
+    (println (cl-format nil "\\\\  \\textbf{~A} ~A"
+                        (:short-name (first tmap-list)
+                                     (comment (first tmap-list)))))))
+
+(defn write-section!
+  "Write a \\section, \\subsection etc. Calls itself recursively on zip/children."
+  [loc]
+  (reset! diag loc)
+  (cond (empty? loc) nil
+        (map? loc) (write-concept loc)
+        (var? loc) (println loc),
+        (zip/end? loc) nil
+        (zip/branch? loc)
+        (let [tmap (-> loc zip/next zip/node)]
+          (reset! diag {:loc loc :tmap tmap})
+          (when (map? tmap)
+            (println (cl-format nil "\\~Asection{~A}"
+                                (subsub (:depth tmap))
+                                (:short-name tmap))))
+          ;; <================== HERE: USE THE MAP
+          (when-let [chilun (reset! chilun (place-concepts-first (zip/children loc)))]
+            (map #(write-section! (if (vector? %) (zip/vector-zip %) %))
+                 chilun)))))
+               
+
+;;; <========== POD Right now it isn't picking up every subsection below abstract.
+(defn latex-write-onto!
+  "Write latex for the onto-root structure"
+  [v]
+  (-> v
+      latex-leaf-nodes
+      zip/vector-zip
+      write-section!))
 
 
 ;;;\begin{description}
@@ -89,73 +269,10 @@
 ;;;   specific objectives (e.g. optimal production schedules).
 ;;;\end{description}
 
-;;; POD Someday this will be created automatically (and then edited for content). 
-#_(def index
-   [:Abstract [:ModelAbstraction [:Equation []
-                                  :Function []
-                                  :ModelEntity []
-                                  :Model [:PredictiveModel [:AnalyticalModel []
-                                                            :NumericalModel [:FEAModel []]]]
-                                  :ModelProperty []
-                                  :ModelTechnology []
-                                  :Symbol []]
-               :Uncertainty [:AleatoryUncertainty []
-                             :EpistemicUncertainty []
-                             :ModelUncertainty []
-                             :ParameterMeasurementUncertainty []
-                             :PropertyMeasurementUncertainty []
-                             :StatisticalUncertaintyOfModelParameters []]]])
+#_(defn ppp []
+  (binding [clojure.pprint/*print-right-margin* 140]
+    (pprint *1)))
 
-#_(defn term-locs
-  "Return a map of locations of each keyword."
-  []
-  (let [z-seq (->> index
-                   zip/vector-zip
-                   (iterate zip/next) ; a lazy seq of locs in pre-order.
-                   (take-while #(not (zip/end? %)))) ; stop producing at end.
-        key-locs (filter #(keyword? (zip/node %)) z-seq)]
-    (zipmap (map zip/node key-locs) key-locs)))
-
-#_(defn term-children
-  "Return a map of the children of each keyword node."
-  []
-  (let [z-seq (->> index
-                   zip/vector-zip
-                   (iterate zip/next) ; a lazy seq of locs in pre-order.
-                   (take-while #(not (zip/end? %)))) ; stop producing at end.
-        key-locs (filter #(keyword? (zip/node %)) z-seq)]
-    (zipmap (map zip/node key-locs)
-            (map (fn [k-l]
-                          (reset! diag k-l)
-                          (vec (filter keyword?
-                                      (-> k-l zip/right zip/node))))
-                        key-locs))))
-
-;;; POD NYI
-#_(defn deeper
-  "Return a vector removing toplevel atoms and merging toplevel lists."
-  [terms]
-  (as-> terms ?t
-    (remove keyword? ?t)
-    (vec (mapcat identity ?t))))
-
-#_(defn index-depth
-  "Return a natural number indicating how deep we are in the index."
-  ([term] (index-depth term 0 index))
-  ([term level terms]
-   (cond (some #(= term %) terms) level
-         (empty? terms) nil
-         :else (index-depth term (inc level) (deeper terms)))))
-
-;;; If the concept has children it is a (sub)*section.
-;;; If it is a leaf it is a \begin{description}...\end{description}
-  
-            
-            
-
-
-             
-            
-
-
-
+#_(defn ppprint [arg]
+  (binding [clojure.pprint/*print-right-margin* 140]
+    (pprint arg)))
