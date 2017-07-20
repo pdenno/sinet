@@ -77,6 +77,18 @@
         (assoc ?p :t-adds (set (subvec (:t ?p) cnt-t)))
         (assoc ?p :p-adds (set (subvec (:p ?p) cnt-p)))))))
 
+;;; POD This needs lots of work. What I should be doing is not to have +problem+
+;;; elements, but rather build several (20?) circular (Eden) individuals by
+;;; dropping into the log at random places and creating Edens from what I learn
+;;; by following a small part of the process. The search operators might then
+;;; be less likely to add places and transition; more likely to add arcs and
+;;; inhibitors. They might also look to combine eden processes (as though there
+;;; were multiple job types. Then of course there needs to be higher level operations
+;;; These include (1) recognizing subsystems and preserving them from further mucking.
+;;; (2) adding feeder lines, (3) messing with buffer size. The setting of rates
+;;; and distributions of timed transitions will be another process, one that also
+;;; looks at the default causal knowledge. See Sankaran Mahadevan's paper with Sudarsan
+;;; "Automated uncertainty quantification analysis using a system model and data"
 (declare eden-display-geometry)
 (defn eden-individual
   "Return a minimal and prototypical individual for the problem.
