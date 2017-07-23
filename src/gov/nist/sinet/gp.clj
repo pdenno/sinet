@@ -9,6 +9,7 @@
             [gov.nist.spntools.util.reach :as pnr :refer (reachability)]
             [gov.nist.spntools.util.simulate :as sim :refer (simulate)]
             [gov.nist.spntools.util.pnml :as pnml :refer (read-pnml)] ;  POD clean this up
+            [gov.nist.sinet.util :as util :refer (app-info)]
             [gov.nist.sinet.fitness :as fit :refer (workflow-fitness)]
             [gov.nist.sinet.ws :as ws]))
 
@@ -25,9 +26,6 @@
 ;;;       - DONE (enough): Probably need more than one Eden individual for diversity (backwards, multi-loops etc).
 ;;;       - GSPN: Maybe I shouldn't care about absorbing states?
 
-;;; Two functions for viewing/updating system state:
-(defn app-info []
-  ((resolve 'gov.nist.sinet.run/app-info)))
 
 (defn update-pop! [pop]
   (alter-var-root
@@ -36,10 +34,10 @@
   pop)
 
 (defn gp-param [name]
-  (-> (app-info) :gp-params name))
+  (-> (util/app-info) :gp-params name))
 
 (defn pr-param [name]
-  (-> (app-info) :problem name))
+  (-> (util/app-info) :problem name))
 
 (defrecord Inv [pn id error history])
 (def +diag+ (atom nil))
@@ -58,7 +56,6 @@
 ;;;     and then of course, get the wiring correct. 
 ;;;     Each transition in the initial population will be randomly given one of the four functions
 ;;;;    (from those that not already chosen). Mutations will move them around. etc.
-
 (defn add-extra-nodes
   "Return a map {:t <> :p <> :t-adds, :p-adds} naming nodes (transitions or places) to be added.
    Used to make the ring-shaped Eden individual."
@@ -77,6 +74,57 @@
         (assoc ?p :t-adds (set (subvec (:t ?p) cnt-t)))
         (assoc ?p :p-adds (set (subvec (:p ?p) cnt-p)))))))
 
+;;;================================================================
+;;; New code for Eden individuals
+;;;================================================================
+(def keep-vs-ignore "The probability that a message is going to be represented." 0.8)
+(declare elem-names)
+
+;;; POD Someday, you might want to call this with multiple job traces.
+(defn initial-individual-pn
+  "Read the SCADA log to infer what ought to be treated as an event."
+  [job-trace]
+  (let [used-job-trace (filter (fn [_] (> keep-vs-ignore (rand))) job-trace)]
+    (elem-name used-job-trace)))
+
+;;; ======> POD Finish elem-names. Use it in initial-individual-pn, which will use the existing
+;;;         add-extra-nodes and some of the existing eden individual code. 
+
+;;; POD This interprets the SCADA log. We'll need to generalize it someday.
+(defn elem-names
+  [job-trace]
+  (let [max-m (scada/max-machine job-trace)]
+    (map (fn [msg]
+           (cond (= :aj (:act msg)) :m1-start-job,
+                 (= :ej (:act msg)) (keyword (cl-format nil "m~A-end-job" max-m))
+                 (= :sm (:act msg)) (keyword (cl-format nil "m~A-start-job" (scada/implies-machine msg))))))))
+
+
+
+
+;;; New creation of initial population. 
+
+[{:act :aj, :j 1695, :jt :jobType1, :ends 2127.3173821415817, :clk 2121.9362171746693, :line 491}
+ {:act :bj, :bf :b1, :j 1695, :n 0, :clk 2127.3173821415817, :line 500}
+ {:act :sm, :bf :b1, :j 1695, :n 1, :clk 2127.3173821415817, :line 502}
+ {:act :ej, :m :m2, :j 1695, :ent 2121.9362171746693, :clk 2128.4173821415816, :line 506}]
+
+[{:act :aj, :j 1660, :jt :jobType1, :ends 2078.1059568493292, :clk 2077.1059568493292, :line 281}
+ {:act :bl, :m :m1, :clk 2078.205956849329, :line 284}
+ {:act :bj, :bf :b1, :j 1660, :n 2, :clk 2078.205956849329, :line 285}
+ {:act :sm, :bf :b1, :j 1660, :n 3, :clk 2083.1285760500264, :line 301}
+ {:act :ej, :m :m2, :j 1660, :ent 2077.1059568493292, :clk 2084.2285760500263, :line 306}]
+
+;;; Rules
+;;;      :aj means :m1-start-job       (place or transition)
+;;;      :ej means :mN-complete-job    (place or transition)
+;;;      :sj means :mX-start-job       (place or transiiton)
+;;;      :bl means :mX-blocked         (place or transition)
+;;;      :ub means :mX-unblocked
+
+
+
+
 ;;; POD This needs lots of work. What I should be doing is not to have +problem+
 ;;; elements, but rather build several (20?) circular (Eden) individuals by
 ;;; dropping into the log at random places and creating Edens from what I learn
@@ -90,7 +138,7 @@
 ;;; looks at the default causal knowledge. See Sankaran Mahadevan's paper with Sudarsan
 ;;; "Automated uncertainty quantification analysis using a system model and data"
 (declare eden-display-geometry)
-(defn eden-individual
+(defn eden-pn
   "Return a minimal and prototypical individual for the problem.
    It is a loop made by using visible places and transitions with additional
    hidden places and transitions necessary to close the loop. It isn't
@@ -145,12 +193,12 @@
                    {}
                    elems))))
 
-(defn eden-pns!
+#_(defn eden-pns!
   [problem]
   (reset! +edens+
           (vector
-           (map->Inv {:pn (eden-individual problem) :id "eden-fwd"})
-           (map->Inv {:pn (eden-individual (update problem :visible-places reverse)) :id "eden-rev"}))))
+           (map->Inv {:pn (eden-pn problem) :id "eden-fwd"})
+           (map->Inv {:pn (eden-pn (update problem :visible-places reverse)) :id "eden-rev"}))))
 
 (defn random-crossover [])
 
@@ -432,7 +480,18 @@
        (:pn inv)
        (map :name (-> inv :pn :transitions))))))
 
-(defn initial-pop [problem pop-size eden-dist eden-mutation-cnt]
+(defn initial-pop [problem pop-size & ignore] ; POD ignore
+  (let [pop-cnt (atom -1)]
+    (vec (repeatedly
+          pop-size
+          #(let [job-trace (scada/random-job-trace)]
+             (as-> (map->Inv {:pn (initial-individual-pn job-trace)
+                              :id (swap! pop-cnt inc)
+                              :history [{:trace job-trace}]}) ?inv
+               (add-scada-report-fns ?inv)
+               (add-color-binding ?inv)))))))
+
+#_(defn initial-pop [problem pop-size eden-dist eden-mutation-cnt]
   (let [edens (eden-pns! problem)
         pop-cnt (atom -1)]
     (vec (repeatedly
@@ -526,7 +585,7 @@
 (defn client?
   "Returns true if there is a web client."
   []
-  (-> (app-info) :ws-connection :connected-uids deref :any first))
+  (-> (util/app-info) :ws-connection :connected-uids deref :any first))
 
 (declare server>client-notify-new-gen)
 
@@ -613,7 +672,7 @@
 (ws/register-method
   :sinet/get-individual     
   (fn [{:as ev-msg :keys [?data ?reply-fn]}]
-    (let [pop (-> (app-info) :pop)]
+    (let [pop (-> (util/app-info) :pop)]
       (if (empty? pop)
         (log/info "No population in get-individual!")
         (let [pn-index  ?data]
@@ -623,8 +682,8 @@
               (?reply-fn (-> (nth pop pn-index) inv-geom clean-inv-for-transmit)))))))))
 
 
-(defn evolve-chan [] (-> (app-info) :gp-system :evolve-chan))
-(defn pause-evolve? [] (-> (app-info) :gp-system :pause-evolve?))
+(defn evolve-chan [] (-> (util/app-info) :gp-system :evolve-chan))
+(defn pause-evolve? [] (-> (util/app-info) :gp-system :pause-evolve?))
 
 (ws/register-method
  :sinet/evolve-run
@@ -646,12 +705,12 @@
 #_(ws/register-method
  :sinet/get-report
  (fn [_]
-   (report-map (:pop (app-info)) 0 (System/currentTimeMillis))))
+   (report-map (:pop (util/app-info)) 0 (System/currentTimeMillis))))
 
 (defn server>client-notify-new-gen
   "Push report of new generation to the client."
   [report]
-  (let [connect (-> (app-info) :ws-connection)
+  (let [connect (-> (util/app-info) :ws-connection)
         uids (:connected-uids connect)]
     (if-let [uid (-> @uids :any first)]
       (ws/send! connect uid [:sinet/new-generation report])
@@ -672,7 +731,7 @@
                 (assoc ?w :gen 0)
                 (assoc ?w :state :init)
                 (assoc ?w :start-time (System/currentTimeMillis))
-                (assoc ?w :pop (initial-pop (:problem (app-info))
+                (assoc ?w :pop (initial-pop (:problem (util/app-info))
                                             (gp-param :pop-size)
                                             (gp-param :eden-dist)
                                             (gp-param :eden-mutation-cnt))))]

@@ -1,25 +1,11 @@
 (ns gov.nist.sinet.app
   (:require [clojure.tools.logging :as log]
-            [clojure.edn :as edn]
             [clojure.pprint :refer (pprint)]
             [clojure.core.async :as async :refer [>! <! >!! <!! go-loop chan]]
             [com.stuartsierra.component :as component]
-            [gov.nist.sinet.fitness :as fit]
+            [gov.nist.sinet.scada :as scada]
             [gov.nist.sinet.gp :as gp]))
 
-(defn preprocess-log
-  "Add line numbers. This is used by hand on the datafile."
-  [data]
-  (reduce (fn [data n] (assoc-in data [n :line] n))
-          data
-          (range (count data))))
-
-;;; POD Better than this would be transit. 
-(defn load-scada [filename]
-  (let [in (java.io.PushbackReader. (clojure.java.io/reader filename))
-        edn-seq (repeatedly (partial edn/read {:eof :eof :readers {'function (fn [x])}} in))
-        data (first (take-while #(not= :eof %) edn-seq))]
-    (preprocess-log data)))
 
 (def mutation-dist "The pdf for ordinary mutations (not eden mutations)"
   [[:add-place        1/10]    ; Add place (mine can't be absorbing, thus Nobile 1&2).
@@ -61,11 +47,10 @@
    :eden-dist eden-dist})
 
 (def problem
-  {:visible-places [:buffer :m1-blocked :m1-busy :m2-busy :m2-starved]
-   :use-cpus (.availableProcessors (Runtime/getRuntime)) ; counts hyperthreading apparently
-   :scada-events [:bj :aj :ej :sm] 
-   :visible-transitions [:m1-complete-job :m1-start-job :m2-complete-job :m2-start-job]
-   :scada-patterns (-> "data/SCADA-logs/scada-f0-vec.clj" load-scada fit/scada-patterns)
+  {:use-cpus (.availableProcessors (Runtime/getRuntime)) ; counts hyperthreading apparently
+   :scada-events [:bj :aj :ej :sm] ; POD this will go away. 
+   :scada-data-file    "data/SCADA-logs/scada-f0-vec.clj"
+   :scada-patterns (-> "data/SCADA-logs/scada-f0-vec.clj" scada/load-scada scada/scada-patterns)
    :data-source :ignore #_+m2-11+}) ; POD not yet dynamic, of course.
 
 (defn gp-system []

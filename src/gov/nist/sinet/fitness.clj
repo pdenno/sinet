@@ -1,135 +1,26 @@
 (ns gov.nist.sinet.fitness
+  "Compute the fitness of an individual"
   (:require [medley.core :refer (abs)]
             [clojure.pprint :refer (cl-format pprint)]
-            [clojure.set :refer (union difference intersection)]
             [gov.nist.spntools.core :as pn :refer :all]
             [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp)]
             [gov.nist.spntools.util.reach :as pnr :refer (reachability)]
             [gov.nist.spntools.util.simulate :as sim :refer (simulate)]))
 
-;;; Purpose: Fitness test
+;;; ToDo: Currently fitness only concerns violation of partial orders it should
+;;;       additionally include:
+;;;         1) Dynamic response (from Q matrix or simulation)
+;;;         2) Association to being blocked/unblocked starved/unstarved.
+;;;            This is some sort of function relating tokens in places to messages.
+;;;            Maybe this is a place for a NN classifier. The idea here being that
+;;;            you develop a classifier (for a given individual) and then employ it
+;;;            to inject predictions of message types in the execution of the individual.
+;;;            (If the individual scores better without the NN, then just consider that
+;;;            its best score. (The question then becomes, how would you use this in
+;;;            the downstream analytical process? A: Maybe you don't really, but it
+;;;            nonetheless helps the fitness of the individual.) 
 
 (def +diag+ (atom nil))
-
-(defn scada-gather-job
-  "Return every mention of of job-id in chronological order."
-  [data job-id]
-  (filter  #(= (:j %) job-id) data))
-  
-(defn scada-all-job-ids
-  "Return a vector of all job-ids found in the data"
-  [data]
-  (sort (distinct (map :j (filter #(contains? % :j) data)))))
-
- (def +pattern-reserves+ "keys that are preserved in patterns" #{:act :jt :bf :m :n})
- 
-(defn make-pattern
-  [msgs pattern-id]
-  {:id pattern-id
-   :form
-   (as-> msgs ?msgs
-     (map #(reduce (fn [msg key] (dissoc msg key)) ; remove unnecessary keys
-                   %
-                   (difference (set (keys %)) +pattern-reserves+))
-          ?msgs)
-     (map #(reduce (fn [msg key] (if (contains? msg key) (assoc msg key \*) msg))
-                   % ; wildcard certain msg vals
-                   [:jt :bf :n :m])
-          ?msgs)
-     (vec ?msgs))})
-
-(defn match-msg?
-  "Return true if msg matches form"
-  [msg form]
-  (every? (fn [key]
-           (or (and (= (key form) \*) (contains? msg key))
-               (= (key form) (key msg))))
-          (keys form)))
-
-(defn match-pattern?
-  "Return true if msgs matches pattern"
-  [msgs pattern]
-  (let [form (:form pattern)]
-    (and (= (count msgs) (count form))
-         (every? (fn [n] (match-msg? (nth msgs n) (nth form n)))
-                 (range (count form))))))
-
-(declare all-scada-patterns trim-patterns scada-ordering-relations act2trans)
-(defn scada-patterns
-  "Compute the problem's SCADA patterns. It is a vector of maps with keys
-   (:id :form :njobs :relations). Run once per problem."
-  [log]
-  (as-> log ?pats 
-    (all-scada-patterns ?pats)
-    (trim-patterns ?pats 5 5)
-    (map #(as-> % ?pat
-            (assoc ?pat :relations (scada-ordering-relations %))
-            (assoc ?pat :njobs (count (:jobs ?pat)))
-            (dissoc ?pat :jobs)) ; POD don't think the actual job will be useful.
-         ?pats)))
-       
-;;; POD Probably want start and stop point for every occurrence. 
-(defn all-scada-patterns
-  "Return a vector of all the job patterns found in the SCADA log.
-   Run once per problem."
-  [data]
-  (let [pattern-id (atom -1)]
-    (reduce (fn [patterns job-id]
-              (let [job (scada-gather-job data job-id)
-                    matches (filter #(match-pattern? job %) patterns)]
-                (if (empty? matches)
-                  (conj patterns (assoc (make-pattern job (swap! pattern-id inc)) :jobs [job-id]))
-                  (reduce (fn [patterns id]
-                            (update-in patterns [id :jobs] #(conj % job-id)))
-                          patterns (map :id matches)))))
-            [] (scada-all-job-ids data))))
-
-(defn trim-patterns
-  "Trim up to ntrim patterns from the ends of the pattern vector if they account for only a few (njobs) jobs.
-   These are quite likely to be fragments of the complete log for these jobs. Run once per problem."
-  [patterns ntrim njobs]
-  (let [size (count patterns)]
-    (reduce (fn [patterns id]
-              (let [p (some #(when (= (:id %) id) %) patterns)]
-                (if (< (count (:jobs p)) njobs)
-                  (remove #(= % p) patterns)
-                  patterns)))
-            patterns
-            (into (range (- size ntrim) size) (range ntrim)))))
-
-(defn pos-in-trace
-  "Return the position of the argument action in the argument QPN process trace."
-  [trace act]
-  (let [^clojure.lang.PersistentVector acts (vec (map :act trace))
-        idx (.indexOf acts act)]
-    (if (< idx 0) false idx)))
-
-(defn ordering-fn
-  "Return a function : trace -> boolean indicating whether the ordering relationship 
-   is violated by the argument QPN process trace. If one or both of the arguments 
-   does not even appear in the trace, it is considered violated."
-  [x y]
-  (fn [trace]
-    (let [pos-x (pos-in-trace trace x)
-          pos-y (pos-in-trace trace y)]
-      (if (and pos-x pos-y)
-        (<= (pos-in-trace trace x) (pos-in-trace trace y))
-        true))))
-
-(defn scada-ordering-relations
-  "Calculate ordering functions for a SCADA pattern."
-  [p]
-  (loop [events (:form p)
-         ordering []]
-    (if (empty? (rest events))
-      ordering
-      (recur
-       (next events)
-       (into ordering
-             (reduce (fn [m s] (conj m (ordering-fn (:act (first events)) (:act s))))
-                     []
-                     (rest events)))))))
-
 ;;;===========================================
 ;;; QPN
 ;;;===========================================
@@ -142,6 +33,7 @@
                  (some #(= (:id %) tkn-id) (:tkns msg))))
           log))
 
+(declare act2trans)
 ;;; POD Because I'm focusing on jobs here (qpn-gather-job), at some point I'm going to have to account for
 ;;; lines in the log that were not addressed by qpn-gather-job (and the things in-between it).
 (defn qpn-act-is-intro? [pn act]
