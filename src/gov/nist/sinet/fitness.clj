@@ -5,7 +5,8 @@
             [gov.nist.spntools.core :as pn :refer :all]
             [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp)]
             [gov.nist.spntools.util.reach :as pnr :refer (reachability)]
-            [gov.nist.spntools.util.simulate :as sim :refer (simulate)]))
+            [gov.nist.spntools.util.simulate :as sim :refer-only (simulate)]
+            [gov.nist.sinet.util :as util :refer-only (app-info)]))
 
 ;;; ToDo: Currently fitness only concerns violation of partial orders it should
 ;;;       additionally include:
@@ -20,7 +21,7 @@
 ;;;            the downstream analytical process? A: Maybe you don't really, but it
 ;;;            nonetheless helps the fitness of the individual.) 
 
-(def +diag+ (atom nil))
+(def diag (atom nil))
 ;;;===========================================
 ;;; QPN
 ;;;===========================================
@@ -134,22 +135,21 @@
   "Generate a QPN log for the PN and return the score WRT SCADA patterns. The score is the
    average (across all complete jobs) of the process disorder of the best matched process.
    If there are very few jobs (perhaps because :elim :intro weirdness), then just score them."
-  [pn patterns no-new-jobs-penalty]
-  (let [pn (sim/simulate pn :max-steps (* 50 (avg-scada-process-steps patterns)))
-        max-tkn (-> pn :sim :max-tkn)]
-    ;(println "max-tkn =" max-tkn)
-    (if (> max-tkn 20)
-      (let [tkn-range (range +qpn-warm-up+ (- (-> pn :sim :max-tkn) +qpn-warm-up+))
-            total-error (reduce (fn [sum tkn-id]
-                                  (+ sum (calc-process-disorder (qpn-log-about pn tkn-id) patterns)))
-                                0
-                                tkn-range)]
-        (double (/ total-error (count tkn-range))))
-      ;; Otherwise just a few jobs
-      (let [typical-job (first (qpn-typical-jobs pn))]
-        (+ no-new-jobs-penalty
-           (calc-process-disorder typical-job patterns))))))
-          
-
-
-
+  [pn]
+  (let [patterns (-> (util/app-info) :problem :scada-patterns)
+        no-new-jobs-penalty (-> (util/app-info) :gp-params :no-new-jobs-penalty)]
+    (when-let [errs (not-empty (pnu/validate-pn pn))] ; POD TEMPORARY!
+      (throw (ex-info "Invalid PN" {:pn-id (:id pn) :errors errs :pn pn})))
+    (let [pn (sim/simulate pn :max-steps (* 50 (avg-scada-process-steps patterns)))
+          max-tkn (-> pn :sim :max-tkn)]
+      (if (> max-tkn 20)
+        (let [tkn-range (range +qpn-warm-up+ (- (-> pn :sim :max-tkn) +qpn-warm-up+))
+              total-error (reduce (fn [sum tkn-id]
+                                    (+ sum (calc-process-disorder (qpn-log-about pn tkn-id) patterns)))
+                                  0
+                                  tkn-range)]
+          (double (/ total-error (count tkn-range))))
+        ;; Otherwise just a few jobs
+        (let [typical-job (first (qpn-typical-jobs pn))]
+          (+ no-new-jobs-penalty
+             (calc-process-disorder typical-job patterns)))))))

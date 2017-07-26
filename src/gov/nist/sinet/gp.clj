@@ -11,6 +11,7 @@
             [gov.nist.spntools.util.pnml :as pnml :refer (read-pnml)] ;  POD clean this up
             [gov.nist.sinet.util :as util :refer (app-info)]
             [gov.nist.sinet.fitness :as fit :refer (workflow-fitness)]
+            [gov.nist.sinet.scada :as scada]
             [gov.nist.sinet.ws :as ws]))
 
 ;;; I started with Lee Spector's "gp" demonstration software.
@@ -25,7 +26,7 @@
 ;;;       - Implement a log for exceptional situations.
 ;;;       - DONE (enough): Probably need more than one Eden individual for diversity (backwards, multi-loops etc).
 ;;;       - GSPN: Maybe I shouldn't care about absorbing states?
-
+;;;       - For new Eden code: Remove :visible everywhere ???
 
 (defn update-pop! [pop]
   (alter-var-root
@@ -40,7 +41,7 @@
   (-> (util/app-info) :problem name))
 
 (defrecord Inv [pn id error history])
-(def +diag+ (atom nil))
+(def diag (atom nil))
 (def +log+ (atom []))
 (defn log [msg] (swap! +log+ conj msg))
 
@@ -52,17 +53,13 @@
 ;;; :elite-individuals -- carry over this amount of the best without revision.
 ;;; :max-initial-mutations -- apply 1 to this number of mutations (uniform distribution to the "Eden individual")
 
-;;; POD As currently conceived, the problem is to associate :scada-events with :visible-transitions
-;;;     and then of course, get the wiring correct. 
-;;;     Each transition in the initial population will be randomly given one of the four functions
-;;;;    (from those that not already chosen). Mutations will move them around. etc.
 (defn add-extra-nodes
   "Return a map {:t <> :p <> :t-adds, :p-adds} naming nodes (transitions or places) to be added.
    Used to make the ring-shaped Eden individual."
   [prob]
-  (let [cnt-p (count (:visible-places prob))
-        cnt-t (count (:visible-transitions prob))]
-    (as-> {:p (:visible-places prob) :t (:visible-transitions prob)} ?p
+  (let [cnt-p (count (:p prob))
+        cnt-t (count (:t prob))]
+    (as-> {:p (:p prob) :t (:t prob)} ?p
       (cond (= cnt-p cnt-t) ?p
             (> cnt-p cnt-t)
             (update-in ?p [:t]
@@ -77,103 +74,82 @@
 ;;;================================================================
 ;;; New code for Eden individuals
 ;;;================================================================
-(def keep-vs-ignore "The probability that a message is going to be represented." 0.8)
-(declare elem-names)
+(declare elem-names eden-pn)
 
-;;; POD Someday, you might want to call this with multiple job traces.
+;;; POD Someday you might want to call this with multiple job traces.
 (defn initial-individual-pn
-  "Read the SCADA log to infer what ought to be treated as an event."
+  "Translate SCADA log content to a PN."
   [job-trace]
-  (let [used-job-trace (filter (fn [_] (> keep-vs-ignore (rand))) job-trace)]
-    (elem-name used-job-trace)))
+  (->> job-trace
+       (filter (fn [_] (> (pr-param :keep-vs-ignore) (rand))))
+       elem-names
+       (reduce (fn [plan event]
+                 (as-> plan ?p
+                     (update ?p :cnt inc)
+                     (if (even? (:cnt ?p))
+                       (update ?p :t conj event)
+                       (update ?p :p conj event))))
+               {:cnt 0 :t [] :p []})
+       add-extra-nodes
+       eden-pn))
 
-;;; ======> POD Finish elem-names. Use it in initial-individual-pn, which will use the existing
-;;;         add-extra-nodes and some of the existing eden individual code. 
-
-;;; POD This interprets the SCADA log. We'll need to generalize it someday.
+;;; POD This interprets/translates the SCADA log. We'll need to generalize it someday.
 (defn elem-names
   [job-trace]
-  (let [max-m (scada/max-machine job-trace)]
-    (map (fn [msg]
-           (cond (= :aj (:act msg)) :m1-start-job,
-                 (= :ej (:act msg)) (keyword (cl-format nil "m~A-end-job" max-m))
-                 (= :sm (:act msg)) (keyword (cl-format nil "m~A-start-job" (scada/implies-machine msg))))))))
+  (->> job-trace
+       (map (fn [msg]
+              (cond (= :aj (:act msg)) :enter-job,
+                    (= :ej (:act msg)) :exit-job,
+                    (= :sm (:act msg)) (keyword (cl-format nil "m~A-start-job" (scada/implies-machine msg))),
+                    (= :bj (:act msg)) (keyword (cl-format nil "m~A-complete-job" (scada/implies-machine msg))),
+                    (= :bl (:act msg)) (keyword (cl-format nil "m~A-blocked" (scada/implies-machine msg))),   
+                    (= :ub (:act msg)) (keyword (cl-format nil "m~A-unblocked" (scada/implies-machine msg))),
+                    (= :st (:act msg)) (keyword (cl-format nil "m~A-starved" (scada/implies-machine msg))),
+                    (= :us (:act msg)) (keyword (cl-format nil "m~A-unstarved" (scada/implies-machine msg))))))
+       distinct))
 
-
-
-
-;;; New creation of initial population. 
-
-[{:act :aj, :j 1695, :jt :jobType1, :ends 2127.3173821415817, :clk 2121.9362171746693, :line 491}
- {:act :bj, :bf :b1, :j 1695, :n 0, :clk 2127.3173821415817, :line 500}
- {:act :sm, :bf :b1, :j 1695, :n 1, :clk 2127.3173821415817, :line 502}
- {:act :ej, :m :m2, :j 1695, :ent 2121.9362171746693, :clk 2128.4173821415816, :line 506}]
-
-[{:act :aj, :j 1660, :jt :jobType1, :ends 2078.1059568493292, :clk 2077.1059568493292, :line 281}
- {:act :bl, :m :m1, :clk 2078.205956849329, :line 284}
- {:act :bj, :bf :b1, :j 1660, :n 2, :clk 2078.205956849329, :line 285}
- {:act :sm, :bf :b1, :j 1660, :n 3, :clk 2083.1285760500264, :line 301}
- {:act :ej, :m :m2, :j 1660, :ent 2077.1059568493292, :clk 2084.2285760500263, :line 306}]
-
-;;; Rules
-;;;      :aj means :m1-start-job       (place or transition)
-;;;      :ej means :mN-complete-job    (place or transition)
-;;;      :sj means :mX-start-job       (place or transiiton)
-;;;      :bl means :mX-blocked         (place or transition)
-;;;      :ub means :mX-unblocked
-
-
-
-
-;;; POD This needs lots of work. What I should be doing is not to have +problem+
-;;; elements, but rather build several (20?) circular (Eden) individuals by
-;;; dropping into the log at random places and creating Edens from what I learn
-;;; by following a small part of the process. The search operators might then
-;;; be less likely to add places and transition; more likely to add arcs and
-;;; inhibitors. They might also look to combine eden processes (as though there
-;;; were multiple job types. Then of course there needs to be higher level operations
+;;; POD This still needs work. There needs to be higher level operations
 ;;; These include (1) recognizing subsystems and preserving them from further mucking.
 ;;; (2) adding feeder lines, (3) messing with buffer size. The setting of rates
 ;;; and distributions of timed transitions will be another process, one that also
 ;;; looks at the default causal knowledge. See Sankaran Mahadevan's paper with Sudarsan
 ;;; "Automated uncertainty quantification analysis using a system model and data"
+;;; (4) The NN problem with blocking/starvation. 
 (declare eden-display-geometry)
 (defn eden-pn
-  "Return a minimal and prototypical individual for the problem.
+  "Return a PN expressing the places and transitions of the argument 'plan.'
    It is a loop made by using visible places and transitions with additional
-   hidden places and transitions necessary to close the loop. It isn't
-   random but rather it is constant for the problem definition."
-  [problem]
-  (let [prob (add-extra-nodes problem)]
-    (as-> {:places [] :transitions [] :arcs []} ?pn
-      (reduce (fn [pn pl] (pnu/add-pn pn (pnu/make-place pn :name pl))) ?pn (:p prob))
-      (update-in ?pn [:places 0 :initial-tokens] inc) ; Add a token to make it alive
-      (reduce (fn [pn tr] (pnu/add-pn pn (pnu/make-transition pn :name tr)))
-              ?pn (:t prob))
-      (reduce (fn [pn [from to]] (pnu/add-pn pn (pnu/make-arc pn from to)))
-              ?pn
-              (map vec (partition
-                        2 (interleave
-                           (vec (interleave (:p prob) (:t prob)))
-                           (vec (interleave (:t prob)
-                                            (conj (vec (rest (:p prob)))
-                                                  (first (:p prob)))))))))
-      ;; Initialize to :visible? true, then dissoc where added.
-      (assoc ?pn :places (vec (map #(assoc % :visible? true) (:places ?pn))))
-      (assoc ?pn :transitions (vec (map #(assoc % :visible? true) (:transitions ?pn))))
-      (if (:p-adds prob)
-        (assoc ?pn :places
-               (vec (map #(if (contains? (:p-adds prob) (:name %)) (dissoc % :visible?) %)
-                         (:places ?pn))))
-        (assoc ?pn :transitions
-               (vec (map (fn [trans]
-                           (if (contains? (:t-adds prob) (:name trans))
-                             (as-> trans ?t
-                               (dissoc ?t :visible?)
-                               (assoc ?t :type (if (= 0 (rand-int 2)) :exponential :immediate)))
-                             trans))
-                         (:transitions ?pn)))))
-      (eden-display-geometry ?pn))))
+   hidden places and transitions necessary to close the loop."
+  [plan]
+  (as-> {:places [] :transitions [] :arcs []} ?pn
+    (reduce (fn [pn pl] (pnu/add-pn pn (pnu/make-place pn :name pl))) ?pn (:p plan))
+    (update-in ?pn [:places 0 :initial-tokens] inc) ; Add a token to make it alive
+    (reduce (fn [pn tr] (pnu/add-pn pn (pnu/make-transition pn :name tr)))
+            ?pn (:t plan))
+    (reduce (fn [pn [from to]] (pnu/add-pn pn (pnu/make-arc pn from to)))
+            ?pn
+            (map vec (partition
+                      2 (interleave
+                         (vec (interleave (:p plan) (:t plan)))
+                         (vec (interleave (:t plan)
+                                          (conj (vec (rest (:p plan)))
+                                                (first (:p plan)))))))))
+    ;; Initialize to :visible? true, then dissoc where added.
+    (assoc ?pn :places (vec (map #(assoc % :visible? true) (:places ?pn))))
+    (assoc ?pn :transitions (vec (map #(assoc % :visible? true) (:transitions ?pn))))
+    (if (:p-adds plan)
+      (assoc ?pn :places
+             (vec (map #(if (contains? (:p-adds plan) (:name %)) (dissoc % :visible?) %)
+                       (:places ?pn))))
+      (assoc ?pn :transitions
+             (vec (map (fn [trans]
+                         (if (contains? (:t-adds plan) (:name trans))
+                           (as-> trans ?t
+                             (dissoc ?t :visible?)
+                             (assoc ?t :type (if (= 0 (rand-int 2)) :exponential :immediate)))
+                           trans))
+                       (:transitions ?pn)))))
+    (eden-display-geometry ?pn)))
 
 (defn eden-display-geometry 
   "Assign positions to places and transitions of Eden individuals for display."
@@ -192,13 +168,6 @@
                              :label-y-off 15}))
                    {}
                    elems))))
-
-#_(defn eden-pns!
-  [problem]
-  (reset! +edens+
-          (vector
-           (map->Inv {:pn (eden-pn problem) :id "eden-fwd"})
-           (map->Inv {:pn (eden-pn (update problem :visible-places reverse)) :id "eden-rev"}))))
 
 (defn random-crossover [])
 
@@ -274,7 +243,9 @@
       (assoc ?i :pn (pnu/add-pn (:pn ?i) (pnu/make-place (:pn ?i))))
       (assoc ?i :pn (pnu/add-pn (:pn ?i) (pnu/make-arc (:pn ?i) trans-in (-> ?i :pn :places last :name))))
       (assoc ?i :pn (pnu/add-pn (:pn ?i) (pnu/make-arc (:pn ?i) (-> ?i :pn :places last :name) trans-out)))
-      (update ?i :history conj {:mutate :add-place :place (-> ?i :pn :places last :name)}))))
+      (assoc-in ?i [:pn :marking-key] :invalid)
+      (update ?i :history conj {:mutate :add-place :place (-> ?i :pn :places last :name)})
+      (update-in ?i [:pn] pnr/renumber-pids))))
 
 (defmethod mutate-m :add-token [inv & args]
   (let [pn (:pn inv)
@@ -304,11 +275,11 @@
 (defmethod mutate-m :add-arc [inv & args]
   (if-let [tr (random-trans (:pn inv))]
     (if-let [pl (random-place (:pn inv))]
-      (let [[from to] (case (rand-int 2) 0 (vector tr pl) 1 (vector tr pl))]
+      (let [[from to] (case (rand-int 2) 0 (vector tr pl) 1 (vector pl tr))]
         (as-> inv ?i
-          (update ?i :history conj {:mutate :add-arc :place pl})
+          (update ?i :history conj {:mutate :add-arc :from-to (map :name [from to])})
           (assoc ?i :pn (pnu/add-pn (:pn ?i) (pnu/make-arc (:pn ?i) (:name from) (:name to))))))
-      {:skip :add-arc :msg "No visible place"})
+      {:skip :add-arc :msg "No place"})
     {:skip :add-arc :msg "No trans"}))
 
 (defmethod mutate-m :add-inhibitor [inv & args]
@@ -317,17 +288,19 @@
       (as-> inv ?i
         (update ?i :history conj {:mutate :add-inhibitor :place pl})
         (assoc ?i :pn (pnu/add-pn (:pn ?i) (pnu/make-arc (:pn ?i) (:name pl) (:name tr) :type :inhibitor))))
-      {:skip :add-inhibitor :msg "No visible place"})
+      {:skip :add-inhibitor :msg "No place"})
     {:skip :add-inhibitor :msg "No trans"}))
 
 ;;;=================== Remove =======================================
 (defmethod mutate-m :remove-place [inv & args]
-  (let [pl (:name (random-place (:pn inv) :subset #(remove (fn [pl] (:visible? pl)) %)))]
+  (let [pl (:name (random-place (:pn inv) #_:subset #_#(remove (fn [pl] (:visible? pl)) %)))]
     (as-> inv ?i
       (update ?i :history conj {:mutate :remove-place :place pl})
       (assoc-in ?i [:pn :places] (vec (remove #(= (:name %) pl) (-> ?i :pn :places))))
       (assoc-in ?i [:pn :arcs]   (vec (remove #(or (= (:source %) pl)
-                                                   (= (:target %) pl)) (-> ?i :pn :arcs)))))))
+                                                   (= (:target %) pl)) (-> ?i :pn :arcs))))
+      (assoc-in ?i [:pn :marking-key] :invalid)
+      (update-in ?i [:pn] pnr/renumber-pids))))
 
 (defmethod mutate-m :remove-token [inv & args]
   (if-let [pl (:name (random-place (:pn inv) :subset #(remove (fn [pl] (= 0 (:initial-tokens pl))) %)))]
@@ -340,7 +313,7 @@
     {:skip :remove-token :msg "No place with token"}))
 
 (defmethod mutate-m :remove-trans [inv & args]
-  (let [tr (:name (random-trans (:pn inv) :subset #(remove (fn [pl] (:visible? pl)) %)))]
+  (let [tr (:name (random-trans (:pn inv) #_:subset #_#(remove (fn [pl] (:visible? pl)) %)))]
     (as-> inv ?i
       (update ?i :history conj {:mutate :remove-trans :trans tr})
       (assoc-in ?i [:pn :transitions] (vec (remove #(= (:name %) tr) (-> ?i :pn :transitions))))
@@ -385,18 +358,14 @@
                              :else ?ar)))
                    (:arcs pn)))))
 
-(defmethod mutate-m :swap-places-vv [inv & args]
-  (if-let [pl1 (:name (random-place (:pn inv) :subset #(filter (fn [pl] (:visible? pl)) %)))]
-    (if-let [pl2 (:name (random-place (:pn inv):subset #(filter (fn [pl] (and (:visible? pl)
-                                                                              (not= (:name pl) pl1)))
-                                                                %)))]
+(defmethod mutate-m :swap-places [inv & args]
+  (if-let [pl1 (:name (random-place (:pn inv)))]
+    (if-let [pl2 (:name (random-place (:pn inv):subset #(filter (fn [pl] (not= (:name pl) pl1)) %)))]
       (as-> inv ?i
-        (update ?i :history conj {:mutate :swap-places-vv :pl1 pl1 :pl2 pl2})
+        (update ?i :history conj {:mutate :swap-places :pl1 pl1 :pl2 pl2})
         (assoc ?i :pn (swap-arcs (:pn ?i) pl1 pl2)))
-      {:skip :swap-places-vv :msg "no 2nd place"})
-    {:skip :swap-places-vv :msg "no 1st place"}))
-
-(def +old-pop+ "diagnostic" (atom []))
+      {:skip :swap-places :msg "no 2nd place"})
+    {:skip :swap-places :msg "no 1st place"}))
 
 (defn flow-balance
   "Compute the difference tokens-out minus tokens in."
@@ -419,23 +388,6 @@
             (zipmap arcs (repeat narcs 0))
             (range cnt))))
 
-(defn pick-from-atom!
-  [atom]
-  (let [picked (nth @atom (rand-int (count @atom)))]
-    (swap! atom (fn [a] (remove #(= picked %) a)))
-    picked))
-
-(defn add-scada-report-fns [inv]
-  "Randomly add SCADA report functions to transitions."
-  (let [report-fn (fn [name] (fn [tkns] {:act name :tkns tkns}))
-        events-left (atom (pr-param :scada-events))
-        trans-left (atom (range (count (-> inv :pn :transitions))))]
-    (reduce (fn [inv _]
-              (update-in inv [:pn :transitions (pick-from-atom! trans-left)]
-                         #(assoc % :fn (report-fn (pick-from-atom! events-left)))))
-              inv
-              (range (count (pr-param :scada-events))))))
-
 ;;; POD This (and one for trans and place) belong in pnu/
 (defn arc-index
   "Return the index of the named arc in pn. (For use with assoc-in, update-in, etc."
@@ -454,6 +406,18 @@
     (if (= name (:name (first trans)))
       n
       (recur (inc n) (next trans)))))
+
+(defn add-scada-report-fns [inv]
+  "Add SCADA report functions to transitions."
+  (let [report-fn (fn [act machine] (fn [tkns] {:act act :tkns tkns :machine machine}))
+        trans (map :name (-> inv :pn :transitions))]
+     (reduce (fn [inv tr]
+               (if-let [event-map (scada/translate-transition tr)]
+                 (assoc-in inv [:pn :transitions (trans-index (:pn inv) tr) :fn]
+                           (report-fn (:act event-map) (:m event-map)))
+                 inv))
+             inv
+             trans)))
 
 (defn add-color-binding [inv]
   "Add color binding to arcs. To address imbalance, add :elim acts and (randomly) add :intro acts."
@@ -480,46 +444,26 @@
        (:pn inv)
        (map :name (-> inv :pn :transitions))))))
 
-(defn initial-pop [problem pop-size & ignore] ; POD ignore
+(defn initial-pop [pop-size]
   (let [pop-cnt (atom -1)]
     (vec (repeatedly
           pop-size
           #(let [job-trace (scada/random-job-trace)]
-             (as-> (map->Inv {:pn (initial-individual-pn job-trace)
-                              :id (swap! pop-cnt inc)
+             (as-> (map->Inv {:id (swap! pop-cnt inc)
+                              :pn (assoc (initial-individual-pn job-trace) :id @pop-cnt)
                               :history [{:trace job-trace}]}) ?inv
-               (add-scada-report-fns ?inv)
-               (add-color-binding ?inv)))))))
+               (add-scada-report-fns ?inv)     
+               (add-color-binding ?inv))))))) 
 
-#_(defn initial-pop [problem pop-size eden-dist eden-mutation-cnt]
-  (let [edens (eden-pns! problem)
-        pop-cnt (atom -1)]
-    (vec (repeatedly
-          pop-size
-          #(as-> (nth edens (rand-int (count edens))) ?inv
-             (reduce (fn [inv _]
-                       (mutate inv :force (rand-mute-key eden-dist)))
-                     (map->Inv {:pn (:pn ?inv)
-                                :id (swap! pop-cnt inc)
-                                :history [(:id ?inv)]})
-                     (range eden-mutation-cnt))
-             (assoc-in ?inv [:pn :id] (:id ?inv))
-             (add-scada-report-fns ?inv)
-             (add-color-binding ?inv))))))
-
-(defn i-error [inv patterns penalty]
+(defn i-error [inv]
   "Compute the individual's score."
-  (let [id (:id inv)
-        result (assoc inv
-                      :err
-                      (fit/workflow-fitness (:pn inv) patterns penalty))]
-    result))
+  (assoc inv :err (-> inv :pn fit/workflow-fitness)))
 
 (defn sort-by-error
   "Add value for :err to each PN and used it to sort the population; best first."
-  [popu patterns penalty]
+  [popu]
   (as-> popu ?i
-    (pmap #(i-error % patterns penalty) ?i) ; POD pmap
+    (pmap i-error ?i) ; POD pmap
     (vec (sort #(< (:err %1) (:err %2)) ?i))))
 
 ;;; Finally, we'll define a function to select an individual from a sorted
@@ -538,15 +482,6 @@
   (reset! +log+ [])) ; POD FIX THIS!
 
 (declare validate-gp-params push-report)
-
-(defn evolve-sort
-  "Toplevel: Starting with a random population (create one if given just one arg), 
-   sort, select, check for a solution and produce a new population."
-  [pop]
-  (as-> pop ?pop
-    (sort-by-error ?pop (pr-param :scada-patterns) (gp-param :no-new-jobs-penalty)) ; runs the fitness function
-    (update-pop! ?pop)))
-
 
 ;;; Lee Spector's original were:
 ;;;   Basic eqn    - 1/2  mutate, 1/4  cross over, 1/4 untouched,   selection pressure 7
@@ -727,14 +662,12 @@
   "Set up world map and initial population."
   []
   (println "evolve-init...")
+  (reset-spntools!)
   (let [world (as-> {} ?w
                 (assoc ?w :gen 0)
                 (assoc ?w :state :init)
                 (assoc ?w :start-time (System/currentTimeMillis))
-                (assoc ?w :pop (initial-pop (:problem (util/app-info))
-                                            (gp-param :pop-size)
-                                            (gp-param :eden-dist)
-                                            (gp-param :eden-mutation-cnt))))]
+                (assoc ?w :pop (initial-pop (gp-param :pop-size))))]
     (update-pop! (:pop world))
     world))
 
@@ -743,13 +676,11 @@
   [world prom]
   (println "evolve-continue...")
   ;;(log {:defn evolve-continue :world world})
+  (reset! (pause-evolve?) false)
   (loop [w world]
     (as-> w ?w
       (assoc ?w :state :running)
-      (update ?w :pop #(sort-by-error
-                        %
-                        (pr-param :scada-patterns)
-                        (gp-param :no-new-jobs-penalty)))
+      (update ?w :pop #(sort-by-error %))
       (do (update-pop! (:pop ?w)) ?w)
       (update ?w :gen inc)
       (evolve-success? ?w)
@@ -781,6 +712,13 @@
         (if (or (= :close (:state ?w)) (= :timeout (:state ?w)))
           (log ?w)
           (recur ?w))))))
+
+;;;-------------------- Debugging stuff -----------------------------------
+;;; For best debugging experience, don't use pmap in sort-by-error!
+(defn diag-run []
+  (let [p (promise)]
+    (as-> (evolve-init) ?w
+      (evolve-continue ?w p))))
 
 (defn reset
   []

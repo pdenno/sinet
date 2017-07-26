@@ -65,6 +65,8 @@
   (reset! evolve-state :paused)
   (ws/chsk-send! [:sinet/evolve-pause {:status :best-wishes}]))
 
+(declare draw-it)
+
 (defn quil-pn
   "Form-3 component for quil Petri net"
   []  
@@ -88,12 +90,6 @@
 (defn drawing-area []
   [:div#pn {:class "col-md-8"}
    [quil-pn]])
-
-(defn buttons-report []
-  [:div#buttons-report {:class "col-md-4"}
-   [:div {:class "container-fluid"}
-    [:div {:class "row"} [buttons]]
-    [:div {:class "row"} [report]]]])
 
 (defn buttons []
   [:div {:class "container"}
@@ -142,6 +138,12 @@
                       (str/join))
                  ": "
                  (pretty-val (get rmap key)))]]))))])
+
+(defn buttons-report []
+  [:div#buttons-report {:class "col-md-4"}
+   [:div {:class "container-fluid"}
+    [:div {:class "row"} [buttons]]
+    [:div {:class "row"} [report]]]])
 
 ;;; Util for logging output to on-screen console
 (defn console-area []

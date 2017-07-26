@@ -28,7 +28,8 @@
 
 (defn reset []
   (stop)
-  (refresh :after 'gov.nist.sinet.run/run))
+  ;; Reload changed files in dependency order, then do run/run. 
+  (refresh :after 'gov.nist.sinet.run/run)) 
 
 ;;; POD This is essential to getting past component!
 (defn app-info []

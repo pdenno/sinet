@@ -42,7 +42,7 @@
 (defmethod event-msg-handler :chsk/ws-ping
   [_]
     (swap! ping-counts inc)
-    (when (= 0 (mod @ping-counts 10))
+    (when (= 0 (mod @ping-counts 100))
       (println "ping counts: " @ping-counts)))
 
 (defmethod event-msg-handler :rente/testevent

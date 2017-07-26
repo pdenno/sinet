@@ -6,7 +6,6 @@
             [gov.nist.sinet.scada :as scada]
             [gov.nist.sinet.gp :as gp]))
 
-
 (def mutation-dist "The pdf for ordinary mutations (not eden mutations)"
   [[:add-place        1/10]    ; Add place (mine can't be absorbing, thus Nobile 1&2).
    [:add-token        1/10]    ; Add token to some place (visible or hidden).
@@ -18,8 +17,9 @@
    [:remove-trans     1/10]
    [:remove-arc       1/10]
    [:remove-inhibitor 1/10]
-   [:swap-places-vv   2/10]])
+   [:swap-places      2/10]])
 
+;;;POD This will go away. 
 (def eden-dist "for creation of eden individual, which are already rather sparse"
   [[:add-place        2/10]
    [:add-token        2/10]
@@ -47,10 +47,10 @@
    :eden-dist eden-dist})
 
 (def problem
-  {:use-cpus (.availableProcessors (Runtime/getRuntime)) ; counts hyperthreading apparently
-   :scada-events [:bj :aj :ej :sm] ; POD this will go away. 
-   :scada-data-file    "data/SCADA-logs/scada-f0-vec.clj"
-   :scada-patterns (-> "data/SCADA-logs/scada-f0-vec.clj" scada/load-scada scada/scada-patterns)
+  {:use-cpus (.availableProcessors (Runtime/getRuntime)) ; Counts hyperthreading, apparently. 
+   :keep-vs-ignore 0.8
+   :scada-data-file    "data/SCADA-logs/scada-f0-imbalanced.clj"
+   :scada-patterns (-> "data/SCADA-logs/scada-f0-imbalanced.clj" scada/load-scada scada/scada-patterns)
    :data-source :ignore #_+m2-11+}) ; POD not yet dynamic, of course.
 
 (defn gp-system []

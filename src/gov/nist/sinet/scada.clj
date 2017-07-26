@@ -5,12 +5,7 @@
             [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp)]
             [gov.nist.sinet.util :as util :refer (app-info)]))
 
-;;; ToDo: preprocess log ought to remove redundant stuff in log like this:
-;;;    {:act :bl, :m :m1, :clk 2077.1059568493292, :line 278}
-;;;    {:act :ub, :m :m1, :clk 2077.1059568493292, :line 280}
-;;;    {:act :bl, :m :m1, :clk 2078.205956849329,  :line 284}
-;;;    {:act :ub, :m :m1, :clk 2078.205956849329,  :line 286}
-;;; (Even better, MJPdes should not generate this stuff!)
+(def diag (atom nil))
 
 (defn preprocess-log
   "Add line numbers. This is used by hand on the datafile."
@@ -27,31 +22,20 @@
     (preprocess-log data)))
 
 ;;;====== These are used to generate Eden individuals  ======
-
-;;; POD as my notes in fit/ suggest, this ought to be done on a per-individual basis.
-
-  
-(defn infer-visible-transitions
-  []
-  [:m1-complete-job :m1-start-job :m2-complete-job :m2-start-job])
-
-;;; POD as my notes in fit/ suggest, this ought to be done on a per-individual basis.
-(defn infer-visible-places
-  "Read the SCADA log to infer what ought to be treated state."
-  []
-  [:buffer :m1-blocked :m1-busy :m2-busy :m2-starved])
-
 (defn job-id-near
   "Return a job ID near the argument line. Look forward then reverse for one."
   [data line-num]
   (let [look-to (- (count data) 10)
-        look-fn (fn [dir-fn]
+        look-fn (fn [dir-fn stop-fn]
                   (loop [line line-num]
                     (let [msg (nth data line)]
                       (cond (contains? msg :j) (:j msg)
-                            (>= line look-to) nil
+                            (stop-fn line) nil
                             :else (recur (dir-fn line))))))]
-    (or (look-fn inc) (look-fn dec))))
+    (or (look-fn inc #(>= % look-to))
+        (look-fn dec #(<= % 0)))))
+
+(declare scada-gather-job)
 
 (defn random-job-trace
   "Return the trace of a random job. This includes every message starting 
@@ -66,7 +50,6 @@
         end-job (-> job-trace last :line)]
     (remove #(and (contains? % :j) (not (== job-id (:j %))))
             (subvec data start-job (inc end-job)))))
-
 
 (defn max-machine [job-trace]
   "Return an integer representing the last machine mentioned in the argument job trace
@@ -83,8 +66,23 @@
 ;;; {:act :sm, :bf :b1, :j 1660, :n 3, :clk 2083.1285760500264, :line 301}
 (defn implies-machine
   [msg]
-  (map #(second (re-matches #"\:b(\d+)" (str (:bf msg))))))
-  
+  (if (contains? msg :bf)
+    (second (re-matches #"\:b(\d+)" (str (:bf msg))))
+    (second (re-matches #"\:m(\d+)" (str (:m msg))))))
+
+;;; POD This interprets/translates the SCADA log. We'll need to generalize it someday.
+(defn translate-transition
+  "Return a SCADA :act and machine/buffer reference for a given transition name."
+  [tname]
+  (let [tstr (subs (str tname) 1)
+        rexp [{:r #"enter-job" :act :aj} {:r #"exit-job" :act :ej} {:r #"m(\d+)-start-job" :act :sm}
+              {:r #"m(\d+)-complete-job" :act :bj} {:r #"m(\d+)-blocked" :act :bl}
+              {:r #"m(\d+)-unblocked" :act :ub} {:r #"m(\d+)-starved" :act :st}
+              {:r #"m(\d+)-unstarved" :act :us}]]
+    (some #(when-let [mat (re-matches (:r %) tstr)]
+             {:act (:act %) :m (when (vector? mat) (read-string (second mat)))})
+          rexp)))
+
 
 ;;;====== These are used to generate scada patterns ======
 (defn scada-gather-job
