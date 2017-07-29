@@ -70,20 +70,6 @@
     (second (re-matches #"\:b(\d+)" (str (:bf msg))))
     (second (re-matches #"\:m(\d+)" (str (:m msg))))))
 
-;;; POD This interprets/translates the SCADA log. We'll need to generalize it someday.
-(defn translate-transition
-  "Return a SCADA :act and machine/buffer reference for a given transition name."
-  [tname]
-  (let [tstr (subs (str tname) 1)
-        rexp [{:r #"enter-job" :act :aj} {:r #"exit-job" :act :ej} {:r #"m(\d+)-start-job" :act :sm}
-              {:r #"m(\d+)-complete-job" :act :bj} {:r #"m(\d+)-blocked" :act :bl}
-              {:r #"m(\d+)-unblocked" :act :ub} {:r #"m(\d+)-starved" :act :st}
-              {:r #"m(\d+)-unstarved" :act :us}]]
-    (some #(when-let [mat (re-matches (:r %) tstr)]
-             {:act (:act %) :m (when (vector? mat) (read-string (second mat)))})
-          rexp)))
-
-
 ;;;====== These are used to generate scada patterns ======
 (defn scada-gather-job
   "Return every mention of of job-id in chronological order."
