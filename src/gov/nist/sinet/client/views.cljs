@@ -3,9 +3,69 @@
             [clojure.pprint :refer (cl-format pprint)]
             [quil.core :as quil :include-macros true]
             [quil.middleware :as qm]
-            [gov.nist.sinet.client.ws :as ws :refer (->output! output-atom report-atom chsk-send!)]
+            [gov.nist.sinet.client.ws :as ws :refer (->output! output-atom chsk-send!)]
             [gov.nist.sinet.client.draw :as draw :refer (setup-pn draw-pn pn-wheel-fn +display-pn+)]
-            [reagent.core :as reagent]))
+            [reagent.core :as reagent]
+            [re-frame.core :as re]))
+
+(declare request-individual)
+;;; POD Should ask for GP params and check that it isn't over those. 
+(defn handle-requested-pn
+  [{:keys [db]} [_ dif]]
+  (if (= :none (:requested-pn db))
+    (do (request-individual 0)
+        {:db (assoc db :requested-pn 0)})
+    (when (>= (+ (:requested-pn db) dif) 0)
+      (do (request-individual (+ (:requested-pn db) dif))
+          {:db (update db :requested-pn #(+ % dif))}))))
+
+(defn handle-evolve-state
+  [{:keys [db]} [_ state]]
+  {:db (assoc db :evolve-state state)})
+
+;;; POD Still need to define re/dispatch for these two.
+(defn handle-receive-pn
+  [{:keys [db]} [_ pn]]
+  {:db (assoc db :pn pn)})
+
+(defn handle-receive-report
+  [{:keys [db]} [_ report]]
+  {:db (assoc db :report report)})
+
+(re/reg-event-fx :sinet/requested-pn handle-requested-pn)
+(re/reg-event-fx :sinet/evolve-state handle-evolve-state)
+(re/reg-event-fx :sinet/recv-pn      handle-receive-pn)
+(re/reg-event-fx :sinet/recv-report  handle-receive-report)
+
+;;; Domino 4: a query (function) over this app state is automatically called.
+;;; This query function "extracts" data from application state, and then computes "a materialised view"
+;;; of the application state - producing data which is useful to the view functions of domino, 5.
+(defn query-init
+  [db v]
+  (:initial? db))
+
+(defn query-evolve-state
+  [db v]
+  (:evolve-state db))
+
+(defn query-requested-pn
+  [db v]
+  (:requested-pn db))
+
+(defn query-pn
+  [db v]
+  (:pn db))
+
+(defn query-report
+  [db v]
+  (:report db))
+
+;;; reg-sub says "if, in domino 5, you see a (subscribe [:pn]), then use query-pn to compute it".
+(re/reg-sub :initial?     query-init)
+(re/reg-sub :evolve-state query-evolve-state)
+(re/reg-sub :pn           query-pn)
+(re/reg-sub :requested-pn query-requested-pn)
+(re/reg-sub :report       query-report)
 
 (defn pretty-val 
   "cljs: (cl-format nil '~5,3f' nil) --> 0.000."
@@ -36,98 +96,88 @@
       [:li [:a {:href "#params"}"Parameters"]]
       [:li [:a {:href "#patterns"}"Message Patterns"]]]]]])
 
-(def viewing-pop-index (reagent/atom 0))
- 
-(defn view-pop
-  "Display the next PN in the population"
+(defn request-individual
+  "Retrieve the argument PN (index from population)"
   [index]
   (ws/chsk-send! [:sinet/get-individual index] 5000
-              (fn [cb-reply]
-                (->output! "Received PN  %s (it's Inv.id) " (:id cb-reply))
-                (reset! +display-pn+ cb-reply))))
+                 (fn [cb-reply]
+                   (cond (= cb-reply :chsk/timeout)
+                         (->output! "Timeout requesting individual")
+                         (contains? cb-reply :places)
+                         (do (->output! "Received PN with err= %s " (:err cb-reply))
+                             (re/dispatch [:sinet/recv-pn cb-reply]))
+                         :else
+                         (->output! "Invalid individual returned from get-individual request.")))))
 
-(def evolve-state (reagent/atom false))
-
-(defn evolve-run
-  [{:as args}]
-  (ws/->output! "evolve-run...")
-  (reset! evolve-state :running)
-  (ws/chsk-send! [:sinet/evolve-run {:status :best-wishes}]))
-
-(defn evolve-continue
-  [{:as args}]
-  (ws/->output! "evolve-continue...")
-  (reset! evolve-state :running)
-  (ws/chsk-send! [:sinet/evolve-continue {:status :best-wishes}]))
-
-(defn evolve-pause
-  [{:as args}]
-  (ws/->output! "evolve-pause...")
-  (reset! evolve-state :paused)
-  (ws/chsk-send! [:sinet/evolve-pause {:status :best-wishes}]))
+;;; reg-sub says "if, in domino 5, you see a (subscribe [:pn]), then use query-pn to compute it".
+;;; Yeah, fine, that returns provide an :evolve-state value which I'd like to pick up here.
+;;; This is where I'm stuck. These don't run. :evolve-state <===========
+(defn request-server-change-evolve-state
+  []
+  (let [change-to (re/subscribe [:evolve-state])]
+    (->output! "change-to-evolve-state: %s" change-to)
+    (cond
+      (= change-to :run)      (ws/chsk-send! [:sinet/evolve-run      {:status :best-wishes}]),
+      (= change-to :pause)    (ws/chsk-send! [:sinet/evolve-pause    {:status :best-wishes}]),
+      (= change-to :continue) (ws/chsk-send! [:sinet/evolve-continue {:status :best-wishes}]))))
 
 (declare draw-it)
 
 (defn quil-pn
   "Form-3 component for quil Petri net"
   []  
-  (let [a-closed-over-val nil]        ;; <-- closed over by lifecycle fns
-     (reagent/create-class            ;; <-- expects a map of functions 
-      {:component-did-mount           ;; the name of a lifecycle function
-       #(do
-          (println (cl-format nil "~%quil-pn requests PN ~S" @viewing-pop-index))
-          (draw-it)
-          (view-pop @viewing-pop-index))
-         
-       :component-will-mount            ;; the name of a lifecycle function
-       #(println "quil-pn-will-mount")  ;; your implementation
-       
-       :display-name  "quil-pn"  ;; for more helpful warnings & errors
-       
-       :reagent-render  ;; Note:  is not :render
-       (fn []           ;; remember to repeat parameters
-         [:canvas {:id "best-pn"}])})))
+  (let [pn (re/subscribe [:pn])
+        a-closed-over-val nil]        ;; <-- closed over by lifecycle fns
+      (reagent/create-class            ;; <-- expects a map of functions 
+       {:component-did-mount           ;; the name of a lifecycle function
+        #(when (contains? pn :places)
+           (reset! draw/+display-pn+ pn)
+           (draw-it))
+        
+        :component-will-mount            ;; the name of a lifecycle function
+        #(println "quil-pn-will-mount")  ;; your implementation
+        
+        :display-name  "quil-pn"  ;; for more helpful warnings & errors
+        
+        :reagent-render  ;; Note:  is not :render
+        (fn []           ;; remember to repeat parameters
+          [:canvas {:id "best-pn"}])})))
 
 (defn drawing-area []
   [:div#pn {:class "col-md-8"}
    [quil-pn]])
 
 (defn buttons []
-  [:div {:class "container"}
-   [:div {:class "row"} [:strong "GP Control"]]
-   [:div {:class "row"} "Viewing PN (order): " (pretty-val @viewing-pop-index)]
-   [:div {:class "row"} "ID: " (pretty-val (:id @+display-pn+))]
-   [:div {:class "row"} "Error: " (pretty-val (:error @+display-pn+))]
-   [:div {:class "row"}
-    [:div {:class "btn-group btn-group-sm"}
-     [:button {:class "btn btn-primary" :style {:background-color "#CC0066"}
-               :on-click (fn [] (view-pop (swap! viewing-pop-index inc)))} "Pop+"]
-     [:button {:class "btn btn-primary" :style {:background-color "#CC0066"}
-               :disabled (<= @viewing-pop-index 0)
-               :on-click (fn [] (view-pop (swap! viewing-pop-index dec)))} "Pop-"]]]
-   [:div {:class "row"}
-    [:div {:class "btn-group btn-group-sm"}
-     [:button {:class "btn btn-primary" :style {:background-color "#CC0066"}
-               :disabled (= @evolve-state :running)
-               :on-click evolve-run} "Run"]
-     [:button {:class "btn btn-primary" :style {:background-color "#CC0066"}
-               :disabled (not (= @evolve-state :running))
-               :on-click evolve-pause} "Pause"]
-     [:button {:class "btn btn-primary" :style {:background-color "#CC0066"}
-               :disabled (not (= @evolve-state :paused))
-               :on-click evolve-continue} "Continue"]]]])
-
-(add-watch report-atom
-           :watcher
-           (fn [key atom old-state new-state]
-             (reset! viewing-pop-index 0)
-             (view-pop 0)))
+  (let [evolve-state (re/subscribe [:evolve-state])
+        pn-id        (re/subscribe [:requested-pn])] ; Disabled ignores this. Did I read something about that?
+    [:div {:class "container"}
+     [:div {:class "row"} [:strong "GP Control"]]
+     [:div {:class "row"} "Viewing PN (order): " pn-id]
+     [:div {:class "row"} "Error: " (pretty-val (:err @+display-pn+))]
+     [:div {:class "row"}
+      [:div {:class "btn-group btn-group-sm"}
+       [:button {:class "btn btn-primary" :style {:background-color "#CC0066"}
+                 :on-click #(re/dispatch [:sinet/requested-pn 1])} "Pop+"]
+       [:button {:class "btn btn-primary" :style {:background-color "#CC0066"}
+                 :disabled (= pn-id 0)
+                 :on-click #(re/dispatch [:sinet/requested-pn -1])} "Pop-"]]]
+     [:div {:class "row"}
+      [:div {:class "btn-group btn-group-sm"}
+       [:button {:class "btn btn-primary" :style {:background-color "#CC0066"}
+                 #_:disabled #_(= evolve-state :run)
+                 :on-click #(re/dispatch [:sinet/evolve-state :run])} "Run"]
+       [:button {:class "btn btn-primary" :style {:background-color "#CC0066"}
+                 #_:disabled #_(not (= evolve-state :run))
+                 :on-click #(re/dispatch [:sinet/evolve-state :pause])} "Pause"]
+       [:button {:class "btn btn-primary" :style {:background-color "#CC0066"}
+                 #_:disabled #_(not (= evolve-state :pause))
+                 :on-click #(re/dispatch [:sinet/evolve-state :continue])} "Continue"]]]]))
 
 (defn report []
-  [:div {:class "container"}
-   [:div {:class "row"}
-    [:p [:strong "Report"]]]
-   (let [rmap @ws/report-atom]
+  (let [rmap (re/subscribe [:report])]
+    [:div {:class "container"}
+     [:div {:class "row"}
+      [:p [:strong "Report"]]]
      (when (and (contains? rmap :generation) (contains? rmap :pop-size))
        (doall
         (for [key (keys rmap)]
@@ -138,7 +188,7 @@
                       (interpose " ")
                       (str/join))
                  ": "
-                 (pretty-val (get rmap key)))]]))))])
+                 (pretty-val (get rmap key)))]])))]))
 
 (defn buttons-report []
   [:div#buttons-report {:class "col-md-4"}
@@ -169,21 +219,16 @@
 ;;; Loughborough Magenta: Pantone 220 C #8F004F (143,0,79)   Websafe, #CC0066
 ;;; Orange "#f4511e" 
 (defn main [data]
-  ;(js/setTimeout #(view-pop @viewing-pop-index) 2000) ; POD I'm looking for a ":on-redisplay" sort of thing. 
-  [:div {:id "myPage" :data-spy "scroll" :data-target ".navbar" :data-offset "60"} ; was :body. Could probably go back!
-   [nav]
-   [:div {:class "jumbotron text-center" :style {:background-color "#330066" :color "#ffffff"}} ; 
-    [:h1 "Sinet"]
-    [:p "System Identification for Smart Manufacturing"]]
-   [:div {:class "container-fluid"}
-    [:div {:class "row"}
-     [drawing-area]
-     [buttons-report]]
-    [:div {:class "row"}
-     [console-area]]]])
+  (let [_ (re/subscribe [:initial?])]
+    [:div {:id "myPage" :data-spy "scroll" :data-target ".navbar" :data-offset "60"} ; was :body. Could probably go back!
+     [nav]
+     [:div {:class "jumbotron text-center" :style {:background-color "#330066" :color "#ffffff"}} ; 
+      [:h1 "Sinet"]
+      [:p "System Identification for Smart Manufacturing"]]
+     [:div {:class "container-fluid"}
+      [:div {:class "row"}
+       [drawing-area]
+       [buttons-report]]
+      [:div {:class "row"}
+       [console-area]]]]))
 
-#_(ws/chsk-send!
- [:sinet/get-report {:gen 0}] 2000
- (fn [cb-reply]
-   (->output! "Received GenerationReport ")
-   (reset! ws/report-atom cb-reply)))

@@ -424,17 +424,13 @@
 (defn add-scada-report-fns [inv] ; POD This could be eliminated now that we have :rep. 
   "Add SCADA report functions to transitions and places."
   (let [report-fn (fn [rep] (fn [tkns] {:tkns tkns :rep rep}))]
-    (as-> inv ?i
-      (update-in ?i [:pn :transitions]
-                 #(vec (map (fn [t] (assoc t :fn (report-fn (:rep t)))) %)))
-      (update-in ?i [:pn :places]
-                 #(vec (map (fn [p] (assoc p :fn (report-fn (:rep p)))) %))))))
+    (update-in inv [:pn :transitions]
+               #(vec (map (fn [t] (assoc t :fn (report-fn (:rep t)))) %)))))
 
 ;;; POD Currently only one color. 
 (defn add-color-binding
   "Add color binding information."
   [inv]
-  (reset! diag {:iii inv})
   (update-in inv [:pn :arcs] (fn [arcs] (vec (map #(assoc % :bind {:jtype :blue}) arcs)))))
 
 ;;; A priority 1 to N is assigned to the N arcs out-going from a transition. Each
@@ -490,20 +486,18 @@
                        pick-map))))))
 
 (defn initial-pop [pop-size]
-  (let [pop-cnt (atom -1)]
-    (vec (repeatedly
-          pop-size ; job-trace: we only want the ones that mention jobs
-          (let [job-trace (->> (scada/random-job-trace) (filter #(contains? % :j)))]
-             (as-> (map->Inv {:id (swap! pop-cnt inc)
-                              :pn (assoc (initial-individual-pn job-trace) :id @pop-cnt)
-                              :history [{:trace job-trace}]}) ?inv
-               (add-scada-report-fns ?inv)
-               (add-color-binding ?inv)
-               (update ?inv :pn
-                       (fn [pn]
-                         (reduce (fn [pn trans] (assign-flow-priorities pn trans))
-                                 pn
-                                 (->> pn :transitions (map :name)))))))))))
+  (vec (repeatedly
+        pop-size 
+        #(let [job-trace (->> (scada/random-job-trace) (filter (fn [msg] (contains? msg :j))))]
+           (as-> (map->Inv {:pn (initial-individual-pn job-trace),
+                            :history [{:trace job-trace}]}) ?inv
+             (add-scada-report-fns ?inv)
+             (add-color-binding ?inv)
+             (update ?inv :pn
+                     (fn [pn]
+                       (reduce (fn [pn trans] (assign-flow-priorities pn trans))
+                               pn
+                               (->> pn :transitions (map :name))))))))))
 
 (defn i-error [inv]
   "Compute the individual's score."
@@ -564,7 +558,6 @@
      :total-mutations (reduce + 0 (map #(count (:history %)) pop))
      :elapsed-time (int (/ (- (System/currentTimeMillis) (:start-time world)) 1000))
      :best-error (:err best)
-     :id-of-best (:id best)
      :median-error (:err (nth pop (int (/ (gp-param :pop-size) 2))))
      :average-pn-size (pnu/avg (map #(-> % :pn pnu/pn-size) pop))}))
 
@@ -616,8 +609,7 @@
                   (dissoc :M2Mp :initial-marking :Q :steady-state))))
 
 (defn print-inv [p writer]
-  (.write writer (cl-format nil "#Inv [id=~S, err=~A]"
-                            (:id p)
+  (.write writer (cl-format nil "#Inv [err=~A]"
                             (if (number? (:err p))
                               (cl-format nil "~6,2F" (:err p))
                               :NA))))
@@ -633,7 +625,7 @@
 (defn clean-inv-for-transmit [inv]
   "Sente can't send functions, can't send records, at least. Add error and history."
   (as-> (:pn inv) ?pn
-    (assoc  ?pn :error (:error inv))
+    (assoc  ?pn :err (:err inv))
     (assoc  ?pn :history (:history inv))
     (update ?pn :transitions (fn [t] (vec (map #(dissoc % :fn) t))))))
 
@@ -685,12 +677,6 @@
   :sinet/evolve-pause
   (fn [ev-msg]
     (>!! (evolve-chan) "pause")))
-
-;;; POD this always asks for generation 0, 
-#_(ws/register-method
- :sinet/get-report
- (fn [_]
-   (report-map (:pop (util/app-info)) 0 (System/currentTimeMillis))))
 
 (defn server>client-notify-new-gen
   "Push report of new generation to the client."
@@ -809,8 +795,7 @@
       (println "SD Error:"        (cl-format nil "~5,3F" (->> pop (map :err) variance Math/sqrt))))
     (println "SD Arc count:"    (cl-format nil "~5,3F" (->> pop (map #(-> % :pn :arcs count)) variance Math/sqrt)))
     (println "SD Trans count:"  (cl-format nil "~5,3F" (->> pop (map #(-> % :pn :transitions count)) variance Math/sqrt)))
-    (println "SD Place count:"  (cl-format nil "~5,3F" (->> pop (map #(-> % :pn :places count)) variance Math/sqrt)))
-    (println "Remaining ancestors:"  (->> pop (map :id) distinct))))
+    (println "SD Place count:"  (cl-format nil "~5,3F" (->> pop (map #(-> % :pn :places count)) variance Math/sqrt)))))
 
 (defn diag-trace
   ([] (diag-trace 20))

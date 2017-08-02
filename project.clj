@@ -6,7 +6,7 @@
   :global-vars {*assert* true}
   :dependencies [[org.clojure/clojure        "1.8.0"]
                  [org.clojure/tools.reader   "1.0.2"] ; this one can probably go. 
-                 [org.clojure/clojurescript  "1.9.671"]
+                 [org.clojure/clojurescript  "1.9.854"]
                  [medley                     "1.0.0"]
                  [org.clojure/core.async     "0.3.443"]
                  [com.cemerick/piggieback    "0.2.2"]
@@ -24,6 +24,7 @@
 
                  [reagent                    "0.7.0"]
                  [reagent-forms              "0.5.29"]
+                 [re-frame                   "0.9.4"] 
                  [re-frisk                   "0.4.5"] 
                  [org.webjars/bootstrap      "3.3.7"] ; "4.0.0-alpha" had problems with menu
                  [quil                       "2.6.0"]

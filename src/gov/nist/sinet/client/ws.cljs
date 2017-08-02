@@ -3,12 +3,13 @@
             [taoensso.encore :as encore :refer-macros (have have?)] ; POD two logging facilities
             [taoensso.timbre :as timbre :refer-macros (tracef debugf infof warnf errorf)] ; POD two logging facilities
             [taoensso.sente :as sente]
-            [reagent.core :as reagent]))
+            [reagent.core :as reagent]
+            [re-frame.core :as re]))
+
 
 (timbre/set-level! :error) ; :trace :debug etc. for more logging
 
 (defonce output-atom (reagent/atom "Intentionally blank"))
-(defonce report-atom (reagent/atom {}))
 
 (def output-el (.getElementById js/document "output"))
 (defn ->output! [fmt & args]
@@ -43,8 +44,10 @@
   (->output! "Pushed event from server: %s " (first ?data))
   (let [msg-type (first ?data)]
     (cond 
-      (= msg-type :sinet/new-generation) (reset! report-atom (second ?data))
-      (= msg-type :sinet/event) (->output! "Event from Sinet: %s" (second ?data)))))
+      (= msg-type :sinet/new-generation)
+      (re/dispatch [:sinet/recv-report (second ?data)]),
+      (= msg-type :sinet/event)
+      (->output! "Event from Sinet: %s" (second ?data)))))
 
 (defmethod event-msg-handler :chsk/handshake
   [{:as ev-msg :keys [?data]}]
