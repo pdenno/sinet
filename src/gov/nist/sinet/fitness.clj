@@ -10,6 +10,7 @@
 
 ;;; ToDo: Currently fitness only concerns violation of partial orders it should
 ;;;       additionally include:
+;;;         0) Checking for work flows that are not reflected in the log. 
 ;;;         1) Dynamic response (from Q matrix or simulation)
 ;;;         2) Association to being blocked/unblocked starved/unstarved.
 ;;;            This is some sort of function relating tokens in places to messages.

@@ -28,7 +28,7 @@
    :eden-mutation-cnt 4
    :max-gens 20
    :debugging? true
-   :pn-k-bounded  10      ; When to give up on computing the reachability graph.
+   :pn-k-bounded 10 ; When to give up on computing the reachability graph.
    :pn-max-rs 1000
    :crossover-to-mutation-ratio 0.5
    :select-pressure 4 ; POD not normalized to pop-size! Spector: 7/1000
@@ -37,15 +37,13 @@
    :no-new-jobs-penalty 1.00001
    :crossover-keeps-parents? true ; NYI
    :initial-mutations 10  ; max number of times to mutate eden individuals to create first generation.
-   :mutation-dist mutation-dist
-   #_:eden-dist #_eden-dist})
+   :mutation-dist mutation-dist})
 
 (def problem
   {:use-cpus (.availableProcessors (Runtime/getRuntime)) ; Counts hyperthreading, apparently. 
    :keep-vs-ignore 0.8
-   :scada-data-file    "data/SCADA-logs/scada-f0-imbalanced.clj"
-   :scada-patterns (-> "data/SCADA-logs/scada-f0-imbalanced.clj" scada/load-scada scada/scada-patterns)
-   :data-source :ignore #_+m2-11+}) ; POD not yet dynamic, of course.
+   :scada-data-file  "data/SCADA-logs/scada-f0-imbalanced.clj"
+   :pattern-reserves #{:act :jt :bf :m :n}})
 
 (defn gp-system []
   {:evolve-chan (async/chan)
@@ -55,7 +53,10 @@
 (defrecord App [ws-connection]
   component/Lifecycle
   (start [component]
-    (assoc component :gp-params gp-params :problem problem :gp-system (gp-system)))
+    (as-> component ?c
+        (assoc ?c :gp-params gp-params :problem problem :gp-system (gp-system))
+        (assoc-in ?c [:problem :scada-patterns] ; Needs :pattern-reserves defined.
+                  (-> ?c :problem :scada-data-file scada/load-scada scada/scada-patterns))))
   (stop [component]
     (async/close! (-> component :gp-system :evolve-chan))
     component))

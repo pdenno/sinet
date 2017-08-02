@@ -63,16 +63,25 @@
        (apply max)
        inc))
 
-;;; {:act :sm, :bf :b1, :j 1660, :n 3, :clk 2083.1285760500264, :line 301}
+
+;;;{:act :aj, :j 1079, :jt :jobType1, :ends 2367.448119327561, :clk 2365.448119327561, :line 989}
+;;;{:act :bj, :bf :b1, :j 1079, :n 0, :clk 2367.448119327561, :line 994}
+;;;{:act :sm, :bf :b1, :j 1079, :n 1, :clk 2367.448119327561, :line 996}
+;;;{:act :ej, :m :m2, :j 1079, :ent 2365.448119327561, :clk 2368.248119327561, :line 998})
 (defn implies-machine
+  "Returns machine referenced/implied in message. 
+   If a buffer n is references, machine n+1 is pulling from it.
+   Returns nil if msg contains neither :bf or :m"
   [msg]
-  (if (contains? msg :bf)
-    (second (re-matches #"\:b(\d+)" (str (:bf msg))))
-    (second (re-matches #"\:m(\d+)" (str (:m msg))))))
+  (let [act (:act msg)]
+    (cond (= act :aj) :m1
+          (= act :bj) (keyword (format "m%d"      (read-string (subs (str (:bf msg)) 2)))),
+          (= act :sm) (keyword (format "m%d" (inc (read-string (subs (str (:bf msg)) 2))))),
+          (contains? msg :m) (:m msg))))
 
 ;;;====== These are used to generate scada patterns ======
 (defn scada-gather-job
-  "Return every mention of of job-id in chronological order."
+  "Return a 'job trace', every mention of of job-id in chronological order."
   [data job-id]
   (filter  #(= (:j %) job-id) data))
   
@@ -80,21 +89,23 @@
   "Return a vector of all job-ids found in the data"
   [data]
   (sort (distinct (map :j (filter #(contains? % :j) data)))))
-
-(def +pattern-reserves+ "keys that are preserved in patterns" #{:act :jt :bf :m :n})
  
 (defn make-pattern
+  "Create a SCADA pattern; they look like this: {:act :sm, :bf :b1, :n :*}, 
+   {:act :ej, :m m1}..."
   [msgs pattern-id]
   {:id pattern-id
    :form
    (as-> msgs ?msgs
      (map #(reduce (fn [msg key] (dissoc msg key)) ; remove unnecessary keys
                    %
-                   (difference (set (keys %)) +pattern-reserves+))
+                   (difference (set (keys %))
+                               #{:act :jt :bf :m :n} ; POD Ugh! 
+                               #_(-> (util/app-info) :problem :pattern-reserves)))
           ?msgs)
-     (map #(reduce (fn [msg key] (if (contains? msg key) (assoc msg key \*) msg))
+     (map #(reduce (fn [msg key] (if (contains? msg key) (assoc msg key :*) msg))
                    % ; wildcard certain msg vals
-                   [:jt :bf :n :m])
+                   [:jt :n]) ; POD I ONLY WANT :jt and :n here
           ?msgs)
      (vec ?msgs))})
 
@@ -102,7 +113,7 @@
   "Return true if msg matches form"
   [msg form]
   (every? (fn [key]
-           (or (and (= (key form) \*) (contains? msg key))
+           (or (and (= (key form) :*) (contains? msg key))
                (= (key form) (key msg))))
           (keys form)))
 
@@ -115,7 +126,7 @@
                  (range (count form))))))
 
 (declare all-scada-patterns trim-patterns scada-ordering-relations act2trans)
-(defn scada-patterns
+(defn scada-patterns ; called from app.clj
   "Compute the problem's SCADA patterns. It is a vector of maps with keys
    (:id :form :njobs :relations). Run once per problem."
   [log]
@@ -130,16 +141,16 @@
        
 ;;; POD Probably want start and stop point for every occurrence. 
 (defn all-scada-patterns
-  "Return a vector of all the job patterns found in the SCADA log.
-   Run once per problem."
+  "Return a vector of all the job-trace patterns  found in the SCADA log.
+   A 'job-trace-pattern' only includes msgs that have a :j. Run once per problem at init."
   [data]
   (let [pattern-id (atom -1)]
     (reduce (fn [patterns job-id]
-              (let [job (scada-gather-job data job-id)
-                    matches (filter #(match-pattern? job %) patterns)]
-                (if (empty? matches)
+              (let [job (scada-gather-job data job-id) ; get a job trace
+                    matches (filter #(match-pattern? job %) patterns)] ; matches one already collected?
+                (if (empty? matches)  ; no, make a new pattern.
                   (conj patterns (assoc (make-pattern job (swap! pattern-id inc)) :jobs [job-id]))
-                  (reduce (fn [patterns id]
+                  (reduce (fn [patterns id] ; yes, just update the job count.
                             (update-in patterns [id :jobs] #(conj % job-id)))
                           patterns (map :id matches)))))
             [] (scada-all-job-ids data))))
@@ -189,4 +200,3 @@
              (reduce (fn [m s] (conj m (ordering-fn (:act (first events)) (:act s))))
                      []
                      (rest events)))))))
-

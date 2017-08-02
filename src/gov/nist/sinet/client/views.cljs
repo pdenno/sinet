@@ -17,6 +17,7 @@
         (and (coll? val) (empty? val)) "nil"
         :else (str val)))
 
+;;; https://www.w3schools.com/bootstrap/bootstrap_theme_company.asp
 (defn nav []
   [:nav {:class "navbar navbar-default navbar-fixed-top"
          :style {:margin-bottom "0" :background-color "#330066" :z-index "9999"

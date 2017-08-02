@@ -24,6 +24,7 @@
 
                  [reagent                    "0.7.0"]
                  [reagent-forms              "0.5.29"]
+                 [re-frisk                   "0.4.5"] 
                  [org.webjars/bootstrap      "3.3.7"] ; "4.0.0-alpha" had problems with menu
                  [quil                       "2.6.0"]
 

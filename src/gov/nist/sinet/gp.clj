@@ -52,41 +52,21 @@
 
 ;;; {:name :enter-job, :act :aj :m (:m msg)}
 
-(defn add-extra-nodes
-  "Return a map {:t <> :p <> :t-adds, :p-adds} naming nodes (transitions or places) to be added.
-   Used to make the ring-shaped Eden individual."
-  [prob]
-  (let [cnt-p (count (:p prob))
-        cnt-t (count (:t prob))]
-    (as-> {:p (:p prob) :t (:t prob)} ?p
-      (cond (= cnt-p cnt-t) ?p
-            (> cnt-p cnt-t)
-            (update ?p :t
-                    into (for [n (range (- cnt-p cnt-t))]
-                           {:name (keyword (str "tadd-" (inc n))) :act :silent}))
-            (> cnt-t cnt-p)
-            (update ?p :p
-                    into (for [n (range (- cnt-t cnt-p))]
-                           {:name (keyword (str "padd-" (inc n))) :act :silent}))))))
-
 ;;;================================================================
 ;;; New code for Eden individuals
 ;;;================================================================
 (declare elem-assoc eden-pn)
 
 (defn make-plan
-  "Return a 'plan' from list of {:name <elem-name> :rep <scada-log-msg it represents>}"
+  "Return a 'plan' given a list of {:name <elem-name> :rep <scada-log-msg it represents>}"
   [e-assocs]
-  (let [cnt (rand-int 2)]
-    (reduce (fn [plan e-assoc]
-              (as-> plan ?p
-                (update ?p :cnt inc)
-                (if (even? (:cnt ?p))
-                  (update ?p :t conj e-assoc)
-                  (update ?p :p conj e-assoc))))
-            ;; rand-int decides if first event will be represented by a place or transition.
-            {:cnt cnt :t [] :p [] :starts-on (if (= cnt 0) :t :p)}
-            e-assocs)))
+  (reduce (fn [plan e-assoc]
+            (as-> plan ?p
+              (update ?p :cnt inc)
+              (update ?p :t conj {:name (:name e-assoc) :rep (dissoc e-assoc :name)})
+              (update ?p :p conj {:name (format "Place-%d" (:cnt ?p))})))
+          {:cnt 0 :t [] :p []}
+          e-assocs))
 
 ;;; POD Someday you might want to call this with multiple job traces.
 (defn initial-individual-pn
@@ -94,37 +74,39 @@
   [job-trace]
   (->> job-trace
        ;(filter (fn [_] (> (pr-param :keep-vs-ignore) (rand)))) ; let mutation do it.
-       elem-assoc ; This returns maps of {:name <elem-name> :rep <scada-log-msg it represents.
+       elem-assoc ; This returns maps of {:name <elem-name> :act <act frm slog> :bf/:m <from slog>}
        make-plan 
-       add-extra-nodes
        eden-pn))
 
 ;;; POD This interprets/translates the SCADA log. We'll need to generalize it someday.
 (defn scada2pn-name
-  "Return a name for a given SCADA msg"
+  "Return a transition name for a given SCADA msg (bl/ub/st/us probably wont' be used.)"
   [msg]
-  (cond (= :sm (:act msg)) (keyword (cl-format nil "m~A-start-job" (scada/implies-machine msg))),
-        (= :bj (:act msg)) (keyword (cl-format nil "m~A-complete-job" (scada/implies-machine msg))),
-        (= :bl (:act msg)) (keyword (cl-format nil "m~A-blocked" (scada/implies-machine msg))),   
-        (= :ub (:act msg)) (keyword (cl-format nil "m~A-unblocked" (scada/implies-machine msg))),
-        (= :st (:act msg)) (keyword (cl-format nil "m~A-starved" (scada/implies-machine msg))),
-        (= :us (:act msg)) (keyword (cl-format nil "m~A-unstarved" (scada/implies-machine msg)))))
+  (let [m (scada/implies-machine msg)]
+    (cond (= :aj (:act msg)) (read-string (cl-format nil "~A-start-job"    m)),
+          (= :ej (:act msg)) (read-string (cl-format nil "~A-complete-job" m)),
+          (= :sm (:act msg)) (read-string (cl-format nil "~A-start-job"    m)),
+          (= :bj (:act msg)) (read-string (cl-format nil "~A-complete-job" m)),
+          (= :bl (:act msg)) (read-string (cl-format nil "~A-blocked"      m)),
+          (= :ub (:act msg)) (read-string (cl-format nil "~A-unblocked"    m)),
+          (= :st (:act msg)) (read-string (cl-format nil "~A-starved"      m)),
+          (= :us (:act msg)) (read-string (cl-format nil "~A-unstarved"    m)))))
 
 ;;; POD This interprets/translates the SCADA log. We'll need to generalize it someday.
 (defn elem-assoc
   [job-trace]
   (distinct
    (map (fn [msg]
-          (cond (= :aj (:act msg)) {:name :enter-job, :act :aj :m (:m msg)}
-                (= :ej (:act msg)) {:name :exit-job :act :ej :m (:m msg)}
-                (= :sm (:act msg)) {:name (scada2pn-name msg) :act :sm :m (:m msg)}
-                (= :bj (:act msg)) {:name (scada2pn-name msg) :act :bj :m (:m msg)}
-                (= :bl (:act msg)) {:name (scada2pn-name msg) :act :bl :m (:m msg)}
-                (= :ub (:act msg)) {:name (scada2pn-name msg) :act :ub :m (:m msg)}
-                (= :st (:act msg)) {:name (scada2pn-name msg) :act :st :m (:m msg)}
-                (= :us (:act msg)) {:name (scada2pn-name msg) :act :us :m (:m msg)}))
+          (let [m (scada/implies-machine msg)]
+            (cond (= :aj (:act msg)) {:name (scada2pn-name msg) :act :aj :m m} 
+                  (= :ej (:act msg)) {:name (scada2pn-name msg) :act :ej :m m} 
+                  (= :sm (:act msg)) {:name (scada2pn-name msg) :act :sm :m m :bf (:bf msg)}
+                  (= :bj (:act msg)) {:name (scada2pn-name msg) :act :bj :m m :bf (:bf msg)}
+                  (= :bl (:act msg)) {:name (scada2pn-name msg) :act :bl :m m}
+                  (= :ub (:act msg)) {:name (scada2pn-name msg) :act :ub :m m}
+                  (= :st (:act msg)) {:name (scada2pn-name msg) :act :st :m m}
+                  (= :us (:act msg)) {:name (scada2pn-name msg) :act :us :m m})))
         job-trace)))
-
 
 ;;; POD This still needs work. There needs to be higher level operations
 ;;; These include (1) recognizing subsystems and preserving them from further mucking.
@@ -133,7 +115,7 @@
 ;;; looks at the default causal knowledge. See Sankaran Mahadevan's paper with Sudarsan
 ;;; "Automated uncertainty quantification analysis using a system model and data"
 ;;; (4) The NN problem with blocking/starvation. 
-(declare eden-places eden-trans eden-display-geometry)
+(declare eden-places eden-trans eden-arcs eden-display-geometry)
 (defn eden-pn
   "Return a PN expressing the places and transitions of the argument 'plan.'
    It is a loop made by using visible places and transitions with additional
@@ -437,17 +419,16 @@
 
 ;;;====== End search operators ================================
 
-;;; The design is such that each transition and place was named (at Eden) to describe an event
-;;; in the SCADA log. For example, {:act :ej, :m :m2, :j 909, :ent 1999.3, :clk 2002.21}
-;;; would be translated to :exit-job
+;;; Each transition and place represents something in the log. 
+;;; SCADA log example: {:act :ej, :m :m2, :j 909, :ent 1999.3, :clk 2002.21}
 (defn add-scada-report-fns [inv] ; POD This could be eliminated now that we have :rep. 
   "Add SCADA report functions to transitions and places."
-  (let [report-fn (fn [act machine] (fn [tkns] {:act act :tkns tkns :machine machine}))]
+  (let [report-fn (fn [rep] (fn [tkns] {:tkns tkns :rep rep}))]
     (as-> inv ?i
       (update-in ?i [:pn :transitions]
-                 #(vec (map (fn [t] (assoc t :fn (report-fn (-> t :rep :act) (-> t :rep :m)))) %)))
+                 #(vec (map (fn [t] (assoc t :fn (report-fn (:rep t)))) %)))
       (update-in ?i [:pn :places]
-                 #(vec (map (fn [p] (assoc p :fn (report-fn (-> p :rep :act) (-> p :rep :m)))) %))))))
+                 #(vec (map (fn [p] (assoc p :fn (report-fn (:rep p)))) %))))))
 
 ;;; POD Currently only one color. 
 (defn add-color-binding
@@ -511,8 +492,8 @@
 (defn initial-pop [pop-size]
   (let [pop-cnt (atom -1)]
     (vec (repeatedly
-          pop-size
-          #(let [job-trace (scada/random-job-trace)]
+          pop-size ; job-trace: we only want the ones that mention jobs
+          (let [job-trace (->> (scada/random-job-trace) (filter #(contains? % :j)))]
              (as-> (map->Inv {:id (swap! pop-cnt inc)
                               :pn (assoc (initial-individual-pn job-trace) :id @pop-cnt)
                               :history [{:trace job-trace}]}) ?inv
@@ -686,7 +667,7 @@
               (?reply-fn (-> (nth pop pn-index) inv-geom clean-inv-for-transmit)))))))))
 
 
-(defn evolve-chan [] (-> (util/app-info) :gp-system :evolve-chan))
+(defn evolve-chan []   (-> (util/app-info) :gp-system :evolve-chan))
 (defn pause-evolve? [] (-> (util/app-info) :gp-system :pause-evolve?))
 
 (ws/register-method
@@ -766,6 +747,7 @@
 (defn start-evolve-loop!
   []
   (reset! +log+ [])
+  (println "evolve-chan=" (evolve-chan))
   (async/go-loop [world {}]
     (let [msg (<! (evolve-chan))]
       (log (str "msg =" msg))
