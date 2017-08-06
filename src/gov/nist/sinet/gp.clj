@@ -64,7 +64,7 @@
             (as-> plan ?p
               (update ?p :cnt inc)
               (update ?p :t conj {:name (:name e-assoc) :rep (dissoc e-assoc :name)})
-              (update ?p :p conj {:name (format "Place-%d" (:cnt ?p))})))
+              (update ?p :p conj {:name (keyword (format "place-%d" (:cnt ?p)))})))
           {:cnt 0 :t [] :p []}
           e-assocs))
 
@@ -714,7 +714,7 @@
   ;;(log {:defn evolve-continue :world world})
   (reset! (pause-evolve?) false)
   (loop [w world]
-    (pop-stats)
+    (pop-stats w)
     (as-> w ?w
       (assoc ?w :state :running)
       (update ?w :pop #(sort-by-error %))
@@ -778,8 +778,9 @@
 
 (defn pop-stats 
   "Report population statistics"
-  []
+  [world]
   (let [pop (-> (app-info) :pop)]
+    (println "\nGeneration:" (:gen world))
     (when (-> (app-info) :pop first :err)
       (println "Best Error:"      (cl-format nil "~5,3F" (->> pop first :err)))
       (println "Avg Error:"       (cl-format nil "~5,3F" (->> pop (map :err) mean))))

@@ -26,7 +26,7 @@
   {:pn-elements [:place :token :normal-arc :inhibitor-arc :expo-trans #_:immediate-trans #_:fixed-trans]
    :pop-size 100
    :eden-mutation-cnt 4
-   :max-gens 20
+   :max-gens 3
    :debugging? true
    :pn-k-bounded 10 ; When to give up on computing the reachability graph.
    :pn-max-rs 1000

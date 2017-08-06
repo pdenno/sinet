@@ -4,7 +4,7 @@
             [taoensso.timbre :as timbre :refer-macros (tracef debugf infof warnf errorf)] ; POD two logging facilities
             [taoensso.sente :as sente]
             [reagent.core :as reagent]
-            [re-frame.core :as re]))
+            [re-frame.core :as rf]))
 
 
 (timbre/set-level! :error) ; :trace :debug etc. for more logging
@@ -41,11 +41,11 @@
 ;;; This is for things pushed from server
 (defmethod event-msg-handler :chsk/recv
   [{:as ev-msg :keys [?data]}]
-  (->output! "Pushed event from server: %s " (first ?data))
+  (->output! "Received event pushed from server: %s " (first ?data))
   (let [msg-type (first ?data)]
     (cond 
       (= msg-type :sinet/new-generation)
-      (re/dispatch [:sinet/recv-report (second ?data)]),
+      (rf/dispatch [:sinet/recv-report (second ?data)]), 
       (= msg-type :sinet/event)
       (->output! "Event from Sinet: %s" (second ?data)))))
 

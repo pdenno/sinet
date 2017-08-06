@@ -6,66 +6,53 @@
             [gov.nist.sinet.client.ws :as ws :refer (->output! output-atom chsk-send!)]
             [gov.nist.sinet.client.draw :as draw :refer (setup-pn draw-pn pn-wheel-fn +display-pn+)]
             [reagent.core :as reagent]
-            [re-frame.core :as re]))
+            [re-frame.core :as rf]))
 
-(declare request-individual)
-;;; POD Should ask for GP params and check that it isn't over those. 
-(defn handle-requested-pn
-  [{:keys [db]} [_ dif]]
-  (if (= :none (:requested-pn db))
-    (do (request-individual 0)
-        {:db (assoc db :requested-pn 0)})
-    (when (>= (+ (:requested-pn db) dif) 0)
-      (do (request-individual (+ (:requested-pn db) dif))
-          {:db (update db :requested-pn #(+ % dif))}))))
+(declare request-individual request-server-change-evolve-state)
+;;; https://github.com/Day8/re-frame/blob/master/docs/EffectfulHandlers.md
+;;; As suggested in above URL, if you want to do a dispatch in a hanlder use :dispatch
+;;; just as you are using :db (as the thing returned). 
+;;; POD Should ask for GP params and check that it isn't over those.
 
-(defn handle-evolve-state
-  [{:keys [db]} [_ state]]
-  {:db (assoc db :evolve-state state)})
+;;; reg-event-db just does one reduce-like step, -fx additionally allows:
+;;;    * event handlers to hav effects effects (beyond state change)
+;;;    * coeffects (arguments) beyond just db and v. POD I could probably use -db here.
+(rf/reg-event-fx
+ :sinet/requested-pn
+ (fn [{:keys [db]} [_ dif]]
+   (if (= :none (:requested-pn db))
+     (do (request-individual 0)              ; POD Handlers are expected to be pure. Hmmm. 
+         {:db (assoc db :requested-pn 0)})   ; The tutorial claims that. Then dismisses it. 
+     (when (>= (+ (:requested-pn db) dif) 0) ; You can also call rf/dispatch here. 
+       (do (request-individual (+ (:requested-pn db) dif))
+           {:db (update db :requested-pn #(+ % dif))})))))
 
-;;; POD Still need to define re/dispatch for these two.
-(defn handle-receive-pn
-  [{:keys [db]} [_ pn]]
-  {:db (assoc db :pn pn)})
-
-(defn handle-receive-report
-  [{:keys [db]} [_ report]]
-  {:db (assoc db :report report)})
-
-(re/reg-event-fx :sinet/requested-pn handle-requested-pn)
-(re/reg-event-fx :sinet/evolve-state handle-evolve-state)
-(re/reg-event-fx :sinet/recv-pn      handle-receive-pn)
-(re/reg-event-fx :sinet/recv-report  handle-receive-report)
+(rf/reg-event-fx
+ :sinet/evolve-state
+ (fn [{:keys [db]} [_ state]]
+   (do (request-server-change-evolve-state state)
+       {:db (assoc db :evolve-state state)})))
+  
+(rf/reg-event-fx
+ :sinet/recv-pn
+ (fn [{:keys [db]} [_ pn]]
+   {:db (assoc db :pn pn)}))
+ 
+(rf/reg-event-fx
+ :sinet/recv-report
+ (fn [{:keys [db]} [_ report]]
+   {:db (assoc db :report report)}))
 
 ;;; Domino 4: a query (function) over this app state is automatically called.
 ;;; This query function "extracts" data from application state, and then computes "a materialised view"
 ;;; of the application state - producing data which is useful to the view functions of domino, 5.
-(defn query-init
-  [db v]
-  (:initial? db))
-
-(defn query-evolve-state
-  [db v]
-  (:evolve-state db))
-
-(defn query-requested-pn
-  [db v]
-  (:requested-pn db))
-
-(defn query-pn
-  [db v]
-  (:pn db))
-
-(defn query-report
-  [db v]
-  (:report db))
-
-;;; reg-sub says "if, in domino 5, you see a (subscribe [:pn]), then use query-pn to compute it".
-(re/reg-sub :initial?     query-init)
-(re/reg-sub :evolve-state query-evolve-state)
-(re/reg-sub :pn           query-pn)
-(re/reg-sub :requested-pn query-requested-pn)
-(re/reg-sub :report       query-report)
+;;; Check this out: https://www.youtube.com/watch?v=fU9hR3kiOK0
+;;; reg-sub says "if, in domino 5, you see a @(subscribe [:pn]), then use query-pn to compute it".
+(rf/reg-sub :initial?     (fn [db _] (:initial? db)))
+(rf/reg-sub :evolve-state (fn [db _] (:evolve-state db)))
+(rf/reg-sub :pn           (fn [db _] (:pn db)))           ; <--- This is "query-pn"
+(rf/reg-sub :requested-pn (fn [db _] (:requested-pn db))) 
+(rf/reg-sub :report       (fn [db _] (:report db)))
 
 (defn pretty-val 
   "cljs: (cl-format nil '~5,3f' nil) --> 0.000."
@@ -105,28 +92,34 @@
                          (->output! "Timeout requesting individual")
                          (contains? cb-reply :places)
                          (do (->output! "Received PN with err= %s " (:err cb-reply))
-                             (re/dispatch [:sinet/recv-pn cb-reply]))
+                             (rf/dispatch [:sinet/recv-pn cb-reply]))
                          :else
                          (->output! "Invalid individual returned from get-individual request.")))))
 
-;;; reg-sub says "if, in domino 5, you see a (subscribe [:pn]), then use query-pn to compute it".
+;;; reg-sub says "if, in domino 5, you see a @(subscribe [:pn]), then use query-pn to compute it".
 ;;; Yeah, fine, that returns provide an :evolve-state value which I'd like to pick up here.
 ;;; This is where I'm stuck. These don't run. :evolve-state <===========
 (defn request-server-change-evolve-state
-  []
-  (let [change-to (re/subscribe [:evolve-state])]
-    (->output! "change-to-evolve-state: %s" change-to)
-    (cond
-      (= change-to :run)      (ws/chsk-send! [:sinet/evolve-run      {:status :best-wishes}]),
-      (= change-to :pause)    (ws/chsk-send! [:sinet/evolve-pause    {:status :best-wishes}]),
-      (= change-to :continue) (ws/chsk-send! [:sinet/evolve-continue {:status :best-wishes}]))))
+  [change-to]
+  (->output! "change-to-evolve-state: %s" change-to)
+  (cond
+    (= change-to :run)      (ws/chsk-send! [:sinet/evolve-run      {:status :best-wishes}]),
+    (= change-to :pause)    (ws/chsk-send! [:sinet/evolve-pause    {:status :best-wishes}]),
+    (= change-to :continue) (ws/chsk-send! [:sinet/evolve-continue {:status :best-wishes}])))
 
 (declare draw-it)
 
-(defn quil-pn
+(defn quil-pn []
+  (let [pn @(rf/subscribe [:pn])]
+    (when (contains? pn :places)
+      (reset! draw/+display-pn+ pn)
+      (draw-it))
+    [:canvas {:id "best-pn"}]))
+
+#_(defn quil-pn
   "Form-3 component for quil Petri net"
   []  
-  (let [pn (re/subscribe [:pn])
+  (let [pn @(rf/subscribe [:pn])
         a-closed-over-val nil]        ;; <-- closed over by lifecycle fns
       (reagent/create-class            ;; <-- expects a map of functions 
        {:component-did-mount           ;; the name of a lifecycle function
@@ -148,8 +141,8 @@
    [quil-pn]])
 
 (defn buttons []
-  (let [evolve-state (re/subscribe [:evolve-state])
-        pn-id        (re/subscribe [:requested-pn])] ; Disabled ignores this. Did I read something about that?
+  (let [evolve-state @(rf/subscribe [:evolve-state])
+        pn-id        @(rf/subscribe [:requested-pn])] ; Disabled ignores this. Did I read something about that?
     [:div {:class "container"}
      [:div {:class "row"} [:strong "GP Control"]]
      [:div {:class "row"} "Viewing PN (order): " pn-id]
@@ -157,27 +150,29 @@
      [:div {:class "row"}
       [:div {:class "btn-group btn-group-sm"}
        [:button {:class "btn btn-primary" :style {:background-color "#CC0066"}
-                 :on-click #(re/dispatch [:sinet/requested-pn 1])} "Pop+"]
+                 :on-click #(rf/dispatch [:sinet/requested-pn 1])} "Pop+"]
        [:button {:class "btn btn-primary" :style {:background-color "#CC0066"}
                  :disabled (= pn-id 0)
-                 :on-click #(re/dispatch [:sinet/requested-pn -1])} "Pop-"]]]
+                 :on-click #(rf/dispatch [:sinet/requested-pn -1])} "Pop-"]]]
      [:div {:class "row"}
       [:div {:class "btn-group btn-group-sm"}
        [:button {:class "btn btn-primary" :style {:background-color "#CC0066"}
-                 #_:disabled #_(= evolve-state :run)
-                 :on-click #(re/dispatch [:sinet/evolve-state :run])} "Run"]
+                 :disabled (= evolve-state :run)
+                 :on-click #(rf/dispatch [:sinet/evolve-state :run])} "Run"]
        [:button {:class "btn btn-primary" :style {:background-color "#CC0066"}
-                 #_:disabled #_(not (= evolve-state :run))
-                 :on-click #(re/dispatch [:sinet/evolve-state :pause])} "Pause"]
+                 :disabled (not (= evolve-state :run))
+                 :on-click #(rf/dispatch [:sinet/evolve-state :pause])} "Pause"]
        [:button {:class "btn btn-primary" :style {:background-color "#CC0066"}
-                 #_:disabled #_(not (= evolve-state :pause))
-                 :on-click #(re/dispatch [:sinet/evolve-state :continue])} "Continue"]]]]))
+                 :disabled (not (= evolve-state :pause))
+                 :on-click #(rf/dispatch [:sinet/evolve-state :continue])} "Continue"]]]]))
 
+;;; To render the DOM representation of some part of the app state, view functions must query
+;;; for that part of app-db, and that means using subscribe.
 (defn report []
-  (let [rmap (re/subscribe [:report])]
+  (let [rmap @(rf/subscribe [:report])]
     [:div {:class "container"}
      [:div {:class "row"}
-      [:p [:strong "Report"]]]
+      [:p [:strong (cl-format  nil "Report")]]]
      (when (and (contains? rmap :generation) (contains? rmap :pop-size))
        (doall
         (for [key (keys rmap)]
@@ -219,7 +214,7 @@
 ;;; Loughborough Magenta: Pantone 220 C #8F004F (143,0,79)   Websafe, #CC0066
 ;;; Orange "#f4511e" 
 (defn main [data]
-  (let [_ (re/subscribe [:initial?])]
+  (let [_ @(rf/subscribe [:initial?])]
     [:div {:id "myPage" :data-spy "scroll" :data-target ".navbar" :data-offset "60"} ; was :body. Could probably go back!
      [nav]
      [:div {:class "jumbotron text-center" :style {:background-color "#330066" :color "#ffffff"}} ; 
