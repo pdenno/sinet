@@ -865,4 +865,3 @@
        ppprint))
 
 (defn diag-push-inv [inv] (push-inv inv))
-
