@@ -23,7 +23,10 @@
 (rf/reg-event-fx
  :sinet/initialize
  (fn[{:keys [db]} [_ _]] #_[coeffects event]
-   {:db (assoc db :initial? true :requested-pn :none)}))
+   {:db (assoc db
+               :initial? true
+               :evolve-state :ready
+               :requested-pn :none)}))
 
 ;;; See ~/Documents/git/sinet/resources-index/dev/index.html for "app"
 (defn ^:export main []

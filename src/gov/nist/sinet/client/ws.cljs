@@ -44,8 +44,10 @@
   (->output! "Received event pushed from server: %s " (first ?data))
   (let [msg-type (first ?data)]
     (cond 
-      (= msg-type :sinet/new-generation)
-      (rf/dispatch [:sinet/recv-report (second ?data)]), 
+      (= msg-type :sinet/generation-report)
+      (rf/dispatch [:sinet/recv-report (second ?data)]),
+      (= msg-type :sinet/diag-push-pn)
+      (rf/dispatch [:sinet/recv-pn (second ?data)]),
       (= msg-type :sinet/event)
       (->output! "Event from Sinet: %s" (second ?data)))))
 

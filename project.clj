@@ -52,11 +52,12 @@
   
   :profiles {:dev-config {}
              ;; There is a user.clj in dev/. By design of clojure, it gets loaded if it on the path...
-             :dev [:dev-config
+             :dev [:dev-config ; This pattern of use from rente. 
                    {:dependencies [[org.clojure/tools.namespace "0.2.10"]
                                    [com.cemerick/piggieback "0.2.2"] 
                                    [figwheel "0.5.11"]
                                    [figwheel-sidecar "0.5.11"]]
+                    :repl-options {:nrepl-middleware [cemerick.piggieback/wrap-cljs-repl]}
                     :plugins [[lein-figwheel "0.5.11"]
                               [lein-environ "1.0.1"]]
                               
@@ -81,7 +82,6 @@
                      {:client {:compiler {:optimizations :advanced
                                           :elide-asserts true
                                           :pretty-print false}}}}}}
-  :repl-options {:nrepl-middleware [cemerick.piggieback/wrap-cljs-repl]}
   :aliases  {"start-repl" ["do" "clean," "cljsbuild" "once," "repl" ":headless"]
              "start"      ["do" "clean," "cljsbuild" "once," "run"]
              "package"    ["with-profile" "prod" "do" "clean" ["cljsbuild" "once"]]})

@@ -40,8 +40,12 @@
  
 (rf/reg-event-fx
  :sinet/recv-report
- (fn [{:keys [db]} [_ report]]
-   {:db (assoc db :report report)}))
+ (fn [{:keys [db]} [_ rpt]]
+   (let [done? (or (= :failure (:state rpt))
+                   (= :success (:state rpt)))]
+     {:db (cond-> db
+            true  (assoc :report rpt)
+            done? (assoc :evolve-state :ready))})))
 
 ;;; Domino 4: a query (function) over this app state is automatically called.
 ;;; This query function "extracts" data from application state, and then computes "a materialised view"
@@ -112,29 +116,9 @@
 (defn quil-pn []
   (let [pn @(rf/subscribe [:pn])]
     (when (contains? pn :places)
-      (reset! draw/+display-pn+ pn)
+      (reset! draw/+display-pn+ (draw/pn-geom pn))
       (draw-it))
     [:canvas {:id "best-pn"}]))
-
-#_(defn quil-pn
-  "Form-3 component for quil Petri net"
-  []  
-  (let [pn @(rf/subscribe [:pn])
-        a-closed-over-val nil]        ;; <-- closed over by lifecycle fns
-      (reagent/create-class            ;; <-- expects a map of functions 
-       {:component-did-mount           ;; the name of a lifecycle function
-        #(when (contains? pn :places)
-           (reset! draw/+display-pn+ pn)
-           (draw-it))
-        
-        :component-will-mount            ;; the name of a lifecycle function
-        #(println "quil-pn-will-mount")  ;; your implementation
-        
-        :display-name  "quil-pn"  ;; for more helpful warnings & errors
-        
-        :reagent-render  ;; Note:  is not :render
-        (fn []           ;; remember to repeat parameters
-          [:canvas {:id "best-pn"}])})))
 
 (defn drawing-area []
   [:div#pn {:class "col-md-8"}
@@ -142,7 +126,8 @@
 
 (defn buttons []
   (let [evolve-state @(rf/subscribe [:evolve-state])
-        pn-id        @(rf/subscribe [:requested-pn])] ; Disabled ignores this. Did I read something about that?
+        pn-id        @(rf/subscribe [:requested-pn])
+        report       @(rf/subscribe [:report])]
     [:div {:class "container"}
      [:div {:class "row"} [:strong "GP Control"]]
      [:div {:class "row"} "Viewing PN (order): " pn-id]
@@ -150,9 +135,10 @@
      [:div {:class "row"}
       [:div {:class "btn-group btn-group-sm"}
        [:button {:class "btn btn-primary" :style {:background-color "#CC0066"}
+                 :disabled (not report)
                  :on-click #(rf/dispatch [:sinet/requested-pn 1])} "Pop+"]
        [:button {:class "btn btn-primary" :style {:background-color "#CC0066"}
-                 :disabled (= pn-id 0)
+                 :disabled (or (= pn-id :none) (= pn-id 0) )
                  :on-click #(rf/dispatch [:sinet/requested-pn -1])} "Pop-"]]]
      [:div {:class "row"}
       [:div {:class "btn-group btn-group-sm"}
@@ -208,7 +194,9 @@
     :setup draw/setup-pn
     :draw draw/draw-pn
     :mouse-wheel draw/pn-wheel-fn
-    :size [900 500])) ; POD This is used in pnml/rescale. I need a solution for getting it here! (component?)
+    ;; POD I need a solution for getting it here! 
+    :size [(-> draw/graph-window-params :window-size :length)
+           (-> draw/graph-window-params :window-size :height)]))
 
 ;;; Loughborough Purple:  Pantone 269 C #472267 (71,51,103), Websafe, #330066 
 ;;; Loughborough Magenta: Pantone 220 C #8F004F (143,0,79)   Websafe, #CC0066

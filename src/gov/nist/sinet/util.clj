@@ -4,4 +4,8 @@
 (defn app-info []
   ((resolve 'gov.nist.sinet.run/app-info)))
 
+(def +log+ (atom []))
+(defn log [msg] (swap! +log+ conj msg))
+
+
 

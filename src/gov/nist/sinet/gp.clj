@@ -7,25 +7,26 @@
             [gov.nist.spntools.core :as pn :refer :all]
             [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp pn-ok-> as-pn-ok->)]
             [gov.nist.spntools.util.reach :as pnr :refer (reachability)]
-            [gov.nist.spntools.util.simulate :as sim :refer (simulate)]
             [gov.nist.spntools.util.pnml :as pnml :refer (read-pnml)] ;  POD clean this up
             [gov.nist.sinet.util :as util :refer (app-info)]
+            [gov.nist.sinet.simulate :as sim :refer (simulate)]
             [gov.nist.sinet.fitness :as fit :refer (workflow-fitness)]
             [gov.nist.sinet.scada :as scada]
             [gov.nist.sinet.ws :as ws]))
 
-;;; I started with Lee Spector's "gp" demonstration software.
+;;; Just for the record, I started with Lee Spector's "gp" demonstration software!
 
 ;;; ToDo: - DONE: Get data for exponential jobs, BBS.
-;;;       ===> Make sure I'm not promoting non-mutated individuals when they fail mutation.
-;;;       ===> Normalize the error calculation.
+;;;       - Normalize the error calculation.
+;;;       - Only do local mutations (No arcs to distance places, etc.)
+;;;       - Implement the MJP crossover operator
 ;;;       - Keeping compute time on each individual might be useful.
 ;;;       - GSPN: Decide what to do about remove-token and other things that might fail or cause failure.
 ;;;       - DONE: Implement a log for exceptional situations.
 ;;;       - GSPN: Maybe I shouldn't care about absorbing states?
-;;;       - For new Eden code: Remove :visible everywhere ???
 ;;;       - Need a mutation to move the :intro of new tokens to a different arc.
 ;;;         (:remove doesn't matter where you do it from )
+;;;       - I made every transition timed. Probably not the best idea, generally speaking. 
 
 (defn update-pop! [pop]
   (alter-var-root
@@ -41,8 +42,6 @@
 
 (defrecord Inv [pn id error history])
 (def diag (atom nil))
-(def +log+ (atom []))
-(defn log [msg] (swap! +log+ conj msg))
 
 ;;;  DOCUMENTATION REQUIREMENT: Determine what among the :gp-params matters.
 ;;; :pn-elements -- The PN elements that can appear in individuals.
@@ -57,13 +56,15 @@
 ;;;================================================================
 (declare elem-assoc eden-pn)
 
+;;; {:tkns [{:jtype :blue, :id 1}], :rep {:name :m2-complete-job, :rep {:act :ej, :m :m2}}}
 (defn make-plan
   "Return a 'plan' given a list of {:name <elem-name> :rep <scada-log-msg it represents>}"
   [e-assocs]
   (reduce (fn [plan e-assoc]
             (as-> plan ?p
               (update ?p :cnt inc)
-              (update ?p :t conj {:name (:name e-assoc) :rep (dissoc e-assoc :name)})
+              ;(update ?p :t conj {:name (:name e-assoc) :rep (dissoc e-assoc :name)})
+              (update ?p :t conj e-assoc)
               (update ?p :p conj {:name (keyword (format "place-%d" (:cnt ?p)))})))
           {:cnt 0 :t [] :p []}
           e-assocs))
@@ -125,7 +126,7 @@
     (eden-places ?pn (:p plan))
     (eden-trans  ?pn (:t plan))
     (eden-arcs   ?pn plan)
-    (eden-display-geometry ?pn)))
+    #_(eden-display-geometry ?pn)))
 
 (defn eden-places
   "Update the PN with :places according to the seq of plan-maps for places."
@@ -145,7 +146,7 @@
   (assoc pn :transitions
          (vec (map (fn [plan]
                      (as-> (pnu/make-transition pn :name (:name plan)) ?tr
-                       (assoc ?tr :type (if (= 0 (rand-int 2)) :exponential :immediate))
+                       (assoc ?tr :type :exponential) ; (if (= 0 (rand-int 2)) :exponential :immediate))
                        (assoc ?tr :rep plan)
                        (assoc ?tr :visible? (if (= :silent (:act plan)) false true))))
                    plans))))
@@ -165,7 +166,7 @@
                                                      (first (map :name (:p plan))))))))))))
   
 
-(defn eden-display-geometry 
+#_(defn eden-display-geometry 
   "Assign positions to places and transitions of Eden individuals for display."
   [pn]
   (let [elems (interleave (map :name (:places pn)) (map :name (:transitions pn)))
@@ -218,7 +219,6 @@
     (when (not-empty arcs)
       (nth arcs (rand-int (count arcs))))))
 
-
 (declare mutate-m eval-pn add-color-binding assign-flow-priorities pick-from-atom!)
 
 (defn mutate
@@ -244,7 +244,7 @@
   (let [answer (or force (pick-fn))]
     ;(println "method=" answer)
     (when-not (pnu/pn? (:pn inv))
-      (log (str "last mutation failed:" inv))
+      (util/log (str "last mutation failed:" inv))
       (throw (ex-info "Not a PN" {:inv inv}))) ; POD temporary
     answer))
 
@@ -272,12 +272,16 @@
       (update ?i :pn #(pnu/add-pn % (pnu/make-arc % trans-in (-> % :places last :name))))
       (update ?i :pn #(pnu/add-pn % (pnu/make-arc % (-> % :places last :name) trans-out)))
       (assoc-in ?i [:pn :marking-key] :invalid)
-      (update ?i :pn pnr/renumber-pids))))
+      (update ?i :pn pnr/renumber-pids)
+      (update ?i :history conj [:add-place (-> ?i :pn :places last :name)]))))
 
+;;; POD this should probably go away! Replace by some sort of coping mechanism!
 (defmethod mutate-m :add-token [inv & args]
   (if-let [places (-> inv :pn :places not-empty)]
     (let [p-indx (rand-int (count places))]
-      (update-in inv [:pn :places p-indx :initial-tokens] inc))
+      (as-> inv ?i
+          (update-in ?i [:pn :places p-indx :initial-tokens] inc)
+          (update    ?i :history conj [:add-token (-> ?i :pn :places p-indx :name)])))
     {:skip :add-token :msg "no place!"}))
 
 (defmethod mutate-m :add-trans [inv & args]
@@ -286,13 +290,14 @@
         (as-> inv ?i
           (update ?i :pn
                   #(pnu/add-pn % (pnu/make-transition
-                                   % ; POD choice of :exponential/:immediate here is temporary
-                                   :type (if (= 0 (rand-int 2)) :exponential :immediate))))
+                                   % ; POD maybe the GP should assume everything is timed
+                                   :type :exponential #_(if (== 0 (rand-int 2)) :exponential :immediate))))
           (update ?i :pn
                   #(let [tname (-> % :transitions last :name)]
                      (as-> % ?pn
                        (pnu/add-pn ?pn (pnu/make-arc ?pn p-in tname))
-                       (pnu/add-pn ?pn (pnu/make-arc ?pn tname p-out))))))
+                       (pnu/add-pn ?pn (pnu/make-arc ?pn tname p-out)))))
+          (update ?i :history conj [:add-trans (-> ?i :pn :transitions last :name)]))
         {:skip :add-trans :msg "no p-out"})
     {:skip :add-trans :msg "no p-in"}))
 
@@ -303,8 +308,12 @@
         (if-let [have-one (some #(when (and (= (:name from) (:source %))
                                             (= (:name to)   (:target %))) %)
                                 (filter #(= (:type %) :normal) (-> inv :pn :arcs)))]
-          (update-in inv [:pn :arcs (pnu/arc-index (:pn inv) (:name have-one)) :multiplicity] inc)
-          (update inv :pn #(pnu/add-pn % (pnu/make-arc % (:name from) (:name to))))))
+          (-> inv
+              (update-in [:pn :arcs (pnu/arc-index (:pn inv) (:name have-one)) :multiplicity] inc)
+              (update    :history conj [:add-arc :have-one (:name have-one)]))
+          (as-> inv ?i
+              (update ?i :pn #(pnu/add-pn % (pnu/make-arc % (:name from) (:name to))))
+              (update ?i :history conj (-> ?i :pn :arcs last :name)))))
       {:skip :add-arc :msg "No place"})
     {:skip :add-arc :msg "No trans"}))
 
@@ -314,63 +323,84 @@
       (if-let [have-one (some #(when (and (= (:name pl) (:source %))
                                           (= (:name tr) (:target %))) %)
                               (filter #(= (:type %) :inhibitor) (-> inv :pn :arcs)))]
-        (update-in inv [:pn :arcs (pnu/arc-index (:pn inv) (:name have-one)) :multiplicity] inc)
-        (update inv :pn #(pnu/add-pn % (pnu/make-arc % (:name pl) (:name tr) :type :inhibitor))))
+        (as-> inv ?i
+          (update-in ?i [:pn :arcs (pnu/arc-index (:pn ?i) (:name have-one)) :multiplicity] inc)
+          (update    ?i :history conj [:add-inhibitor :have-one (:name have-one)]))
+        (as-> inv ?i
+          (update ?i :pn #(pnu/add-pn % (pnu/make-arc % (:name pl) (:name tr) :type :inhibitor)))
+          (update ?i :history conj [:add-inhibitor (-> ?i :pn :arcs last :name)])))
       {:skip :add-inhibitor :msg "No place"})
     {:skip :add-inhibitor :msg "No trans"}))
 
 (defmethod mutate-m :bump-inhibitor-3 [inv & args]
   (if-let [inh (random-inhib (:pn inv))]
-    (update-in inv [:pn :arcs (pnu/arc-index (:pn inv) (:name inh)) :multiplicity] #(+ % 3))
+    (-> inv
+        (update-in [:pn :arcs (pnu/arc-index (:pn inv) (:name inh)) :multiplicity] #(+ % 3))
+        (update    :history conj [:bump-inhibitor-3 (:name inh)]))
     {:skip :bump-inhibitor- :msg "No inhib"}))
 
 ;;;=================== Remove =======================================
 (defmethod mutate-m :remove-place [inv & args]
-  (let [pl (:name (random-place (:pn inv) #_:subset #_#(remove (fn [pl] (:visible? pl)) %)))]
+  (let [pl (:name (random-place (:pn inv) :subset #(remove (fn [pl] (:visible? pl)) %)))]
     (as-> inv ?i
       (update-in ?i [:pn :places] (fn [pls] (vec (remove #(= (:name %) pl) pls))))
       (update-in ?i [:pn :arcs] (fn [arcs]  (vec (remove #(or (= (:source %) pl)
                                                               (= (:target %) pl)) arcs)))) 
       (assoc-in ?i [:pn :marking-key] :invalid)
-      (update ?i :pn pnr/renumber-pids))))
+      (update ?i :pn pnr/renumber-pids)
+      (update ?i :history conj [:remove-place pl]))))
 
 (defmethod mutate-m :remove-trans [inv & args]
-  (let [tr (:name (random-trans (:pn inv)))]
+  (let [tr (:name (random-trans (:pn inv) :subset #(remove (fn [tr] (:visible? tr)) %)))]
     (if (> (-> inv :transitions count) 1)
       (as-> inv ?i
         (update-in ?i [:pn :transitions] (fn [ts] (vec (remove #(= % tr) ts))))
         (update-in ?i [:pn :arcs] (fn [arcs] (vec (remove #(or (= (:source %) tr)
-                                                               (= (:target %) tr)) arcs)))))
+                                                               (= (:target %) tr)) arcs))))
+        (update    ?i :history conj [:remove-trans tr]))
       {:skip :remove-trans :msg "too few"})))
 
 (defmethod mutate-m :remove-token [inv & args]
   (if (> (apply + (->> inv :pn :places (map :initial-tokens))) 1)
     (let [pl (:name (random-place (:pn inv) :subset #(remove (fn [pl] (= 0 (:initial-tokens pl))) %)))]
-      (update-in inv [:pn :places (pnu/place-index (:pn inv) pl) :initial-tokens] dec))
+      (-> inv
+          (update-in [:pn :places (pnu/place-index (:pn inv) pl) :initial-tokens] dec)
+          (update    :history conj [:remove-token pl])))
     {:skip :remove-token :msg "Not enough tokens left"}))
 
 (defn sole-arc?
   "Return true if removal of the argument arc would leave the net with a
    transition or place for which there isn't at least one arc in and one out."
   [pn ar]
-  (and (= (count (remove #(= :inhibitor (:type %)) (pnu/arcs-into  pn (:source ar)))) 1)
-       (= (count (remove #(= :inhibitor (:type %)) (pnu/arcs-outof pn (:target ar)))) 1)
+  (and (or (= (count (remove #(= :inhibitor (:type %)) (pnu/arcs-into  pn (:source ar)))) 1)
+           (= (count (remove #(= :inhibitor (:type %)) (pnu/arcs-outof pn (:target ar)))) 1))
        ;; If it is :multiplicity > 1, we won't remove it, just reduce multiplicity
        (= (:multiplicity ar) 1)))
 
 (defmethod mutate-m :remove-arc [inv & args]
+  (reset! diag {:where :remove-arc :inv inv})
   (if-let [ar (random-arc (:pn inv) :subset #(filter (fn [ar] (and (= :normal (:type ar))
                                                                    (not (sole-arc? (:pn inv) ar)))) %))]
-    (if (= 1 (:multiplicity ar))
-      (update-in inv [:pn :arcs] (fn [arcs] (vec (remove #(= % ar) arcs))))
-      (update-in inv [:pn :arcs (pnu/arc-index (:pn inv) (:name ar)) :multiplicity] dec))
-    {:skip :remove-arc :msg "No arc"}))
+      (if (= 1 (:multiplicity ar))
+        (-> inv
+            (update-in [:pn :arcs] (fn [arcs] (vec (remove #(= % ar) arcs))))
+            (update    :history conj [:remove-arc (:name ar)]))
+        (-> inv
+            (update-in [:pn :arcs (pnu/arc-index (:pn inv) (:name ar)) :multiplicity] dec)
+            (update    :history conj [:remove-arc :dec (:name ar)])))
+      {:skip :remove-arc :msg "No arc"}))
+
 
 (defmethod mutate-m :remove-inhibitor [inv & args]
+  (reset! diag {:where :remove-inhib :inv inv})
   (if-let [ar (random-arc (:pn inv) :subset #(filter (fn [ar] (= :inhibitor (:type ar))) %))]
     (if (= 1 (:multiplicity ar))
-      (update-in inv [:pn :arcs] (fn [arcs] (vec (remove #(=  % ar) arcs))))
-      (update-in inv [:pn :arcs (pnu/arc-index (:pn inv) (:name ar)) :multiplicity] dec))
+      (-> inv
+          (update-in [:pn :arcs] (fn [arcs] (vec (remove #(=  % ar) arcs))))
+          (update    :history conj [:remove-inhib (:name ar)]))
+      (-> inv
+          (update-in [:pn :arcs (pnu/arc-index (:pn inv) (:name ar)) :multiplicity] dec)
+          (update    :history conj [:remove-inhib :dec (:name ar)])))
     {:skip :remove-inhibitor :msg "No inhibitor arcs"}))
 
 ;;;================================================================================
@@ -390,14 +420,18 @@
 (defmethod mutate-m :swap-places [inv & args]
   (if-let [pl1 (:name (random-place (:pn inv)))]
     (if-let [pl2 (:name (random-place (:pn inv):subset #(filter (fn [pl] (not= (:name pl) pl1)) %)))]
-      (update inv :pn #(swap-arcs % pl1 pl2))
+      (-> inv
+          (update :pn #(swap-arcs % pl1 pl2))
+          (update :history conj [:swap-places pl1 pl2]))
       {:skip :swap-places :msg "no 2nd place"})
     {:skip :swap-places :msg "no 1st place"}))
 
 (defmethod mutate-m :swap-trans [inv & args]
   (if-let [tr1 (:name (random-trans (:pn inv)))]
     (if-let [tr2 (:name (random-trans (:pn inv):subset #(filter (fn [tr] (not= (:name tr) tr1)) %)))]
-      (update inv :pn #(swap-arcs % tr1 tr2))
+      (-> inv 
+          (update :pn #(swap-arcs % tr1 tr2))
+          (update :history conj [:swap-arcs tr1 tr2]))
       {:skip :swap-trans :msg "no 2nd trans"})
     {:skip :swap-trans :msg "no 1st trans"}))
 
@@ -414,7 +448,8 @@
             p2 (:priority arc2)]
         (-> inv
             (assoc-in [:pn :arcs (pnu/arc-index pn (:name arc1)) :priority] p2)
-            (assoc-in [:pn :arcs (pnu/arc-index pn (:name arc2)) :priority] p1)))
+            (assoc-in [:pn :arcs (pnu/arc-index pn (:name arc2)) :priority] p1)
+            (update :history conj [:swap-priority  (:name arc1) (:name arc2)])))
       {:skip :swap-priority :msg "no candidates"})))
 
 ;;;====== End search operators ================================
@@ -485,7 +520,9 @@
                        arcs
                        pick-map))))))
 
-(defn initial-pop [pop-size]
+(defn initial-pop
+  "Create an initial population of size pop-size."
+  [pop-size]
   (vec (repeatedly
         pop-size 
         #(let [job-trace (->> (scada/random-job-trace) (filter (fn [msg] (contains? msg :j))))]
@@ -499,9 +536,10 @@
                                pn
                                (->> pn :transitions (map :name))))))))))
 
-(defn i-error [inv]
+(defn i-error 
   "Compute the individual's score."
-  (assoc inv :err (-> inv :pn fit/workflow-fitness)))
+  [inv]
+  (assoc inv :err (fit/workflow-fitness inv)))
 
 (defn sort-by-error
   "Add value for :err to each PN and used it to sort the population; best first."
@@ -523,7 +561,7 @@
   (reset! pnr/+max-rs+ (gp-param :pn-max-rs))
   (reset! pn/+max-states+ (gp-param :pn-max-states))
   (pnu/reset-ids! {})
-  (reset! +log+ [])) ; POD FIX THIS!
+  (reset! util/+log+ [])) 
 
 (declare validate-gp-params push-report)
 
@@ -553,26 +591,20 @@
   (let [pop (:pop world)
         best (first pop)]
     {:generation (:gen world)
+     :best-error (:err best)
+     :median-error (:err (nth pop (int (/ (gp-param :pop-size) 2))))
+     :average-pn-size (pnu/avg (map #(-> % :pn pnu/pn-size) pop))
      :state (:state world)
      :pop-size (count pop)
      :total-mutations (reduce + 0 (map #(count (:history %)) pop))
-     :elapsed-time (int (/ (- (System/currentTimeMillis) (:start-time world)) 1000))
-     :best-error (:err best)
-     :median-error (:err (nth pop (int (/ (gp-param :pop-size) 2))))
-     :average-pn-size (pnu/avg (map #(-> % :pn pnu/pn-size) pop))}))
+     :elapsed-time (int (/ (- (System/currentTimeMillis) (:start-time world)) 1000))}))
 
 (defn client?
   "Returns true if there is a web client."
   []
   (-> (util/app-info) :ws-connection :connected-uids deref :any first))
 
-(declare server>client-notify-new-gen pop-stats)
-
-(defn push-report
-  "Set the report-data atom to new data and notify the server"
-  [world]
-  (server>client-notify-new-gen (report-map world))
-  pop)
+(declare pop-stats)
 
 (def +log+ (atom []))
 (defn log [msg] (swap! +log+ conj msg))
@@ -582,7 +614,7 @@
   (-> world report-map log))
 
 (defn report-gen
-  "Either log results or send them to a client. Doesn't touch world"
+  "Either log results or send them to a client. Doesn't touch world."
   [world]
   (if (client?)
     (push-report world)
@@ -629,7 +661,7 @@
     (assoc  ?pn :history (:history inv))
     (update ?pn :transitions (fn [t] (vec (map #(dissoc % :fn) t))))))
 
-(defn inv-geom
+#_(defn inv-geom
   "Compute reasonable display placement (:geom) for the argument individual."
   [inv]
   (let [from (-> inv :history first)
@@ -646,6 +678,7 @@
                      (clojure.set/difference elems (set (keys (:geom ?pn)))))
              (pnml/rescale ?pn)))))
 
+;;; Respond to a request for an individual 
 (ws/register-method
   :sinet/get-individual     
   (fn [{:as ev-msg :keys [?data ?reply-fn]}]
@@ -656,7 +689,7 @@
           (println "get-individual:" pn-index)
           (when ?reply-fn
             (when (and (>= pn-index 0) (< pn-index (count pop)))
-              (?reply-fn (-> (nth pop pn-index) inv-geom clean-inv-for-transmit)))))))))
+              (?reply-fn (-> (nth pop pn-index) #_inv-geom clean-inv-for-transmit)))))))))
 
 
 (defn evolve-chan []   (-> (util/app-info) :gp-system :evolve-chan))
@@ -678,14 +711,25 @@
   (fn [ev-msg]
     (>!! (evolve-chan) "pause")))
 
-(defn server>client-notify-new-gen
+(defn push-report
   "Push report of new generation to the client."
-  [report]
+  [world]
+  (let [report (report-map world)
+        connect (-> (util/app-info) :ws-connection)
+        uids (:connected-uids connect)]
+    (if-let [uid (-> @uids :any first)]
+      (ws/send! connect uid [:sinet/generation-report report])
+      (println "notify-new-gen failed "))))
+
+(defn push-inv
+  "Push an individual to the client for viewing"
+  [inv]
   (let [connect (-> (util/app-info) :ws-connection)
         uids (:connected-uids connect)]
     (if-let [uid (-> @uids :any first)]
-      (ws/send! connect uid [:sinet/new-generation report])
-      (println "notify-new-gen failed "))))
+      (ws/send! connect uid [:sinet/diag-push-pn
+                             (-> inv #_inv-geom clean-inv-for-transmit)])
+      (println "No client."))))
 
 (defn evolve-success? [world]
   (cond (< (-> world :pop first :err) 0.1) ; good enough to count as success (POD :gp-param+)
@@ -723,8 +767,8 @@
       (evolve-success? ?w)
       (report-gen ?w)
       (cond @(pause-evolve?) ?w, 
-            (= (:state ?w) :failure) (deliver prom ?w), 
-            (= (:state ?w) :success) (deliver prom ?w), 
+            (= (:state ?w) :failure) (do (push-inv (-> ?w :pop first)) (deliver prom ?w)), 
+            (= (:state ?w) :success) (do (push-inv (-> ?w :pop first)) (deliver prom ?w)), 
             :else
             (recur (make-next-gen ?w))))))
 
@@ -736,7 +780,7 @@
   (println "evolve-chan=" (evolve-chan))
   (async/go-loop [world {}]
     (let [msg (<! (evolve-chan))]
-      (log (str "msg =" msg))
+      ;(log (str "msg =" msg))
       (as-> world ?w
         (cond (= msg "init")
               (if (not= (:state ?w) :init) (evolve-init) ?w),
@@ -748,7 +792,7 @@
               (do (println "evolve-pause...")
                   (reset! (pause-evolve?) true) ?w))
         (if (or (= :close (:state ?w)) (= :timeout (:state ?w)))
-          (log ?w)
+          (util/log ?w)
           (recur ?w))))))
 
 ;;;-------------------- Debugging stuff -----------------------------------
@@ -798,8 +842,9 @@
     (println "SD Trans count:"  (cl-format nil "~5,3F" (->> pop (map #(-> % :pn :transitions count)) variance Math/sqrt)))
     (println "SD Place count:"  (cl-format nil "~5,3F" (->> pop (map #(-> % :pn :places count)) variance Math/sqrt)))))
 
-(defn diag-trace
-  ([] (diag-trace 20))
+(defn diag-sim
+  "Simulate some steps on the best Inv."
+  ([] (diag-sim 20))
   ([nsteps]
    (-> (app-info)
        :pop
@@ -810,7 +855,8 @@
        :log
        ppprint)))
 
-(defn diag-problem
+(defn diag-scada-patterns
+  "pprint the scada-patterns."
   []
   (->> (app-info)
        :problem
@@ -818,4 +864,5 @@
        (map :form)
        ppprint))
 
-  
+(defn diag-push-inv [inv] (push-inv inv))
+

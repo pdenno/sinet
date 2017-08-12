@@ -8,13 +8,13 @@
 
 (def mutation-dist "The pdf for ordinary mutations (not eden mutations)"
   [[:add-place        1/10]    ; Add place (mine can't be absorbing, thus Nobile 1&2).
-   [:add-token        1/10]    ; Add token to some place (visible or hidden).
+   [:add-token           0]    ; Add token to some place (visible or hidden).
    [:add-trans        1/10]    ; Add transition, connecting to input and output places.
    [:add-arc          1/20]
    [:add-inhibitor    1/10]    ; Add inhibitor arc, connecting a place to a trans
 ;  [:bump-inhibitor-3 1/20]    ; N.B. Makes it hard to remove, (but that might be good).
    [:remove-place     1/10]
-   [:remove-token     1/10]
+   [:remove-token        0]
    [:remove-trans     1/10]
    [:remove-arc       1/10]
    [:remove-inhibitor 1/10]
@@ -25,18 +25,17 @@
 (def gp-params
   {:pn-elements [:place :token :normal-arc :inhibitor-arc :expo-trans #_:immediate-trans #_:fixed-trans]
    :pop-size 100
-   :eden-mutation-cnt 4
-   :max-gens 3
+   :aqpn-warm-up 5 ; "Ignore this number of tokens on both ends of the log."
+   :max-gens 30
    :debugging? true
    :pn-k-bounded 10 ; When to give up on computing the reachability graph.
    :pn-max-rs 1000
    :crossover-to-mutation-ratio 0.5
    :select-pressure 4 ; POD not normalized to pop-size! Spector: 7/1000
-   :elite-individuals 0
+   :elite-individuals 1
    :timeout-secs 60
    :no-new-jobs-penalty 1.00001
    :crossover-keeps-parents? true ; NYI
-   :initial-mutations 10  ; max number of times to mutate eden individuals to create first generation.
    :mutation-dist mutation-dist})
 
 (def problem

@@ -427,4 +427,75 @@
                                    (= 2 (:rotate %)) (assoc % :rotate 3),
                                    :else (dissoc % :rotate)))))))))
 
+;;;---------------- window/rescaling  stuff ------------------------
+(def graph-window-params {:window-size {:length 900 :height 500}
+                          :x-start 30 :y-start 30})
+
+;;;(def diag (atom nil))
+
+(defn pn-graph-scale
+  "Return a map providing reasonable scale factor for displaying the graph,
+   given that the PN might have originated with another tool."
+  [pn]
+  (let [range
+        (reduce (fn [range xy]
+                  (as-> range ?r
+                    (assoc ?r :min-x (min (:min-x ?r) (:x xy)))
+                    (assoc ?r :max-x (max (:max-x ?r) (:x xy)))
+                    (assoc ?r :min-y (min (:min-y ?r) (:y xy)))
+                    (assoc ?r :max-y (max (:max-y ?r) (:y xy)))))
+                {:min-x 99999 :max-x -99999
+                 :min-y 99999 :max-y -99999}
+                (-> pn :geom vals))
+        length (- (:max-x range) (:min-x range))
+        height (- (:max-y range) (:min-y range))
+        params graph-window-params]
+    (as-> {} ?r
+      (assoc ?r :scale (* 0.8 (min (/ (-> params :window-size :length) length)
+                                   (/ (-> params :window-size :height) height))))
+      (assoc ?r :x-off (- (:x-start params) (:min-x range)))
+      (assoc ?r :y-off (- (:y-start params) (:min-y range))))))
+
+(defn rescale
+  "Modifiy :geom to fit graph-window-params"
+  [pn]
+  (let [params (pn-graph-scale pn)
+        scale (:scale params)
+        xs (:x-off params)
+        ys (:y-off params)]
+    (update pn :geom
+           #(reduce (fn [mp [key val]]
+                      (assoc mp key
+                             (-> val
+                                 (assoc :x (Math/round (* scale (+ xs (-> val :x)))))
+                                 (assoc :y (Math/round (* scale (+ ys (-> val :y)))))
+                                 (assoc :label-x-off (max 10 (Math/round (* 0.6 scale (-> val :label-x-off)))))
+                                 (assoc :label-y-off (max 10 (Math/round (* 0.6 scale (-> val :label-y-off))))))))
+                    {}
+                    %))))
+
+(defn pn-geom
+  "Compute reasonable display placement (:geom) for the argument PN."
+  [pn]
+  (let [elems (interleave
+               (->> pn :places (map :name))
+               (->> pn :transitions (map :name)))
+        angle-inc (/ (* 2 Math/PI) (count elems))
+        angle (atom (- angle-inc))]
+    (-> pn 
+      (assoc :geom 
+             (reduce (fn [geom ename]
+                       (swap! angle #(+ % angle-inc))
+                       (assoc geom ename
+                              {:x (Math/round (* 100 (Math/cos @angle)))
+                               :y (Math/round (* 100 (Math/sin @angle)))
+                               :label-x-off 10
+                               :label-y-off 15}))
+                     {}
+                     elems))
+      (rescale))))
+
+
+
+
 
