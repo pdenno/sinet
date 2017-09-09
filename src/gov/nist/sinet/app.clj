@@ -53,9 +53,10 @@
   component/Lifecycle
   (start [component]
     (as-> component ?c
-        (assoc ?c :gp-params gp-params :problem problem :gp-system (gp-system))
-        (assoc-in ?c [:problem :scada-patterns] ; Needs :pattern-reserves defined.
-                  (-> ?c :problem :scada-data-file scada/load-scada scada/scada-patterns))))
+      (assoc ?c :gp-params gp-params :problem problem :gp-system (gp-system))
+      (assoc-in ?c [:problem :scada-log] (-> ?c :problem :scada-data-file scada/load-scada))
+      (assoc-in ?c [:problem :scada-patterns] ; Needs :pattern-reserves defined.
+                (-> ?c :problem :scada-log scada/scada-patterns))))
   (stop [component]
     (async/close! (-> component :gp-system :evolve-chan))
     component))

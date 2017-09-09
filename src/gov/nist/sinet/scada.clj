@@ -42,7 +42,7 @@
    with where it is first mentioned to where it is last mentioned MINUS
    the messages that are about a different job."
   []
-  (let [data (-> (util/app-info) :problem :scada-data-file load-scada)
+  (let [data (-> (util/app-info) :problem :scada-log)
         line-num (-> data count rand-int)
         job-id (job-id-near data line-num)
         job-trace (scada-gather-job data job-id)

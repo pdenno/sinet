@@ -89,10 +89,10 @@
 (defn act2trans
   "Return the transition (its name) responsible for the argument act."
   [pn act]
-  (some #(when (= act (:act ((:fn %) :arg-do-not-matter))) (:name %))
-        (filter #(contains? % :fn) (:transitions pn))))
+  (some #(when (= act (-> % :rep :act)) (:name %))
+        (:transitions pn)))
 
-(defn diag-describe-pn-transition-binding
+#_(defn diag-describe-pn-transition-binding
   [pn]
   (zipmap (map :name (:transitions pn))
           (map #((:fn %) :job-x) (:transitions pn))))
@@ -152,7 +152,7 @@
     (if-let [errs (not-empty (pnu/validate-pn pn))] ; POD TEMPORARY!
       (do
         #_(reset! diag {:errors errs :inv inv})
-        (util/log {:errors errs :inv inv})
+        (util/log {:errors errs :id (:id inv)})
         #_(throw (ex-info "Invalid PN" {:errors errs :inv inv}))
         (double (count errs)))
       (let [pn (sim/simulate pn :max-steps (* 50 (avg-scada-process-steps patterns)))
