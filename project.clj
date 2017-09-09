@@ -7,6 +7,7 @@
   :dependencies [[org.clojure/clojure        "1.8.0"]
                  [org.clojure/tools.reader   "1.0.2"] ; this one can probably go. 
                  [org.clojure/clojurescript  "1.9.854"]
+                 [org.clojure/tools.trace    "0.7.9"]
                  [medley                     "1.0.0"]
                  [org.clojure/core.async     "0.3.443"]
                  [com.cemerick/piggieback    "0.2.2"]

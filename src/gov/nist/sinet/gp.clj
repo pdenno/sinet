@@ -2,6 +2,7 @@
   "SINET demonstrate ideas in system identification/process mining using genetic programming."
   {:author "Peter Denno"}
   (:require [clojure.tools.logging :as log]
+            [clojure.tools.trace :as tr] ; POD temporary
             [clojure.pprint :refer (cl-format pprint)]
             [clojure.core.async :as async :refer [>! <! >!! <!! go-loop chan]]
             [gov.nist.spntools.core :as pn :refer :all]
@@ -165,25 +166,6 @@
                                                (conj (vec (rest (map :name (:p plan))))
                                                      (first (map :name (:p plan))))))))))))
   
-
-#_(defn eden-display-geometry 
-  "Assign positions to places and transitions of Eden individuals for display."
-  [pn]
-  (let [elems (interleave (map :name (:places pn)) (map :name (:transitions pn)))
-        nelems (count elems)
-        angle-inc (/ (* 2 Math/PI) nelems)
-        angle (atom (- angle-inc))]
-    (assoc pn :geom
-           (reduce (fn [geom ename]
-                     (swap! angle #(+ % angle-inc))
-                     (assoc geom ename
-                            {:x (Math/round (* 100 (Math/cos @angle)))
-                             :y (Math/round (* 100 (Math/sin @angle)))
-                             :label-x-off 10
-                             :label-y-off 15}))
-                   {}
-                   elems))))
-
 (defn random-crossover [])
 
 (defn rand-mute-key
@@ -337,27 +319,51 @@
     (-> inv
         (update-in [:pn :arcs (pnu/arc-index (:pn inv) (:name inh)) :multiplicity] #(+ % 3))
         (update    :history conj [:bump-inhibitor-3 (:name inh)]))
-    {:skip :bump-inhibitor- :msg "No inhib"}))
+    {:skip :bump-inhibitor-3 :msg "No inhib"}))
 
 ;;;=================== Remove =======================================
+(defn sole-arc?
+  "Return true if removal of the argument arc would leave the net with a
+   transition or place for which there isn't at least one arc in and one out."
+  [pn ar]
+  (and (or (= (count (remove #(= :inhibitor (:type %)) (pnu/arcs-into  pn (:source ar)))) 1)
+           (= (count (remove #(= :inhibitor (:type %)) (pnu/arcs-outof pn (:target ar)))) 1))
+       ;; If it is :multiplicity > 1, we won't remove it, just reduce multiplicity
+       (== (:multiplicity ar) 1)))
+
+(defn update-arc-removal
+  "If arc has multiplicity 1, remove it. Otherwise, reduce its multiplicity."
+  [inv ar]
+  (if (== (:multiplicity ar) 1)
+    (update-in inv [:pn :arcs] (fn [arcs] (vec (remove #(= % ar) arcs))))
+    (update-in inv [:pn :arcs (pnu/arc-index (:pn inv) (:name ar)) :multiplicity] dec)))
+
 (defmethod mutate-m :remove-place [inv & args]
-  (let [pl (:name (random-place (:pn inv) :subset #(remove (fn [pl] (:visible? pl)) %)))]
-    (as-> inv ?i
-      (update-in ?i [:pn :places] (fn [pls] (vec (remove #(= (:name %) pl) pls))))
-      (update-in ?i [:pn :arcs] (fn [arcs]  (vec (remove #(or (= (:source %) pl)
-                                                              (= (:target %) pl)) arcs)))) 
-      (assoc-in ?i [:pn :marking-key] :invalid)
-      (update ?i :pn pnr/renumber-pids)
-      (update ?i :history conj [:remove-place pl]))))
+  (let [pn (:pn inv)
+        pl (:name (random-place pn :subset #(remove (fn [pl] (or (:visible? pl)
+                                                                 (some (fn [ar] (sole-arc? pn ar))
+                                                                       (pnu/arcs-into pn pl))
+                                                                 (some (fn [ar] (sole-arc? pn ar))
+                                                                       (pnu/arcs-outof pn pl))))
+                                                    %)))]
+    (if pl
+      (-> inv
+        (update-in [:pn :places] (fn [pls] (vec (remove #(= (:name %) pl) pls))))
+        (update-in [:pn] #(reduce (fn [pn ar] (update-arc-removal pn ar))
+                                    % (into (pnu/arcs-into pn pl) (pnu/arcs-outof pn pl))))
+        (assoc-in [:pn :marking-key] :invalid)
+        (update :pn pnr/renumber-pids)
+        (update :history conj [:remove-place pl]))
+      {:skip :remove-place :msg "no qualifying place"})))
 
 (defmethod mutate-m :remove-trans [inv & args]
   (let [tr (:name (random-trans (:pn inv) :subset #(remove (fn [tr] (:visible? tr)) %)))]
     (if (> (-> inv :transitions count) 1)
-      (as-> inv ?i
-        (update-in ?i [:pn :transitions] (fn [ts] (vec (remove #(= % tr) ts))))
-        (update-in ?i [:pn :arcs] (fn [arcs] (vec (remove #(or (= (:source %) tr)
+      (-> inv 
+        (update-in [:pn :transitions] (fn [ts] (vec (remove #(= % tr) ts))))
+        (update-in [:pn :arcs] (fn [arcs] (vec (remove #(or (= (:source %) tr)
                                                                (= (:target %) tr)) arcs))))
-        (update    ?i :history conj [:remove-trans tr]))
+        (update    :history conj [:remove-trans tr]))
       {:skip :remove-trans :msg "too few"})))
 
 (defmethod mutate-m :remove-token [inv & args]
@@ -368,28 +374,14 @@
           (update    :history conj [:remove-token pl])))
     {:skip :remove-token :msg "Not enough tokens left"}))
 
-(defn sole-arc?
-  "Return true if removal of the argument arc would leave the net with a
-   transition or place for which there isn't at least one arc in and one out."
-  [pn ar]
-  (and (or (= (count (remove #(= :inhibitor (:type %)) (pnu/arcs-into  pn (:source ar)))) 1)
-           (= (count (remove #(= :inhibitor (:type %)) (pnu/arcs-outof pn (:target ar)))) 1))
-       ;; If it is :multiplicity > 1, we won't remove it, just reduce multiplicity
-       (= (:multiplicity ar) 1)))
-
 (defmethod mutate-m :remove-arc [inv & args]
   (reset! diag {:where :remove-arc :inv inv})
   (if-let [ar (random-arc (:pn inv) :subset #(filter (fn [ar] (and (= :normal (:type ar))
                                                                    (not (sole-arc? (:pn inv) ar)))) %))]
-      (if (= 1 (:multiplicity ar))
-        (-> inv
-            (update-in [:pn :arcs] (fn [arcs] (vec (remove #(= % ar) arcs))))
-            (update    :history conj [:remove-arc (:name ar)]))
-        (-> inv
-            (update-in [:pn :arcs (pnu/arc-index (:pn inv) (:name ar)) :multiplicity] dec)
-            (update    :history conj [:remove-arc :dec (:name ar)])))
-      {:skip :remove-arc :msg "No arc"}))
-
+    (-> inv
+        (update-arc-removal ar)
+        (update :history conj [:remove-or-dec-arc (:name ar)]))
+    {:skip :remove-arc :msg "No arc"}))
 
 (defmethod mutate-m :remove-inhibitor [inv & args]
   (reset! diag {:where :remove-inhib :inv inv})
@@ -523,30 +515,42 @@
 (defn initial-pop
   "Create an initial population of size pop-size."
   [pop-size]
-  (vec (repeatedly
-        pop-size 
-        #(let [job-trace (->> (scada/random-job-trace) (filter (fn [msg] (contains? msg :j))))]
-           (as-> (map->Inv {:pn (initial-individual-pn job-trace),
-                            :history [{:trace job-trace}]}) ?inv
-             (add-scada-report-fns ?inv)
-             (add-color-binding ?inv)
-             (update ?inv :pn
-                     (fn [pn]
-                       (reduce (fn [pn trans] (assign-flow-priorities pn trans))
-                               pn
-                               (->> pn :transitions (map :name))))))))))
+  (let [id (atom -1)] ; ID is useful for pmapping, where any individual could be a problem.
+    (vec (repeatedly
+          pop-size 
+          #(let [job-trace (->> (scada/random-job-trace) (filter (fn [msg] (contains? msg :j))) vec)]
+             (as-> (map->Inv {:pn (initial-individual-pn job-trace),
+                              :id (swap! id inc)
+                              :history [{:trace job-trace}]}) ?inv
+               (add-scada-report-fns ?inv)
+               (add-color-binding ?inv)
+               (update ?inv :pn
+                       (fn [pn]
+                         (reduce (fn [pn trans] (assign-flow-priorities pn trans))
+                                 pn
+                                 (->> pn :transitions (map :name)))))))))))
+
+(def check-i-error
+  "Diagnostic to catch individuals hanging in i-error."
+  (atom nil))
 
 (defn i-error 
   "Compute the individual's score."
   [inv]
-  (assoc inv :err (fit/workflow-fitness inv)))
+  (swap! check-i-error #(assoc-in % [(:id inv)] :in))
+  (let [result (assoc inv :err (fit/workflow-fitness inv))]
+    (swap! check-i-error #(assoc-in % [(:id inv)] :out))
+    result))
 
 (defn sort-by-error
   "Add value for :err to each PN and used it to sort the population; best first."
   [popu]
+  (reset! check-i-error (vec (repeat (gp-param :pop-size) nil)))
+  (println "entering sort-by-error...")
   (as-> popu ?i
     (pmap i-error ?i) ; POD pmap
-    (vec (sort #(< (:err %1) (:err %2)) ?i))))
+    (vec (sort #(< (:err %1) (:err %2)) ?i))
+    (do (println "...exiting sort-by-error") ?i)))
 
 ;;; Finally, we'll define a function to select an individual from a sorted
 ;;; population using tournaments of a given size.
@@ -569,22 +573,23 @@
 ;;;   Basic eqn    - 1/2  mutate, 1/4  cross over, 1/4 untouched,   selection pressure 7
 ;;;   Weather n    - 1/2  mutate, 1/4  cross over, 1/4 untouched,   selection pressure 7
 ;;;   even parity  - 1/10 mutate  8/10 cross over, 1/10 untouched,  selection pressure 5
-(defn make-next-gen [world]
+(tr/deftrace make-next-gen [world]
   "Compute the next generation, a combination of tournament selection, mutations and crossover
    of tournament winners, and elite individuals. Argument has :state (e.g. :continue, :success)
    start-time and population Invs"
   (let [e-cnt (gp-param :elite-individuals)
         pop-size (gp-param :pop-size)
-        pressure (gp-param :select-pressure)]
-    (assoc world :pop
-           (as-> (:pop world) ?spop
-             (into (subvec ?spop 0 e-cnt)
-                   (repeatedly (* 3/4 pop-size) #(mutate (select ?spop pressure)))) ; POD gp-param
-             ;;(repeatedly (* 2/8 (gp-param :pop-size)) #(crossover (select ?spop 7) (select ?spop 7)))
-             (loop [pop ?spop]
-               (if (>= (count pop) pop-size)
-                 (subvec (vec pop) 0 pop-size)
-                 (recur (conj pop (select (:pop world) pressure)))))))))
+        pressure (gp-param :select-pressure)] ; POD I'm running 4 right now. 
+    (update world :pop
+            (fn [?x] ; POD no # and % allowed here. Why? (CIDER says unmatched parentheses.)
+              (as-> ?x ?spop
+                (into (subvec ?spop 0 e-cnt)
+                      (repeatedly (* 3/4 pop-size) #(mutate (select ?spop pressure)))) ; POD gp-param
+                ;;(repeatedly (* 2/8 (gp-param :pop-size)) #(crossover (select ?spop 7) (select ?spop 7)))
+                (loop [pop ?spop]
+                  (if (>= (count pop) pop-size)
+                    (subvec (vec pop) 0 pop-size)
+                    (recur (conj pop (select ?x pressure))))))))))
 
 ;;;============== Reporting =====================================
 (defn report-map [world]
@@ -660,23 +665,6 @@
     (assoc  ?pn :err (:err inv))
     (assoc  ?pn :history (:history inv))
     (update ?pn :transitions (fn [t] (vec (map #(dissoc % :fn) t))))))
-
-#_(defn inv-geom
-  "Compute reasonable display placement (:geom) for the argument individual."
-  [inv]
-  (let [from (-> inv :history first)
-        elems (into (set (map :name (-> inv :pn :places))) (map :name (-> inv :pn :transitions)))]
-    (assoc inv :pn
-           (as-> (:pn inv) ?pn
-             (reduce (fn [pn ename]
-                       (assoc-in pn [:geom ename]
-                                 {:x (+ 15 (rand-int 100))
-                                  :y (+ 15 (rand-int 100))
-                                  :label-x-off 10
-                                  :label-y-off 15}))
-                     ?pn
-                     (clojure.set/difference elems (set (keys (:geom ?pn)))))
-             (pnml/rescale ?pn)))))
 
 ;;; Respond to a request for an individual 
 (ws/register-method
@@ -865,3 +853,37 @@
        ppprint))
 
 (defn diag-push-inv [inv] (push-inv inv))
+
+;;;[pn id error history]
+
+(defn write-inv
+  "Write an Inv so that it is readable."
+  [inv]
+  (let [inv (-> inv
+                (update-in [:pn :transitions] #(vec (map (fn [ar] (assoc ar :fn nil)) %)))
+                (update-in [:history 0 :trace] vec))]
+    (println "(map->Inv ")
+    (print "{  :pn ")      (ppprint (:pn inv))
+    (print "   :err ")     (ppprint (:err inv))
+    (print "   :history ") (ppprint (:history inv))
+    (print "})")))
+
+(defn diag-save-gen 
+  "Save the current generation."
+  []
+  (with-open [writer (java.io.FileWriter. "data/generations/test.clj")]
+    (binding [*out* writer]
+      (println "(in-ns 'gov.nist.sinet.gp)")
+      (println "(def foo [")
+      (doseq [x (-> (app-info) :pop)] (write-inv x))
+      (println "])"))))
+
+(defn step-thru-ierror
+  "Run ierror for each individual"
+  [ivec]
+  (let [ix (atom 0)]
+    (doseq [x ivec]
+      (println (cl-format nil "Inv[~s].err = ~s" @ix (i-error x)))
+      (swap! ix inc))))
+
+
