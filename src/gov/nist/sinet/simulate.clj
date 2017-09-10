@@ -1,7 +1,7 @@
 (ns gov.nist.sinet.simulate
   (:require [clojure.pprint :refer (cl-format pprint pp)]
             [gov.nist.spntools.util.reach :as pnr]
-            [gov.nist.spntools.util.utils :as pnu :refer (as-pn-ok-> name2obj)]
+            [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp as-pn-ok-> name2obj)]
             [gov.nist.spntools.util.pnml  :as pnml]))
 
 ;;; Purpose: Run a PN, producing a log of its execution.
@@ -24,6 +24,7 @@
 
 (declare sim-effects pick-link step-state update-log-for-move max-tkn)
 ;;; Not yet a stochastic simulation, also need to implement free choice.
+;;; (simulate (:pn eee) :max-steps 2)
 (defn simulate
   "Run a PN for max-steps or max-token whichever comes first."
   [pn & {:keys [max-token max-steps] :or {max-token 50 max-steps 200}}]
@@ -42,7 +43,7 @@
               ?pn
               (range max-steps)))))
 
-;;; POD: Currently I'm using next-links, because there is only one colour. 
+;;; POD: Currently I'm using next-links, because there is only one colour.
 (defn sim-effects
   "Update the PN's :sim with the effects of one step."
   [pn]
@@ -145,22 +146,22 @@
         a-in (remove #(= :inhibitor (:type %)) (pnu/arcs-into pn fire))
         a-out (pnu/arcs-outof pn fire)
         balance (flow-balance pn fire)]
-    (as-pn-ok-> pn ?pn
+    (pnu/as-pn-ok-> pn ?pn
       (assoc-in ?pn [:sim :old-queues] (-> ?pn :sim :queues))
       (pull-tokens ?pn a-in balance)
       (push-tokens ?pn a-out)
       (update-log-for-move ?pn fire))))
 
 (defn update-log-for-move
-  "Add to log :add :remove and :move actions."
+  "Add to log :add :remove and :move actions and transition :act."
   [pn fire]
   (let [old-queues (-> pn :sim :old-queues)
         queues (-> pn :sim :queues)
         old (-> old-queues vals flatten set)
-        new (-> queues vals flatten set)
-        added (clojure.set/difference new old)
+        new (-> queues     vals flatten set)
+        added   (clojure.set/difference new old)
         removed (clojure.set/difference old new)
-        remain (clojure.set/intersection old new)
+        remain  (clojure.set/intersection old new)
         find-at (fn [tkn queues] (some (fn [[key val]] (when (some #(= % tkn) val) key)) queues))
         moved (reduce (fn [mvd stay]
                         (if (= (find-at stay old-queues) (find-at stay queues))
@@ -168,8 +169,12 @@
                           (conj mvd stay)))
                       [] remain)]
     (as-> pn ?pn
-      (if (contains? (name2obj pn fire) :fn)
-        (update-in ?pn [:sim :log] #(conj % ((:fn (name2obj pn fire)) (vec (clojure.set/union added moved)))))
+      (if (contains? (pnu/name2obj pn fire) :rep)
+        (update-in ?pn [:sim :log] #(conj % (assoc (:rep (pnu/name2obj pn fire))
+                                                   :j
+                                                   (vec (map :id (clojure.set/union added moved)))
+                                                   :fire
+                                                   fire)))
         ?pn)
       (reduce (fn [pn rem]
                 (update-in pn [:sim :log] #(conj % {:on-act fire :tkn rem :motion :remove})))
@@ -206,4 +211,14 @@
                 (max mx (apply max ids)))))
           0
           (-> pn :sim :queues vals)))
-                
+
+;;; POD This can't stay here uncommented (load ordering).
+(defn m2-inhib-bas
+  "Does 'the' correct answer score 0?"
+ []       ;     Change...
+  (-> "/Users/peterdenno/Documents/git/spntools/data/m2-inhib-bas.xml" 
+      gov.nist.spntools.core/run-ready
+      gov.nist.sinet.gp/add-color-binding
+      gov.nist.sinet.gp/add-flow-priorities
+      (simulate :max-steps 15)))
+

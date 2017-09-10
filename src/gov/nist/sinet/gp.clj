@@ -188,7 +188,7 @@
 ;;;
 ;;; Mutation operator: A mutation search operator swaps the priority on two out-going arcs
 ;;;                    chosen randomly.
-(defn assign-flow-priority-aux
+(defn add-flow-priority-trans
   "Update PN to assign flow priorities to arcs out of the transitions that do not yet have one."
   [pn trans]
   (let [aout (pnu/arcs-outof pn trans)
@@ -210,7 +210,7 @@
   "Assign flow priorities to all arcs outbound from a transition."
   [pn]
   (reduce (fn [pn trans]
-            (assign-flow-priority-aux pn trans))
+            (add-flow-priority-trans pn trans))
           pn
           (->> pn :transitions (map :name))))
 
@@ -273,7 +273,7 @@
     (when (not-empty arcs)
       (nth arcs (rand-int (count arcs))))))
 
-(declare mutate-m eval-pn add-color-binding assign-flow-priorities diag-record-inv)
+(declare mutate-m eval-pn add-color-binding diag-record-inv)
 
 (defn mutate
   "Mutate the individual. If impossible (after 5 tries) just return it."
@@ -281,7 +281,7 @@
   ([inv & {:keys [pick-fn force] :or {pick-fn rand-mute-key}}]
    (let [save-inv inv]
      (as-> inv ?inv
-       (loop [n 4] ; POD five
+       (loop [n 4] ; POD five...belongs in params.
          (let [i (mutate-m ?inv :pick-fn pick-fn :force force)]
            ;; Try 5 times to mutate; POD this skews things!
            (cond (pnu/pn? (:pn i)) (diag-record-inv i)
@@ -289,7 +289,7 @@
                  :else (recur (dec n)))))
        (add-color-binding ?inv)
        (update ?inv :pn
-               #(reduce (fn [pn trans] (assign-flow-priorities pn trans))
+               #(reduce (fn [pn trans] (add-flow-priority-trans pn trans))
                         %
                         (->> % :transitions (map :name))))))))
 

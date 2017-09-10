@@ -1,15 +1,15 @@
 (ns gov.nist.sinet.fitness-test
   (:require [clojure.test :refer :all]
             [gov.nist.spntools.util.reach :as pnr]
-            [gov.nist.spntools.core as pn]
-            [gov.nist.sinet.gp :as gp :refer :all]
+            [gov.nist.spntools.core :as pn]
+            [gov.nist.sinet.util :refer (map->Inv)]
+            [gov.nist.sinet.gp :as gp]
             [gov.nist.sinet.fitness :as fit]))
 
 (defn =*
-   "Check that v1 is = v2 +/i tolerance."
+  "Check that v1 is = v2 +/i tolerance."
   [v1 v2 tol]
   (< (- v1 tol) v2 (+ v1 tol)))
-
 
 #_(load-file "data/SCADA-logs/scada-f0.clj") ; defines fit/scada-log-f0
 #_(load-file "data/test-individuals/test-m2-bas.clj") ; defines (in .gp) test-m2-bas individual (a perfect individual for scada-log-f0)
@@ -54,21 +54,14 @@
                {:act :aj, :tkns [{:type :a, :id 23} {:type :a, :id 22}]}
                {:act :sm, :tkns [{:type :a, :id 22}]}]))))))
 
-
 ;;; POD This needs work. The flow-priorities could be wrong.
 ;;; Could use a force-flow-priorities. Define it in this file. 
 (defn m2-inhib-bas-test
   "Does 'the' correct answer score 0?"
  []       ;     Change...
   (as-> "/Users/peterdenno/Documents/git/spntools/data/m2-inhib-bas.xml" ?inv
-    (gp/map->Inv {:pn (pn/run-ready ?inv)})
-    (gp/add-color-binding ?inv)
-    (update ?inv :pn
-            (fn [pn]
-              (reduce (fn [pn trans] (pn/assign-flow-priorities pn trans))
-                      pn
-                      (->> pn :transitions (map :name)))))
-    (workflow-fitness ?inv)))
+    (map->Inv {:pn (-> ?inv pn/run-ready gp/add-color-binding gp/add-flow-priorities)})
+    (fit/workflow-fitness ?inv)))
 
 (deftest perfect-fitness-scores-zero
   (testing "That a PN matching the log scores zero."
