@@ -1,9 +1,9 @@
 (ns gov.nist.sinet.fitness-test
   (:require [clojure.test :refer :all]
             [gov.nist.spntools.util.reach :as pnr]
+            [gov.nist.spntools.core as pn]
             [gov.nist.sinet.gp :as gp :refer :all]
-            [gov.nist.sinet.fitness :as fit #_:refer #_(scada-log-f0 scada-patterns calc-process-disorder qpn-m2-bas)]))
-
+            [gov.nist.sinet.fitness :as fit]))
 
 (defn =*
    "Check that v1 is = v2 +/i tolerance."
@@ -55,16 +55,17 @@
                {:act :sm, :tkns [{:type :a, :id 22}]}]))))))
 
 
-
+;;; POD This needs work. The flow-priorities could be wrong.
+;;; Could use a force-flow-priorities. Define it in this file. 
 (defn m2-inhib-bas-test
   "Does 'the' correct answer score 0?"
- []       ;     cartier...
+ []       ;     Change...
   (as-> "/Users/peterdenno/Documents/git/spntools/data/m2-inhib-bas.xml" ?inv
-    (gov.nist.sinet.gp/map->Inv {:pn (pn/run-ready ?inv)})
-    (gov.nist.sinet.gp/add-color-binding ?inv)
+    (gp/map->Inv {:pn (pn/run-ready ?inv)})
+    (gp/add-color-binding ?inv)
     (update ?inv :pn
             (fn [pn]
-              (reduce (fn [pn trans] (gov.nist.sinet.gp/assign-flow-priorities pn trans))
+              (reduce (fn [pn trans] (pn/assign-flow-priorities pn trans))
                       pn
                       (->> pn :transitions (map :name)))))
     (workflow-fitness ?inv)))

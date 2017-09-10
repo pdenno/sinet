@@ -7,5 +7,14 @@
 (def +log+ (atom []))
 (defn log [msg] (swap! +log+ conj msg))
 
+(defn uuid [] (.toString (java.util.UUID/randomUUID)))
+
+(def ^:dynamic *debugging* false)
+
+
+ 
+
+
+
 
 

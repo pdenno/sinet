@@ -2,14 +2,14 @@
   "SINET demonstrate ideas in system identification/process mining using genetic programming."
   {:author "Peter Denno"}
   (:require [clojure.tools.logging :as log] ; POD hardly used!
-            [clojure.tools.trace :as tr] ; POD temporary
+            [clojure.tools.trace :as tr] ; POD temporary, use tr/deftrace instead of defn
             [clojure.pprint :refer (cl-format pprint)]
             [clojure.core.async :as async :refer [>! <! >!! <!! go-loop chan]]
             [gov.nist.spntools.core :as pn :refer :all]
             [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp pn-ok-> as-pn-ok->)]
             [gov.nist.spntools.util.reach :as pnr :refer (reachability)]
             [gov.nist.spntools.util.pnml :as pnml :refer (read-pnml)] ;  POD clean this up
-            [gov.nist.sinet.util :as util :refer (app-info)]
+            [gov.nist.sinet.util :as util :refer (app-info *debugging*)]
             [gov.nist.sinet.simulate :as sim :refer (simulate)]
             [gov.nist.sinet.fitness :as fit :refer (workflow-fitness)]
             [gov.nist.sinet.scada :as scada]
@@ -41,7 +41,7 @@
   (-> (util/app-info) :problem name))
 
 (defrecord Inv [pn id error history])
-(def diag (atom nil))
+(def ^:private diag (atom nil))
 
 ;;;  DOCUMENTATION REQUIREMENT: Determine what among the :gp-params matters.
 ;;; :pn-elements -- The PN elements that can appear in individuals.
@@ -249,7 +249,7 @@
       (update ?i :pn #(pnu/add-pn % (pnu/make-arc % (-> % :places last :name) trans-out)))
       (assoc-in ?i [:pn :marking-key] :invalid)
       (update ?i :pn pnr/renumber-pids)
-      (update ?i :history conj [:add-place (-> ?i :pn :places last :name)]))))
+      (update ?i :history conj [:add-place (-> ?i :pn :places last :name) :from (:id ?i)]))))
 
 ;;; POD this should probably go away! Replace by some sort of coping mechanism!
 (defmethod mutate-m :add-token [inv & args]
@@ -257,7 +257,7 @@
     (let [p-indx (rand-int (count places))]
       (as-> inv ?i
           (update-in ?i [:pn :places p-indx :initial-tokens] inc)
-          (update    ?i :history conj [:add-token (-> ?i :pn :places p-indx :name)])))
+          (update    ?i :history conj [:add-token (-> ?i :pn :places p-indx :name) :from (:id ?i)])))
     {:skip :add-token :msg "no place!"}))
 
 (defmethod mutate-m :add-trans [inv & args]
@@ -273,7 +273,7 @@
                      (as-> % ?pn
                        (pnu/add-pn ?pn (pnu/make-arc ?pn p-in tname))
                        (pnu/add-pn ?pn (pnu/make-arc ?pn tname p-out)))))
-          (update ?i :history conj [:add-trans (-> ?i :pn :transitions last :name)]))
+          (update ?i :history conj [:add-trans (-> ?i :pn :transitions last :name) :from (:id ?i)]))
         {:skip :add-trans :msg "no p-out"})
     {:skip :add-trans :msg "no p-in"}))
 
@@ -286,10 +286,10 @@
                                 (filter #(= (:type %) :normal) (-> inv :pn :arcs)))]
           (-> inv
               (update-in [:pn :arcs (pnu/arc-index (:pn inv) (:name have-one)) :multiplicity] inc)
-              (update    :history conj [:add-arc :have-one (:name have-one)]))
+              (update    :history conj [:add-arc :have-one (:name have-one) :from (:id inv)]))
           (as-> inv ?i
               (update ?i :pn #(pnu/add-pn % (pnu/make-arc % (:name from) (:name to))))
-              (update ?i :history conj [:add-arc (-> ?i :pn :arcs last :name)]))))
+              (update ?i :history conj [:add-arc (-> ?i :pn :arcs last :name) :from (:id ?i)]))))
       {:skip :add-arc :msg "No place"})
     {:skip :add-arc :msg "No trans"}))
 
@@ -301,10 +301,10 @@
                               (filter #(= (:type %) :inhibitor) (-> inv :pn :arcs)))]
         (as-> inv ?i
           (update-in ?i [:pn :arcs (pnu/arc-index (:pn ?i) (:name have-one)) :multiplicity] inc)
-          (update    ?i :history conj [:add-inhibitor :have-one (:name have-one)]))
+          (update    ?i :history conj [:add-inhibitor :have-one (:name have-one) :from (:id ?i)]))
         (as-> inv ?i
           (update ?i :pn #(pnu/add-pn % (pnu/make-arc % (:name pl) (:name tr) :type :inhibitor)))
-          (update ?i :history conj [:add-inhibitor (-> ?i :pn :arcs last :name)])))
+          (update ?i :history conj [:add-inhibitor (-> ?i :pn :arcs last :name) :from (:id ?i)])))
       {:skip :add-inhibitor :msg "No place"})
     {:skip :add-inhibitor :msg "No trans"}))
 
@@ -312,42 +312,46 @@
   (if-let [inh (random-inhib (:pn inv))]
     (-> inv
         (update-in [:pn :arcs (pnu/arc-index (:pn inv) (:name inh)) :multiplicity] #(+ % 3))
-        (update    :history conj [:bump-inhibitor-3 (:name inh)]))
+        (update    :history conj [:bump-inhibitor-3 (:name inh) :from (:id inv)]))
     {:skip :bump-inhibitor-3 :msg "No inhib"}))
 
 ;;;=================== Remove =======================================
 (defn sole-arc?
   "Return true if removal of the argument arc would leave the net with a
    transition or place for which there isn't at least one arc in and one out."
-  [pn ar]
-  (and (or (= (count (remove #(= :inhibitor (:type %)) (pnu/arcs-into  pn (:source ar)))) 1)
-           (= (count (remove #(= :inhibitor (:type %)) (pnu/arcs-outof pn (:target ar)))) 1))
-       ;; If it is :multiplicity > 1, we won't remove it, just reduce multiplicity
-       (== (:multiplicity ar) 1)))
-
-(defn update-arc-removal
-  "If arc has multiplicity 1, remove it. Otherwise, reduce its multiplicity."
-  [inv ar]
-  (if (== (:multiplicity ar) 1)
-    (update-in inv [:pn :arcs] (fn [arcs] (vec (remove #(= % ar) arcs))))
-    (update-in inv [:pn :arcs (pnu/arc-index (:pn inv) (:name ar)) :multiplicity] dec)))
-
+  ([pn ar check-mult?]
+   (if (> (:multiplicity ar) 1) false (sole-arc? pn ar)))
+  ([pn ar]
+   (let [narc (:name ar)]
+     (some
+      (fn [v]
+        (let [into  (map :name (filter #(= (:type %) :normal) (pnu/arcs-into  pn v)))
+              outof (map :name (filter #(= (:type %) :normal) (pnu/arcs-outof pn v)))]
+          (when-let [sole (cond (and (== 1 (count into )) (= (first into ) narc)) (first into)
+                                (and (== 1 (count outof)) (= (first outof) narc)) (first outof))]
+            sole)))
+      (into (map :name (:places pn)) (map :name (:transitions pn)))))))
+               
 (defmethod mutate-m :remove-place [inv & args]
-  (let [pn (:pn inv)
-        pl (:name (random-place pn :subset #(remove (fn [pl] (or (:visible? pl)
-                                                                 (some (fn [ar] (sole-arc? pn ar))
-                                                                       (pnu/arcs-into pn pl))
-                                                                 (some (fn [ar] (sole-arc? pn ar))
-                                                                       (pnu/arcs-outof pn pl))))
-                                                    %)))]
+  (let [pn (:pn inv)  ;; Removing a place means removing all the arcs into/outof. Therefore this subset:
+        pl (:name (random-place
+                   pn
+                   :subset #(remove ;; Some vertex for which removing one of the arcs of place would be bad.
+                             (fn [pl]
+                               (or (:visible? pl)
+                                   (some (fn [ar] (sole-arc? pn ar)) 
+                                         (into (pnu/arcs-into pn (:name pl))
+                                               (pnu/arcs-outof pn (:name pl))))))
+                             %)))]
     (if pl
-      (-> inv
-        (update-in [:pn :places] (fn [pls] (vec (remove #(= (:name %) pl) pls))))
-        (update-in [:pn] #(reduce (fn [pn ar] (update-arc-removal pn ar))
-                                    % (into (pnu/arcs-into pn pl) (pnu/arcs-outof pn pl))))
-        (assoc-in [:pn :marking-key] :invalid)
-        (update :pn pnr/renumber-pids)
-        (update :history conj [:remove-place pl]))
+      (as-> inv ?i
+          (update-in ?i [:pn :places] (fn [pls] (vec (remove #(= (:name %) pl) pls))))
+          ;; In this case, remove arc regardless of multiplicity.
+          (let [elims (map :name (into (pnu/arcs-into pn pl) (pnu/arcs-outof pn pl)))]
+            (update-in ?i [:pn :arcs] (fn [arcs] (vec (remove (fn [ar] (some #(= (:name ar) %) elims)) arcs)))))
+          (assoc-in ?i [:pn :marking-key] :invalid)
+          (update ?i :pn pnr/renumber-pids)
+          (update ?i :history conj [:remove-place pl :from (:id ?i)]))
       {:skip :remove-place :msg "no qualifying place"})))
 
 (defmethod mutate-m :remove-trans [inv & args]
@@ -357,7 +361,7 @@
         (update-in [:pn :transitions] (fn [ts] (vec (remove #(= % tr) ts))))
         (update-in [:pn :arcs] (fn [arcs] (vec (remove #(or (= (:source %) tr)
                                                                (= (:target %) tr)) arcs))))
-        (update    :history conj [:remove-trans tr]))
+        (update    :history conj [:remove-trans tr :from (:id inv)]))
       {:skip :remove-trans :msg "too few"})))
 
 (defmethod mutate-m :remove-token [inv & args]
@@ -365,15 +369,22 @@
     (let [pl (:name (random-place (:pn inv) :subset #(remove (fn [pl] (= 0 (:initial-tokens pl))) %)))]
       (-> inv
           (update-in [:pn :places (pnu/place-index (:pn inv) pl) :initial-tokens] dec)
-          (update    :history conj [:remove-token pl])))
+          (update    :history conj [:remove-token pl :from (:id inv)])))
     {:skip :remove-token :msg "Not enough tokens left"}))
+
+(defn update-arc-removal
+  "If arc has multiplicity 1, remove it. Otherwise, reduce its multiplicity."
+  [inv ar]
+  (if (== (:multiplicity ar) 1)
+    (update-in inv [:pn :arcs] (fn [arcs] (vec (remove #(= % ar) arcs))))
+    (update-in inv [:pn :arcs (pnu/arc-index (:pn inv) (:name ar)) :multiplicity] dec)))
 
 (defmethod mutate-m :remove-arc [inv & args]
   (if-let [ar (random-arc (:pn inv) :subset #(filter (fn [ar] (and (= :normal (:type ar))
-                                                                   (not (sole-arc? (:pn inv) ar)))) %))]
+                                                                   (not (sole-arc? (:pn inv) ar true)))) %))]
     (-> inv
         (update-arc-removal ar)
-        (update :history conj [:remove-or-dec-arc (:name ar)]))
+        (update :history conj [:remove-or-dec-arc (:name ar) :from (:id inv)]))
     {:skip :remove-arc :msg "No arc"}))
 
 (defmethod mutate-m :remove-inhibitor [inv & args]
@@ -381,10 +392,10 @@
     (if (= 1 (:multiplicity ar))
       (-> inv
           (update-in [:pn :arcs] (fn [arcs] (vec (remove #(=  % ar) arcs))))
-          (update    :history conj [:remove-inhib (:name ar)]))
+          (update    :history conj [:remove-inhib (:name ar) :from (:id inv)]))
       (-> inv
           (update-in [:pn :arcs (pnu/arc-index (:pn inv) (:name ar)) :multiplicity] dec)
-          (update    :history conj [:remove-inhib :dec (:name ar)])))
+          (update    :history conj [:remove-inhib :dec (:name ar) :from (:id inv)])))
     {:skip :remove-inhibitor :msg "No inhibitor arcs"}))
 
 ;;;================================================================================
@@ -406,7 +417,7 @@
     (if-let [pl2 (:name (random-place (:pn inv):subset #(filter (fn [pl] (not= (:name pl) pl1)) %)))]
       (-> inv
           (update :pn #(swap-arcs % pl1 pl2))
-          (update :history conj [:swap-places pl1 pl2]))
+          (update :history conj [:swap-places pl1 pl2 :from (:id inv)]))
       {:skip :swap-places :msg "no 2nd place"})
     {:skip :swap-places :msg "no 1st place"}))
 
@@ -415,7 +426,7 @@
     (if-let [tr2 (:name (random-trans (:pn inv):subset #(filter (fn [tr] (not= (:name tr) tr1)) %)))]
       (-> inv 
           (update :pn #(swap-arcs % tr1 tr2))
-          (update :history conj [:swap-arcs tr1 tr2]))
+          (update :history conj [:swap-arcs tr1 tr2 :from (:id inv)]))
       {:skip :swap-trans :msg "no 2nd trans"})
     {:skip :swap-trans :msg "no 1st trans"}))
 
@@ -433,7 +444,7 @@
         (-> inv
             (assoc-in [:pn :arcs (pnu/arc-index pn (:name arc1)) :priority] p2)
             (assoc-in [:pn :arcs (pnu/arc-index pn (:name arc2)) :priority] p1)
-            (update :history conj [:swap-priority  (:name arc1) (:name arc2)])))
+            (update :history conj [:swap-priority  (:name arc1) (:name arc2) :from (:id inv)])))
       {:skip :swap-priority :msg "no candidates"})))
 
 ;;;====== End search operators ================================
@@ -556,7 +567,7 @@
 ;;;   Basic eqn    - 1/2  mutate, 1/4  cross over, 1/4 untouched,   selection pressure 7
 ;;;   Weather n    - 1/2  mutate, 1/4  cross over, 1/4 untouched,   selection pressure 7
 ;;;   even parity  - 1/10 mutate  8/10 cross over, 1/10 untouched,  selection pressure 5
-(tr/deftrace make-next-gen [world]
+(defn make-next-gen [world]
   "Compute the next generation, a combination of tournament selection, mutations and crossover
    of tournament winners, and elite individuals. Argument has :state (e.g. :continue, :success)
    start-time and population Invs"
@@ -763,10 +774,9 @@
 
 ;;;-------------------- Debugging stuff -----------------------------------
 ;;; For best debugging experience, don't use pmap in sort-by-error!
-(def ^:dynamic *debugging* false)
-
 (def diag-all-inv (atom {}))
 (defn diag-record-inv [inv]
+  "Keep a map of EVERY Inv, check that it has a legit PN."
   (if *debugging*
     (let [inv (assoc inv :id (util/uuid))
           errors (pnu/validate-pn (:pn inv))]

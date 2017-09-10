@@ -86,7 +86,6 @@
 (defn new-tokens
   "Create a vector of n new tokens."
   [pn n]
-  (reset! diag {:pn pn :n n})
   (let [tkns (->> pn :sim :queues (mapcat (fn [[_ v]] (map :id v))))
         max-tkn (if (empty? tkns) 0 (apply max tkns))]
     (reduce (fn [v id] (conj v {:jtype :blue :id id}))
@@ -97,7 +96,6 @@
   "Collect tokens from the arcs (adjusting queues); set (-> pn :sim :to-assign) to 
    the tokens that will be part of push-tokens."
   [pn a-ins balance]
-  (reset! diag {:pn pn :a-ins a-ins :balance balance})
   (as-> pn ?pn
     (assoc-in ?pn [:sim :to-assign] [])
     (reduce (fn [pn arc]

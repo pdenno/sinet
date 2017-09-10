@@ -5,7 +5,7 @@
             [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp)]
             [gov.nist.sinet.util :as util :refer (app-info)]))
 
-(def diag (atom nil))
+(def ^:private diag (atom nil))
 
 (defn preprocess-log
   "Add line numbers. This is used by hand on the datafile."
