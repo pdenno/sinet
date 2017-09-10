@@ -9,7 +9,7 @@
             [org.httpkit.server :refer (run-server)]
             [gov.nist.sinet.ws :as ws]))
 
-(def +diag+ (atom nil))
+(def ^:private diag (atom nil))
 
 (defn handler [ajax-post-fn ajax-get-or-ws-handshake-fn]
   (routes

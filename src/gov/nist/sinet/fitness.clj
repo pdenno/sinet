@@ -202,8 +202,8 @@
 (defn diag-one-that-runs
   "Return the first PN that can generate at least modest amount of log!"
   []
-  (some #(let [sim (sim/simulate (:pn %) :max-steps 100)]
-           (when (> (-> sim :log count) 20) %))
+  (some #(let [pn (sim/simulate (:pn %) :max-steps 100)]
+           (when (> (-> pn :sim :log count) 20) %))
         (-> (util/app-info) :pop)))
 
 (defn diag-simulate
@@ -220,11 +220,12 @@
   (let [patterns (-> (util/app-info) :problem :scada-patterns)
         sim (-> inv :pn (sim/simulate :max-steps (* 50 (avg-scada-process-steps patterns))))]))
 
-(defn m2-inhib-bas
+;;; Commented because needs gp (load order doesn't have this yet.)
+#_(defn m2-inhib-bas
   "Does 'the' correct answer score 0?"
  []       ;     cartier...
   (as-> "/Users/peterdenno/Documents/git/spntools/data/m2-inhib-bas.xml" ?inv
-    (gov.nist.sinet.gp/map->Inv {:pn (pn/run-ready ?inv)})
+    (util/map->Inv {:pn (pn/run-ready ?inv)})
     (gov.nist.sinet.gp/add-color-binding ?inv)
     (update ?inv :pn
             (fn [pn]

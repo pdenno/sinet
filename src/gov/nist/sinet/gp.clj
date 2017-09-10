@@ -1,19 +1,19 @@
 (ns gov.nist.sinet.gp
   "SINET demonstrate ideas in system identification/process mining using genetic programming."
   {:author "Peter Denno"}
-  (:require [clojure.tools.logging :as log] ; POD hardly used!
-            [clojure.tools.trace :as tr] ; POD temporary, use tr/deftrace instead of defn
+  (:require ;[clojure.tools.trace :as tr] ; POD temporary, use tr/deftrace instead of defn
             [clojure.pprint :refer (cl-format pprint)]
             [clojure.core.async :as async :refer [>! <! >!! <!! go-loop chan]]
             [gov.nist.spntools.core :as pn :refer :all]
             [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp pn-ok-> as-pn-ok->)]
             [gov.nist.spntools.util.reach :as pnr :refer (reachability)]
             [gov.nist.spntools.util.pnml :as pnml :refer (read-pnml)] ;  POD clean this up
-            [gov.nist.sinet.util :as util :refer (app-info *debugging*)]
+            [gov.nist.sinet.util :as util :refer (app-info map->Inv gp-param pr-param *debugging*)]
             [gov.nist.sinet.simulate :as sim :refer (simulate)]
             [gov.nist.sinet.fitness :as fit :refer (workflow-fitness)]
             [gov.nist.sinet.scada :as scada]
-            [gov.nist.sinet.ws :as ws]))
+            [gov.nist.sinet.ws :as ws]
+            [gov.nist.sinet.report :as rep]))
 
 ;;; Just for the record, I started with Lee Spector's "gp" demonstration software!
 
@@ -28,20 +28,6 @@
 ;;;       - Need a mutation to move the :intro of new tokens to a different arc.
 ;;;         (:remove doesn't matter where you do it from )
 ;;;       - I made every transition timed. Probably not the best idea, generally speaking.
-(defn update-pop! [pop]
-  (alter-var-root
-   (resolve 'gov.nist.sinet.run/system)
-   #(assoc-in % [:app :pop] pop))
-  pop)
-
-(defn gp-param [name]
-  (-> (util/app-info) :gp-params name))
-
-(defn pr-param [name]
-  (-> (util/app-info) :problem name))
-
-(defrecord Inv [pn id error history])
-(def ^:private diag (atom nil))
 
 ;;;  DOCUMENTATION REQUIREMENT: Determine what among the :gp-params matters.
 ;;; :pn-elements -- The PN elements that can appear in individuals.
@@ -49,14 +35,30 @@
 ;;; :elite-individuals -- carry over this amount of the best without revision.
 ;;; :max-initial-mutations -- apply 1 to this number of mutations (uniform distribution to the "Eden individual")
 
-;;; {:name :enter-job, :act :aj :m (:m msg)}
+(defn update-pop! [pop]
+  (alter-var-root
+   (resolve 'gov.nist.sinet.run/system)
+   #(assoc-in % [:app :pop] pop))
+  pop)
+
+(def ^:private diag (atom nil))
 
 ;;;================================================================
-;;; New code for Eden individuals
+;;; Generate initial population
 ;;;================================================================
-(declare elem-assoc eden-pn)
+(declare mjpdes2nice eden-pn)
 
 ;;; {:tkns [{:jtype :blue, :id 1}], :rep {:name :m2-complete-job, :rep {:act :ej, :m :m2}}}
+;;; (-> (scada/random-job-trace) mjpdes2nice make-plan)
+;;; {:cnt 6,
+;;;  :t
+;;;  [{:name :m1-start-job, :act :aj, :m :m1}
+;;;   {:name :m2-unstarved, :act :us, :m :m2}
+;;;   {:name :m2-starved, :act :st, :m :m2}
+;;;   {:name :m1-complete-job, :act :bj, :m :m1, :bf :b1}
+;;;   {:name :m2-start-job, :act :sm, :m :m2, :bf :b1}
+;;;   {:name :m2-complete-job, :act :ej, :m :m2}],
+;;;  :p [{:name :place-1} {:name :place-2} {:name :place-3} {:name :place-4} {:name :place-5} {:name :place-6}]}
 (defn make-plan
   "Return a 'plan' given a list of {:name <elem-name> :rep <scada-log-msg it represents>}"
   [e-assocs]
@@ -74,8 +76,7 @@
   "Translate a SCADA trace into a PN."
   [job-trace]
   (->> job-trace
-       ;(filter (fn [_] (> (pr-param :keep-vs-ignore) (rand)))) ; let mutation do it.
-       elem-assoc ; This returns maps of {:name <elem-name> :act <act frm slog> :bf/:m <from slog>}
+       mjpdes2nice ; This returns maps of {:name <elem-name> :act <act frm slog> :bf/:m <from slog>}
        make-plan 
        eden-pn))
 
@@ -93,8 +94,16 @@
           (= :st (:act msg)) (read-string (cl-format nil "~A-starved"      m)),
           (= :us (:act msg)) (read-string (cl-format nil "~A-unstarved"    m)))))
 
-;;; POD This interprets/translates the SCADA log. We'll need to generalize it someday.
-(defn elem-assoc
+;;; POD Will need to generalize this idea of 'what a message means' I'm giving nice names to MJPdes output. 
+;;; (mjpdes2nice (scada/random-job-trace)) ==>
+;;; ({:name :m1-start-job, :act :aj, :m :m1}
+;;;  {:name :m2-unstarved, :act :us, :m :m2}
+;;;  {:name :m2-starved, :act :st, :m :m2}
+;;;  {:name :m1-complete-job, :act :bj, :m :m1, :bf :b1}
+;;;  {:name :m2-start-job, :act :sm, :m :m2, :bf :b1}
+;;;  {:name :m2-complete-job, :act :ej, :m :m2})
+(defn mjpdes2nice
+  "Interpret/translate the SCADA log. (Give nice names to MJPdes output.)" 
   [job-trace]
   (distinct
    (map (fn [msg]
@@ -125,8 +134,7 @@
   (as-> {:places [] :transitions [] :arcs []} ?pn
     (eden-places ?pn (:p plan))
     (eden-trans  ?pn (:t plan))
-    (eden-arcs   ?pn plan)
-    #_(eden-display-geometry ?pn)))
+    (eden-arcs   ?pn plan)))
 
 (defn eden-places
   "Update the PN with :places according to the seq of plan-maps for places."
@@ -135,7 +143,6 @@
     (assoc ?pn :places
            (vec (map (fn [plan]
                        (as-> (pnu/make-place pn :name (:name plan)) ?pl
-                         #_(assoc ?pl :rep plan)
                          (assoc ?pl :visible? (if (= :silent (:act plan)) false true))))
                       plans)))
     (update-in ?pn [:places 0 :initial-tokens] inc))) ; Add a token to make it alive
@@ -164,7 +171,70 @@
                               (vec (interleave (map :name (:t plan))
                                                (conj (vec (rest (map :name (:p plan))))
                                                      (first (map :name (:p plan))))))))))))
-  
+
+;;; POD Currently only one color. 
+(defn add-color-binding
+  "Add color binding information."
+  [inv]
+  (update-in inv [:pn :arcs] (fn [arcs] (vec (map #(assoc % :bind {:jtype :blue}) arcs)))))
+
+;;; A priority 1 to N is assigned to the N arcs out-going from a transition. Each
+;;; out-going arc on the transition has a unique priority. Priority is therefore a
+;;; total ordering on the out-going arcs.
+;;; The priority assignments and the ids on token are used to determine what tokens
+;;; will flow out of which arcs from a transition in simulation. The rules are as follows:
+;;;
+;;; (1) Negative balance: The oldest N tokens are removed to satisfy an imbalance of N tokens.
+;;;     The remaining tokens are distributed so that the token requirements (multiplicity) of
+;;;     the highest priority arc are satisfied first using the oldest remaining tokens,
+;;;     then the second highest priority arc, and so on.
+;;; (2) Positive balance: New tokens are created to satisfy the imbalance. Tokens are
+;;;     distributed to the arcs as in (1).
+;;;
+;;; Mutation side-effects:
+;;;    Added arc: If there were m arcs out-going prior to the addition, the new arc would
+;;;               have priority m+1. (i.e. it has lowest priority).
+;;;    Removed arcs: The total ordering on the remaining arcs is maintained.
+;;;
+;;; Mutation operator: A mutation search operator swaps the priority on two out-going arcs
+;;;                    chosen randomly.
+(defn assign-flow-priorities
+  "Update PN to assign flow priorities to arcs out of the transitions that do not yet have one."
+  [pn trans]
+  (let [aout (pnu/arcs-outof pn trans)
+        priorities (map :priority aout) ; existing priorities (includes nils)
+        have-priority (filter identity priorities) ; no nils.
+        max-priority (if (empty? have-priority) 0 (apply max have-priority)) ; current max.
+        num-needed (count (remove identity priorities)) ; number that need a priority
+        pick-plan (map #(+ % max-priority 1) (util/random-index num-needed))
+        pick-map (zipmap pick-plan (map :name (remove :priority aout)))]
+    (update pn :arcs
+            (fn [arcs]
+              (vec
+               (reduce (fn [arcs [priority aname]]
+                         (assoc-in (vec arcs) [(pnu/arc-index pn aname) :priority] priority))
+                       arcs
+                       pick-map))))))
+
+(defn initial-pop
+  "Create an initial population of size pop-size."
+  [pop-size]
+  (vec (repeatedly
+        pop-size 
+        #(let [job-trace (->> (scada/random-job-trace) (filter (fn [msg] (contains? msg :j))) vec)]
+           (as-> (map->Inv {:pn (initial-individual-pn job-trace),
+                            :id (util/uuid)
+                            :history [{:trace job-trace}]}) ?inv
+             (add-color-binding ?inv)
+             (update ?inv :pn
+                     (fn [pn]
+                       (reduce (fn [pn trans] (assign-flow-priorities pn trans))
+                               pn
+                               (->> pn :transitions (map :name))))))))))
+
+;;;================================================================
+;;; Genetic Operators (AKA search operators)
+;;;================================================================
 (defn random-crossover [])
 
 (defn rand-mute-key
@@ -200,7 +270,7 @@
     (when (not-empty arcs)
       (nth arcs (rand-int (count arcs))))))
 
-(declare mutate-m eval-pn add-color-binding assign-flow-priorities pick-from-atom! diag-record-inv)
+(declare mutate-m eval-pn add-color-binding assign-flow-priorities diag-record-inv)
 
 (defn mutate
   "Mutate the individual. If impossible (after 5 tries) just return it."
@@ -239,7 +309,7 @@
       [pnp1 pnp2]
       (crossover pn1 pn2))))
 
-;;;=================== Add =======================================
+;;;------------------ Add -----------------------------
 (defmethod mutate-m :add-place [inv & args]
   (let [trans-in  (:name (random-trans (:pn inv)))
         trans-out (:name (random-trans (:pn inv)))]
@@ -315,7 +385,7 @@
         (update    :history conj [:bump-inhibitor-3 (:name inh) :from (:id inv)]))
     {:skip :bump-inhibitor-3 :msg "No inhib"}))
 
-;;;=================== Remove =======================================
+;;;------------------ Remove -----------------------------
 (defn sole-arc?
   "Return true if removal of the argument arc would leave the net with a
    transition or place for which there isn't at least one arc in and one out."
@@ -398,7 +468,7 @@
           (update    :history conj [:remove-inhib :dec (:name ar) :from (:id inv)])))
     {:skip :remove-inhibitor :msg "No inhibitor arcs"}))
 
-;;;================================================================================
+;;;------------------ Swap -----------------------------
 (defn swap-arcs [pn pl1 pl2]
   "Swap use of places pl1 and pl2 in the arcs of the PN. Works on trans too!"
   (assoc pn :arcs
@@ -437,8 +507,8 @@
     (if (not-empty candidates)
       (let [trans (nth candidates (rand-int (count candidates)))
             patom (atom (pnu/arcs-outof pn trans))
-            arc1 (pick-from-atom! patom)
-            arc2 (pick-from-atom! patom)
+            arc1 (util/pick-from-atom! patom)
+            arc2 (util/pick-from-atom! patom)
             p1 (:priority arc1)
             p2 (:priority arc2)]
         (-> inv
@@ -447,105 +517,23 @@
             (update :history conj [:swap-priority  (:name arc1) (:name arc2) :from (:id inv)])))
       {:skip :swap-priority :msg "no candidates"})))
 
-;;;====== End search operators ================================
-
-;;; POD Currently only one color. 
-(defn add-color-binding
-  "Add color binding information."
-  [inv]
-  (update-in inv [:pn :arcs] (fn [arcs] (vec (map #(assoc % :bind {:jtype :blue}) arcs)))))
-
-;;; A priority 1 to N is assigned to the N arcs out-going from a transition. Each
-;;; out-going arc on the transition has a unique priority. Priority is therefore a
-;;; total ordering on the out-going arcs.
-;;; The priority assignments and the ids on token are used to determine what tokens
-;;; will flow out of which arcs from a transition in simulation. The rules are as follows:
-;;;
-;;; (1) Negative balance: The oldest N tokens are removed to satisfy an imbalance of N tokens.
-;;;     The remaining tokens are distributed so that the token requirements (multiplicity) of
-;;;     the highest priority arc are satisfied first using the oldest remaining tokens,
-;;;     then the second highest priority arc, and so on.
-;;; (2) Positive balance: New tokens are created to satisfy the imbalance. Tokens are
-;;;     distributed to the arcs as in (1).
-;;;
-;;; Mutation side-effects:
-;;;    Added arc: If there were m arcs out-going prior to the addition, the new arc would
-;;;               have priority m+1. (i.e. it has lowest priority).
-;;;    Removed arcs: The total ordering on the remaining arcs is maintained.
-;;;
-;;; Mutation operator: A mutation search operator swaps the priority on two out-going arcs
-;;;                    chosen randomly.
-(defn pick-from-atom!
-  [atom]
-  (let [picked (nth @atom (rand-int (count @atom)))]
-    (swap! atom (fn [a] (remove #(= picked %) a)))
-    picked))
-
-(defn random-index
-  "Create a vector of size n using each of the numbers 0 to n-1 once."
-  [n]
-  (let [patom (atom (range n))]
-    (reduce (fn [v _] (conj v (pick-from-atom! patom)))
-            []
-            (range n))))
-
-(defn assign-flow-priorities
-  "Update PN to assign flow priorities to arcs out of the transitions that do not yet have one."
-  [pn trans]
-  (let [aout (pnu/arcs-outof pn trans)
-        priorities (map :priority aout) ; existing priorities (includes nils)
-        have-priority (filter identity priorities) ; no nils.
-        max-priority (if (empty? have-priority) 0 (apply max have-priority)) ; current max.
-        num-needed (count (remove identity priorities)) ; number that need a priority
-        pick-plan (map #(+ % max-priority 1) (random-index num-needed))
-        pick-map (zipmap pick-plan (map :name (remove :priority aout)))]
-    (update pn :arcs
-            (fn [arcs]
-              (vec
-               (reduce (fn [arcs [priority aname]]
-                         (assoc-in (vec arcs) [(pnu/arc-index pn aname) :priority] priority))
-                       arcs
-                       pick-map))))))
-
-(defn initial-pop
-  "Create an initial population of size pop-size."
-  [pop-size]
-  (vec (repeatedly
-        pop-size 
-        #(let [job-trace (->> (scada/random-job-trace) (filter (fn [msg] (contains? msg :j))) vec)]
-           (as-> (map->Inv {:pn (initial-individual-pn job-trace),
-                            :id (util/uuid)
-                            :history [{:trace job-trace}]}) ?inv
-             (add-color-binding ?inv)
-             (update ?inv :pn
-                     (fn [pn]
-                       (reduce (fn [pn trans] (assign-flow-priorities pn trans))
-                               pn
-                               (->> pn :transitions (map :name))))))))))
-
-(def check-i-error
-  "Diagnostic to catch individuals hanging in i-error."
-  (atom {}))
-
+;;;=====================================================================================
+;;;  Evolution Algorithm
+;;;=====================================================================================
 (defn i-error 
   "Compute the individual's score."
   [inv]
-  (swap! check-i-error #(assoc-in % [(:id inv)] :in))
-  (let [result (assoc inv :err (fit/workflow-fitness inv))]
-    (swap! check-i-error #(assoc-in % [(:id inv)] :out))
-    result))
+  (assoc inv :err (fit/workflow-fitness inv)))
 
 (defn sort-by-error
   "Add value for :err to each PN and used it to sort the population; best first."
   [popu]
-  (reset! check-i-error {})
   (as-> popu ?i
     (pmap i-error ?i) ; POD pmap
     (vec (sort #(< (:err %1) (:err %2)) ?i))))
 
-;;; Finally, we'll define a function to select an individual from a sorted
-;;; population using tournaments of a given size.
 (defn select
+  "Select an individual from a sorted population using a tournament of given size."
   [population tournament-size]
   (let [size (count population)]
     (nth population
@@ -553,15 +541,13 @@
 
 (defn reset-spntools! []
   (reset! pnr/+k-bounded+ (gp-param :pn-k-bounded))
-  (reset! pnr/+max-rs+ (gp-param :pn-max-rs))
+  (reset! pnr/+max-rs+    (gp-param :pn-max-rs))
   (reset! pn/+max-states+ (gp-param :pn-max-states))
   (pnu/reset-ids! {}))
 
 (defn reset-all! []
   (reset-spntools!)
   (reset! util/+log+ []))
-
-(declare validate-gp-params push-report)
 
 ;;; Lee Spector's original were:
 ;;;   Basic eqn    - 1/2  mutate, 1/4  cross over, 1/4 untouched,   selection pressure 7
@@ -571,7 +557,7 @@
   "Compute the next generation, a combination of tournament selection, mutations and crossover
    of tournament winners, and elite individuals. Argument has :state (e.g. :continue, :success)
    start-time and population Invs"
-  (let [e-cnt (gp-param :elite-individuals)
+  (let [e-cnt    (gp-param :elite-individuals)
         pop-size (gp-param :pop-size)
         pressure (gp-param :select-pressure)] ; POD I'm running 4 right now. 
     (update world :pop
@@ -584,129 +570,6 @@
                   (if (>= (count pop) pop-size)
                     (subvec (vec pop) 0 pop-size)
                     (recur (conj pop (select ?x pressure))))))))))
-
-;;;============== Reporting =====================================
-(defn report-map [world]
-  (let [pop (:pop world)
-        best (first pop)]
-    {:generation (:gen world)
-     :best-error (:err best)
-     :median-error (:err (nth pop (int (/ (gp-param :pop-size) 2))))
-     :average-pn-size (pnu/avg (map #(-> % :pn pnu/pn-size) pop))
-     :state (:state world)
-     :pop-size (count pop)
-     :total-mutations (reduce + 0 (map #(count (:history %)) pop))
-     :elapsed-time (int (/ (- (System/currentTimeMillis) (:start-time world)) 1000))}))
-
-(defn client?
-  "Returns true if there is a web client."
-  []
-  (-> (util/app-info) :ws-connection :connected-uids deref :any first))
-
-(declare pop-stats)
-
-(defn log-report
-  [world]
-  (-> world report-map util/log))
-
-(defn report-gen
-  "Either log results or send them to a client. Doesn't touch world."
-  [world]
-  (if (client?)
-    (push-report world)
-    (log-report world))
-  world)
-
-(defn validate-gp-params [params]
-  #_(when (not (< 0.9999 (reduce + 0 (map second (:mutation-types params))) 1.0001))
-    (throw (ex-info {:error ":mutation-types does not sum to 1."}))))
-
-(defn eval-inv
-  "Evaluate the PN all the way through to :avg-tokens-on-place vals."
-  [inv]
-  (assoc inv :pn
-         (pn-ok-> (:pn inv)
-                  pnr/renumber-pids
-                  pnr/possible-live?
-                  pnu/enter-and-exit-places?
-                  pnu/enter-and-exit-trans?
-                  pnr/reachability
-                  pnr/live?
-                  pn/Q-matrix
-                  pn/steady-state-props
-                  (dissoc :M2Mp :initial-marking :Q :steady-state))))
-
-(defn print-inv [p writer]
-  (.write writer (cl-format nil "#Inv [err=~A]"
-                            (if (number? (:err p))
-                              (cl-format nil "~6,2F" (:err p))
-                              :NA))))
-
-(defmethod print-method Inv [p writer]
-  (print-inv p writer))
-
-(.addMethod clojure.pprint/simple-dispatch Inv (fn [p] (print-inv p *out*)))
-
-;;;===========================================================
-;;; Communication with the client
-;;;===========================================================
-(defn clean-inv-for-transmit [inv]
-  "Sente can't send functions, can't send records, at least. Add error and history."
-  (as-> (:pn inv) ?pn
-    (assoc  ?pn :err (:err inv))
-    (assoc  ?pn :history (:history inv))))
-
-;;; Respond to a request for an individual 
-(ws/register-method
-  :sinet/get-individual     
-  (fn [{:as ev-msg :keys [?data ?reply-fn]}]
-    (let [pop (-> (util/app-info) :pop)]
-      (if (empty? pop)
-        (log/info "No population in get-individual!")
-        (let [pn-index  ?data]
-          (println "get-individual:" pn-index)
-          (when ?reply-fn
-            (when (and (>= pn-index 0) (< pn-index (count pop)))
-              (?reply-fn (-> (nth pop pn-index) #_inv-geom clean-inv-for-transmit)))))))))
-
-
-(defn evolve-chan []   (-> (util/app-info) :gp-system :evolve-chan))
-(defn pause-evolve? [] (-> (util/app-info) :gp-system :pause-evolve?))
-
-(ws/register-method
- :sinet/evolve-run
- (fn [ev-msg]
-   (>!! (evolve-chan) "init")
-   (>!! (evolve-chan) "continue")))
-
- (ws/register-method
-  :sinet/evolve-continue
-  (fn [ev-msg]
-    (>!! (evolve-chan) "continue")))
-
- (ws/register-method
-  :sinet/evolve-pause
-  (fn [ev-msg]
-    (>!! (evolve-chan) "pause")))
-
-(defn push-report
-  "Push report of new generation to the client."
-  [world]
-  (let [report (report-map world)
-        connect (-> (util/app-info) :ws-connection)
-        uids (:connected-uids connect)]
-    (if-let [uid (-> @uids :any first)]
-      (ws/send! connect uid [:sinet/generation-report report])
-      (println "No client on push-report."))))
-
-(defn push-inv
-  "Push an individual to the client for viewing"
-  [inv]
-  (let [connect (-> (util/app-info) :ws-connection)
-        uids (:connected-uids connect)]
-    (if-let [uid (-> @uids :any first)]
-      (ws/send! connect uid [:sinet/diag-push-pn (-> inv clean-inv-for-transmit)])
-      (println "No client on push-inv."))))
 
 (defn evolve-success? [world]
   (cond (< (-> world :pop first :err) 0.1) ; good enough to count as success (POD :gp-param+)
@@ -728,12 +591,14 @@
     (update-pop! (:pop world))
     world))
 
+(declare pop-stats)
+
 (defn evolve-continue
   "Loop through generations until success, failure or paused."
   [world prom]
   (println "evolve-continue...")
   ;;(util/log {:defn evolve-continue :world world})
-  (reset! (pause-evolve?) false)
+  (reset! (rep/pause-evolve?) false)
   (loop [w world]
     (pop-stats w)
     (as-> w ?w
@@ -742,21 +607,21 @@
       (do (update-pop! (:pop ?w)) ?w)
       (update ?w :gen inc)
       (evolve-success? ?w)
-      (report-gen ?w)
-      (cond @(pause-evolve?) ?w, 
-            (= (:state ?w) :failure) (do (push-inv (-> ?w :pop first)) (deliver prom ?w)), 
-            (= (:state ?w) :success) (do (push-inv (-> ?w :pop first)) (deliver prom ?w)), 
+      (rep/report-gen ?w)
+      (cond @(rep/pause-evolve?) ?w, 
+            (= (:state ?w) :failure) (do (rep/push-inv (-> ?w :pop first)) (deliver prom ?w)), 
+            (= (:state ?w) :success) (do (rep/push-inv (-> ?w :pop first)) (deliver prom ?w)), 
             :else
             (recur (make-next-gen ?w))))))
 
-;;; (>!! (evolve-chan) "init")
-;;; (>!! (evolve-chan) "continue")
+;;; (>!! (rep/evolve-chan) "init")
+;;; (>!! (rep/evolve-chan) "continue")
 (defn start-evolve-loop!
   []
   (reset! util/+log+ [])
-  (println "evolve-chan=" (evolve-chan))
+  (println "evolve-chan=" (rep/evolve-chan))
   (async/go-loop [world {}]
-    (let [msg (<! (evolve-chan))]
+    (let [msg (<! (rep/evolve-chan))]
       ;(util/log (str "msg =" msg))
       (as-> world ?w
         (cond (= msg "init")
@@ -767,13 +632,30 @@
                 (deref p (* 1000 (gp-param :timeout-secs)) {:state :timeout})),
               (= msg "pause")
               (do (println "evolve-pause...")
-                  (reset! (pause-evolve?) true) ?w))
+                  (reset! (rep/pause-evolve?) true) ?w))
         (if (or (= :close (:state ?w)) (= :timeout (:state ?w)))
           (util/log ?w)
           (recur ?w))))))
 
-;;;-------------------- Debugging stuff -----------------------------------
-;;; For best debugging experience, don't use pmap in sort-by-error!
+;;; This is from the ICMR 2017 days!
+#_(defn eval-inv
+  "Evaluate the PN all the way through to :avg-tokens-on-place vals."
+  [inv]
+  (assoc inv :pn
+         (pn-ok-> (:pn inv)
+                  pnr/renumber-pids
+                  pnr/possible-live?
+                  pnu/enter-and-exit-places?
+                  pnu/enter-and-exit-trans?
+                  pnr/reachability
+                  pnr/live?
+                  pn/Q-matrix
+                  pn/steady-state-props
+                  (dissoc :M2Mp :initial-marking :Q :steady-state))))
+
+;;;=========================================================================
+;;; Diagnostics
+;;;=========================================================================
 (def diag-all-inv (atom {}))
 (defn diag-record-inv [inv]
   "Keep a map of EVERY Inv, check that it has a legit PN."
@@ -786,52 +668,14 @@
       inv)
     inv))
 
-(defn diag-run []
+(defn diag-run
+  "Run the GP in diagnostic mode from the REPL. A very useful function!"
+  []
   (binding [*debugging* true]
     (reset! diag-all-inv {})
     (let [p (promise)]
       (as-> (evolve-init) ?w
         (evolve-continue ?w p)))))
-
-(defn reset
-  "Reset the systems, reloading changed code."
-  []
-  ((resolve 'gov.nist.sinet.run/reset)))
-
-(defn mean
-  [v]
-  (/ (apply + v) (count v)))
-
-(defn variance
-  "Var(X) = E[(X - mu)^2]"
-  [v]
-  (let [avg (mean v)]
-    (mean (vec (map (fn [x]
-                      (let [dif (- x avg)]
-                        (* dif dif)))
-                    v)))))
-
-(defn pop-stats 
-  "Report population statistics"
-  [world]
-  (let [pop (-> (app-info) :pop)]
-    (println "\nGeneration:" (:gen world))
-    (when (-> (app-info) :pop first :err)
-      (println "Best Error:"      (cl-format nil "~5,3F" (->> pop first :err)))
-      (println "Avg Error:"       (cl-format nil "~5,3F" (->> pop (map :err) mean))))
-    (println "Avg Arc count:"
-             (cl-format nil "~5,3F"
-                        (->> pop (map #(->> % :pn :arcs (filter (fn [a] (= (:type a) :normal))) count)) mean)))
-    (println "Avg Inhib count:"
-             (cl-format nil "~5,3F"
-                        (->> pop (map #(->> % :pn :arcs (filter (fn [a] (= (:type a) :inhibitor))) count)) mean)))
-    (println "Avg Trans count:" (cl-format nil "~5,3F" (->> pop (map #(-> % :pn :transitions count)) mean)))
-    (println "Avg Place count:" (cl-format nil "~5,3F" (->> pop (map #(-> % :pn :places count)) mean)))
-    (when (-> (app-info) :pop first :err)
-      (println "SD Error:"        (cl-format nil "~5,3F" (->> pop (map :err) variance Math/sqrt))))
-    (println "SD Arc count:"    (cl-format nil "~5,3F" (->> pop (map #(-> % :pn :arcs count)) variance Math/sqrt)))
-    (println "SD Trans count:"  (cl-format nil "~5,3F" (->> pop (map #(-> % :pn :transitions count)) variance Math/sqrt)))
-    (println "SD Place count:"  (cl-format nil "~5,3F" (->> pop (map #(-> % :pn :places count)) variance Math/sqrt)))))
 
 (defn diag-sim
   "Simulate some steps on the best Inv."
@@ -855,9 +699,11 @@
        (map :form)
        ppprint))
 
-(defn diag-push-inv [inv] (push-inv inv))
+(defn diag-push-inv [inv]
+  "Push an individual to the web client for viewing"
+  (rep/push-inv inv))
 
-(defn write-inv
+(defn diag-write-inv
   "Write an Inv so that it is readable."
   [inv]
   (let [inv (update-in inv [:history 0 :trace] vec)]
@@ -875,15 +721,7 @@
     (binding [*out* writer]
       (println "(in-ns 'gov.nist.sinet.gp)")
       (println "(def foo [")
-      (doseq [x (-> (app-info) :pop)] (write-inv x))
+      (doseq [x (-> (app-info) :pop)] (diag-write-inv x))
       (println "])"))))
-
-(defn step-thru-ierror
-  "Run ierror for each individual"
-  [ivec]
-  (let [ix (atom 0)]
-    (doseq [x ivec]
-      (println (cl-format nil "Inv[~s].err = ~s" @ix (i-error x)))
-      (swap! ix inc))))
 
 

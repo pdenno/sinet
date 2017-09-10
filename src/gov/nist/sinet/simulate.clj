@@ -12,7 +12,7 @@
 ;;; The PN is initialized with default-coloured tokens. For example where the ordinary marking might be
 ;;; [2 0 0 0] ours would be [[{:type :a :id 1} {:type :a :id2}] [] [] []].
 
-(def diag (atom nil))
+(def ^:private diag (atom nil))
 
 ;;; POD When I replace next-link with the QPN equivalent, this can go away. 
 (defn queues-marking-order
