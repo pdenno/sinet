@@ -17,15 +17,14 @@
 
 ;;; Just for the record, I started with Lee Spector's "gp" demonstration software!
 
-;;; ToDo: - DONE: Get data for exponential jobs, BBS.
+;;; ToDo: 
 ;;;       - Normalize the error calculation.
 ;;;       - Only do local mutations (No arcs to distance places, etc.)
 ;;;       - Implement the MJP crossover operator
 ;;;       - Keeping compute time on each individual might be useful.
 ;;;       - GSPN: Decide what to do about remove-token and other things that might fail or cause failure.
-;;;       - DONE: Implement a log for exceptional situations.
 ;;;       - GSPN: Maybe I shouldn't care about absorbing states?
-;;;       - Need a mutation to move the :intro of new tokens to a different arc.
+;;;       - DONE: Need a mutation to move the :intro of new tokens to a different arc.
 ;;;         (:remove doesn't matter where you do it from )
 ;;;       - I made every transition timed. Probably not the best idea, generally speaking.
 
@@ -59,27 +58,18 @@
 ;;;   {:name :m2-start-job, :act :sm, :m :m2, :bf :b1}
 ;;;   {:name :m2-complete-job, :act :ej, :m :m2}],
 ;;;  :p [{:name :place-1} {:name :place-2} {:name :place-3} {:name :place-4} {:name :place-5} {:name :place-6}]}
-(defn make-plan
-  "Return a 'plan' given a list of {:name <elem-name> :rep <scada-log-msg it represents>}"
+(defn make-vertices
+  "Return map with vectors containing skeleton transition and place definition maps."
   [e-assocs]
   (reduce (fn [plan e-assoc]
             (as-> plan ?p
               (update ?p :cnt inc)
-              ;(update ?p :t conj {:name (:name e-assoc) :rep (dissoc e-assoc :name)})
               (update ?p :t conj e-assoc)
               (update ?p :p conj {:name (keyword (format "place-%d" (:cnt ?p)))})))
           {:cnt 0 :t [] :p []}
           e-assocs))
 
 ;;; POD Someday you might want to call this with multiple job traces.
-(defn initial-individual-pn
-  "Translate a SCADA trace into a PN."
-  [job-trace]
-  (->> job-trace
-       mjpdes2nice ; This returns maps of {:name <elem-name> :act <act frm slog> :bf/:m <from slog>}
-       make-plan 
-       eden-pn))
-
 ;;; POD This interprets/translates the SCADA log. We'll need to generalize it someday.
 (defn scada2pn-name
   "Return a transition name for a given SCADA msg (bl/ub/st/us probably wont' be used.)"
@@ -175,8 +165,8 @@
 ;;; POD Currently only one color. 
 (defn add-color-binding
   "Add color binding information."
-  [inv]
-  (update-in inv [:pn :arcs] (fn [arcs] (vec (map #(assoc % :bind {:jtype :blue}) arcs)))))
+  [pn]
+  (update-in pn [:arcs] (fn [arcs] (vec (map #(assoc % :bind {:jtype :blue}) arcs)))))
 
 ;;; A priority 1 to N is assigned to the N arcs out-going from a transition. Each
 ;;; out-going arc on the transition has a unique priority. Priority is therefore a
@@ -198,7 +188,7 @@
 ;;;
 ;;; Mutation operator: A mutation search operator swaps the priority on two out-going arcs
 ;;;                    chosen randomly.
-(defn assign-flow-priorities
+(defn assign-flow-priority-aux
   "Update PN to assign flow priorities to arcs out of the transitions that do not yet have one."
   [pn trans]
   (let [aout (pnu/arcs-outof pn trans)
@@ -216,22 +206,35 @@
                        arcs
                        pick-map))))))
 
+(defn add-flow-priorities
+  "Assign flow priorities to all arcs outbound from a transition."
+  [pn]
+  (reduce (fn [pn trans]
+            (assign-flow-priority-aux pn trans))
+          pn
+          (->> pn :transitions (map :name))))
+
+;;; (-> (scada/random-job-trace) initial-pn)
+(defn initial-pn
+  "Translate a SCADA job trace into a PN."
+  [job-trace]
+  (->> job-trace
+       mjpdes2nice           ; returns maps to translate terse mjpdes log info to nice names.
+       make-vertices         ; returns map of skeletons for place and transition definitions
+       eden-pn               ; complete skeletons and add :arcs, making a bipartite graph. 
+       add-color-binding     ; add e.g. :bind {:jtype :blue} to :arcs for multi-job paths.
+       add-flow-priorities)) ; add info for deciding which tokens go where when multiple in/out on trans.
+
 (defn initial-pop
   "Create an initial population of size pop-size."
   [pop-size]
   (vec (repeatedly
         pop-size 
-        #(let [job-trace (->> (scada/random-job-trace) (filter (fn [msg] (contains? msg :j))) vec)]
-           (as-> (map->Inv {:pn (initial-individual-pn job-trace),
-                            :id (util/uuid)
-                            :history [{:trace job-trace}]}) ?inv
-             (add-color-binding ?inv)
-             (update ?inv :pn
-                     (fn [pn]
-                       (reduce (fn [pn trans] (assign-flow-priorities pn trans))
-                               pn
-                               (->> pn :transitions (map :name))))))))))
-
+        #(let [job-trace (scada/random-job-trace)]
+           (map->Inv {:pn (initial-pn job-trace),
+                      :id (util/uuid)
+                      :history [{:trace job-trace}]})))))
+          
 ;;;================================================================
 ;;; Genetic Operators (AKA search operators)
 ;;;================================================================
@@ -591,8 +594,6 @@
     (update-pop! (:pop world))
     world))
 
-(declare pop-stats)
-
 (defn evolve-continue
   "Loop through generations until success, failure or paused."
   [world prom]
@@ -600,7 +601,7 @@
   ;;(util/log {:defn evolve-continue :world world})
   (reset! (rep/pause-evolve?) false)
   (loop [w world]
-    (pop-stats w)
+    (rep/pop-stats w)
     (as-> w ?w
       (assoc ?w :state :running)
       (update ?w :pop #(sort-by-error %))

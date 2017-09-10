@@ -48,8 +48,10 @@
         job-trace (scada-gather-job data job-id)
         start-job (-> job-trace first :line)
         end-job (-> job-trace last :line)]
-    (remove #(and (contains? % :j) (not (== job-id (:j %))))
-            (subvec data start-job (inc end-job)))))
+    (->> (subvec data start-job (inc end-job))
+         (remove #(and (contains? % :j) (not (== job-id (:j %)))))
+         (filter (fn [msg] (contains? msg :j)))
+         vec)))
 
 (defn max-machine [job-trace]
   "Return an integer representing the last machine mentioned in the argument job trace

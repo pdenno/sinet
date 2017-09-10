@@ -170,7 +170,6 @@
 ;;; This one for an Eden INV:
 #_(def eee
     (let [pn (->> (gov.nist.sinet.scada/random-job-trace)
-                  (filter (fn [msg] (contains? msg :j)))
                   (gov.nist.sinet.gp/initial-individual-pn))]
       (-> (gov.nist.sinet.gp/map->Inv {:pn pn})
           gov.nist.sinet.gp/add-scada-report-fns

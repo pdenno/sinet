@@ -84,8 +84,6 @@
   []
   (-> (util/app-info) :ws-connection :connected-uids deref :any first))
 
-(declare pop-stats)
-
 (defn log-report
   [world]
   (-> world report-map util/log))
