@@ -30,7 +30,6 @@
 
 ;;;  DOCUMENTATION REQUIREMENT: Determine what among the :gp-params matters.
 ;;; :pn-elements -- The PN elements that can appear in individuals.
-;;; :initial-individuals -- percentage of each element type.
 ;;; :elite-individuals -- carry over this amount of the best without revision.
 ;;; :max-initial-mutations -- apply 1 to this number of mutations (uniform distribution to the "Eden individual")
 
