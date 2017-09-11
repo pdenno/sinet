@@ -176,8 +176,8 @@
 ;;;
 ;;; (1) Negative balance: The oldest N tokens are removed to satisfy an imbalance of N tokens.
 ;;;     The remaining tokens are distributed so that the token requirements (multiplicity) of
-;;;     the highest priority arc are satisfied first using the oldest remaining tokens,
-;;;     then the second highest priority arc, and so on.
+;;;     the highest priority arc (lowest priority number) are satisfied first using the oldest 
+;;;     remaining tokens, then the second highest priority arc, and so on.
 ;;; (2) Positive balance: New tokens are created to satisfy the imbalance. Tokens are
 ;;;     distributed to the arcs as in (1).
 ;;;
@@ -725,4 +725,19 @@
       (doseq [x (-> (app-info) :pop)] (diag-write-inv x))
       (println "])"))))
 
-
+;;;(diag-force-priority (:pn eee) [{:source :m1-start-job, :target :buffer :priority 2}])
+(defn diag-force-priority
+  "Set PN priority as indicated by the argument. Anything not specified has priority=1."
+  [pn priority-maps]
+  (as-> pn ?pn
+    (update ?pn :arcs (fn [arcs] (vec (map #(assoc % :priority 1) arcs))))
+    (update ?pn :arcs 
+            (fn [arcs] (reduce (fn [arcs pr]
+                                 (if-let [ar (some #(when (and (= (:source %) (:source pr))
+                                                               (= (:target %) (:target pr)))
+                                                      %)
+                                                   arcs)]
+                                   (assoc-in arcs [(pnu/arc-index pn (:name ar)) :priority] (:priority pr))
+                                   arcs))
+                               arcs priority-maps)))))
+                                           

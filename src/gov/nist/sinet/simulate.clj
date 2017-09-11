@@ -93,6 +93,10 @@
             []
             (range max-tkn (+ max-tkn n)))))
 
+;;; (1) "Negative balance: The oldest N tokens are removed to satisfy an imbalance of N tokens.
+;;;     The remaining tokens are distributed so that the token requirements (multiplicity) of
+;;;     the highest priority arc (lowest priority number) are satisfied first using the oldest 
+;;;     remaining tokens, then the second highest priority arc, and so on."
 (defn pull-tokens
   "Collect tokens from the arcs (adjusting queues); set (-> pn :sim :to-assign) to 
    the tokens that will be part of push-tokens."
@@ -114,19 +118,24 @@
                       (> balance 0) (into % (new-tokens ?pn balance))  ; add
                       :else %))))                                      ; move
 
+;;; (1) ..."The remaining tokens are distributed so that the token requirements (multiplicity) of
+;;;     the highest priority arc (lowest priority number) are satisfied first using the oldest 
+;;;     remaining tokens, then the second highest priority arc, and so on."
 (defn push-tokens
   "Assign tokens from (-> pn :sim :to-assign) to the queues according
    to priority and multiplicity."
-  [pn a-outs]
-  (let [a-outs (sort #(< (:priority %1) (:priority %2)) a-outs)]
+  [pn out-arcs]
+  (let [out-arcs (sort #(< (:priority %1) (:priority %2)) out-arcs)]
     (reduce (fn [pn arc]
               (let [mult (:multiplicity arc)]
                 (as-> pn ?pn
+                  ;; Update a queue according to the arc.
                   (update-in ?pn [:sim :queues (:target arc)]
                              #(into % (subvec (-> pn :sim :to-assign) 0 mult)))
+                  ;; Remove the tokens assigned to the queue.
                   (update-in ?pn [:sim :to-assign] #(subvec % mult)))))
             pn
-            a-outs)))
+            out-arcs)))
 
 (defn flow-balance
   "Compute the difference tokens-out minus tokens in."
@@ -185,7 +194,7 @@
       (reduce (fn [pn mv]
                 (update-in pn [:sim :log] #(conj % {:on-act fire :tkn mv :motion :move
                                                     :from (find-at mv (-> pn :sim :old-queues))
-                                                    :to (find-at mv (-> pn :sim :queues))})))
+                                                    :to   (find-at mv (-> pn :sim :queues))})))
               ?pn moved)
       (assoc-in ?pn [:sim :max-tkn] (max-tkn ?pn)))))
 
@@ -219,6 +228,6 @@
   (-> "/Users/peterdenno/Documents/git/spntools/data/m2-inhib-bas.xml" 
       gov.nist.spntools.core/run-ready
       gov.nist.sinet.gp/add-color-binding
-      gov.nist.sinet.gp/add-flow-priorities
+      (gov.nist.sinet.gp/diag-force-priority [{:source :m1-start-job, :target :m1-busy :priority 2}])
       (simulate :max-steps 15)))
 
