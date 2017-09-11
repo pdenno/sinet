@@ -1,0 +1,3144 @@
+
+ToDo: - 2017-09-08: Explore why sometimes, at around generation 20, things start moving really fast.
+
+
+;;;==================================
+;;; "2017-03-18T19:10:52.476-00:00"
+;;;==================================
+
+Only 6 out of 10 mutations were possible (there are no hidden places to start). 
+
+   :history
+   [{:mutate :add-place}
+    {:trans :Trans-11, :mutate :add-trans-vv}
+    {:trans :Trans-12, :mutate :add-trans-hh}
+    {:mutate :add-token}
+    {:mutate :add-token}
+    {:mutate :add-token}],
+
+
+I think adding places (or trans?) like this is causing the nets to be not k-bounded.  
+
+    {:aid 27, :source :Place-11, :target :Trans-12, :name :aa-27, :type :normal, :multiplicity 1}
+    {:aid 28, :source :Trans-12, :target :Place-11, :name :aa-28, :type :normal, :multiplicity 1}
+
+   :marking-key [:m1-blocked :m1-busy :m2busy :m2-starved :buffer :Place-11],
+   :initial-marking [2 0 0 1 1 0],
+   :failure {:reason :not-k-bounded, :marking [0 1 1 6 6 11]}}}]
+
+--> There aren't enough places to choose from. There was just one hidden one. 
+--> Let's drop back to not caring whether hidden/visible.
+
+   :mutation-types        ; These aren't much like Nobile because I need ergodic nets, they don't. Nobile doesn't do deletes either.
+   [[:add-place     0.2]    ; Add place (mine can't be absorbing, thus 1&2).  
+    [:add-trans-vv  0.1]    ; Add transition, connecting to visible input and output places. 
+    [:add-trans-hh  0.1]    ; Add transition, connecting hidden input place to hidden output place.
+    [:add-trans-vh  0.1]    ; Add transition, connecting visible input place to hidden output place.
+    [:add-trans-hv  0.1]    ; Add transition, connecting hidden input place to visible output place.
+    [:add-inhibit-v 0.1]    ; Add inhibitor arc, connecting a visible place to a trans
+    [:add-inhibit-h 0.1]    ; Add inhibitor arc, connecting a visible place to a trans
+    [:add-token     0.2]    ; Add token to some place (visible or hidden).
+    [:remove-token  0.0]]}) ; Remove token from some place (visible or hidden).
+
+
+   :mutation-types       
+   [[:add-place     0.2]    ; Add place (mine can't be absorbing, thus 1&2).  
+    [:add-trans     0.2]    ; Add transition, connecting to visible input and output places. 
+    [:add-inhibit   0.2]    ; Add inhibitor arc, connecting a visible place to a trans
+    [:add-token     0.2]    ; Add token to some place (visible or hidden).
+    [:remove-token  0.2]]}) ; Remove token from some place (visible or hidden).
+
+
+
+;;; Add a (hidden) transition between two places according to visibility tests.
+(defmacro various-trans-mutate
+  [name test1 test2]
+  `(defmethod mutate-m ~name [pn# & args#]
+     (if-let [p-in#  (:name (random-place pn# :subset ~test1))]
+       (if-let [p-out# (:name (random-place pn# :subset ~test2))]
+         (as-> pn# ?pn#
+           (pnu/add-pn ?pn# (pnu/make-transition pn#))
+           (let [t# (:name (last (:transitions ?pn#)))]
+             (as-> ?pn# ?pnn#
+               (update ?pnn# :history conj {:mutate ~name :trans t#})
+               (pnu/add-pn ?pnn# (pnu/make-arc ?pnn# p-in# t#))
+               (pnu/add-pn ?pnn# (pnu/make-arc ?pnn# t# p-out#)))))
+         {:skip ~name :msg "no p-out"})
+       {:skip ~name :msg "no p-in"})))
+
+;;; POD: This will remain a waste of time if the distribution of these remains equal.
+(various-trans-mutate :add-trans-vv #(filter :visible? %) #(filter :visible? %))
+(various-trans-mutate :add-trans-hh #(remove :visible? %) #(remove :visible? %))
+(various-trans-mutate :add-trans-vh #(filter :visible? %) #(remove :visible? %))
+(various-trans-mutate :add-trans-hv #(remove :visible? %) #(filter :visible? %))
+
+
+(defmethod mutate-m :add-inhibit-h [pn & args]
+  (if-let [trans (random-trans pn)]
+    (if-let [place (random-place pn :subset #(remove :visible? %))]
+      (as-> pn ?pn
+        (update ?pn :history conj {:mutate :add-inhibit-h :place place})
+        (pnu/add-pn ?pn (pnu/make-arc ?pn (:name trans) (:name place) :type :inhibitor)))
+      {:skip :add-inhibit-h :msg "no hidden place"})
+    {:skip :add-inhibit-h :msg "no trans"}))
+
+
+  #_([pn logging?]
+   (if (not logging?)
+     (reach-pn pn)
+     (cond (not (pnr/possible-live? pn))
+           (do (log {:error "fails possible live" :pn pn}) false),
+           (not (pnu/enter-and-exit-places? pn))
+           (do (log {:error "fails enter-and-exit-places" :pn pn}) false),
+           (not (pnu/enter-and-exit-trans? pn))
+           (do (log {:error "fails enter-and-exit-trans" :pn pn}) false),
+           :else
+           (let [pn-reach (-> pn (pn/gspn2spn) (pnr/reachability))]
+             (cond (:failure pn-reach)
+                   (do (log {:error "fails reachability calc" :pn pn-reach}) false),
+                   (not (pnr/live? pn-reach))
+                   (do (log {:error "fails live" :pn pn-reach}) false),
+                   :else pn-reach))))))
+
+
+COOOL ===> as-pn-ok->
+
+==========================================================================
+;;; A hard bug!  See data/mypn.xml
+
+I get a stack overflow on the pn, though walking through by hand, it looks okay.
+PIPE shows 70 states in the reachability graph and it computes steady-state in PIPE very quickly.
+My code should be able to handle 700 states, at least! (though I don't think I want to solve that equation...)
+
+Well, maybe it isn't that hard; the problem is (I suspect) that reachability-aux should never have been recursive. 
+
+{:places
+ [{:name :buffer, :pid 0, :initial-marking 1, :visible? true}
+  {:name :m2-starved, :pid 1, :initial-marking 0, :visible? true}
+  {:name :m2busy, :pid 2, :initial-marking 1, :visible? true}
+  {:name :m1-busy, :pid 3, :initial-marking 2, :visible? true}
+  {:name :m1-blocked, :pid 4, :initial-marking 0, :visible? true}],
+ :transitions
+ [{:name :m1-finished, :tid 6, :type :exponential, :rate 1.0, :visible? true}
+  {:name :m2-finished, :tid 7, :type :exponential, :rate 1.0, :visible? true}
+  {:name :tadd-1, :tid 8, :type :exponential, :rate 1.0}
+  {:name :tadd-2, :tid 9, :type :exponential, :rate 1.0}
+  {:name :tadd-3, :tid 10, :type :exponential, :rate 1.0}
+  {:name :Trans-11, :tid 11, :type :exponential, :rate 1.0}],
+ :arcs
+ [{:aid 11, :source :buffer, :target :m1-finished, :name :aa-11, :type :normal, :multiplicity 1}
+  {:aid 12, :source :m1-finished, :target :m2-starved, :name :aa-12, :type :normal, :multiplicity 1}
+  {:aid 13, :source :m2-starved, :target :m2-finished, :name :aa-13, :type :normal, :multiplicity 1}
+  {:aid 14, :source :m2-finished, :target :m2busy, :name :aa-14, :type :normal, :multiplicity 1}
+  {:aid 15, :source :m2busy, :target :tadd-1, :name :aa-15, :type :normal, :multiplicity 1}
+  {:aid 16, :source :tadd-1, :target :m1-busy, :name :aa-16, :type :normal, :multiplicity 1}
+  {:aid 17, :source :m1-busy, :target :tadd-2, :name :aa-17, :type :normal, :multiplicity 1}
+  {:aid 18, :source :tadd-2, :target :m1-blocked, :name :aa-18, :type :normal, :multiplicity 1}
+  {:aid 19, :source :m1-blocked, :target :tadd-3, :name :aa-19, :type :normal, :multiplicity 1}
+  {:aid 20, :source :tadd-3, :target :buffer, :name :aa-20, :type :normal, :multiplicity 1}
+  {:aid 25, :source :m1-blocked, :target :Trans-11, :name :aa-25, :type :normal, :multiplicity 1}
+  {:aid 26, :source :Trans-11, :target :m1-busy, :name :aa-26, :type :normal, :multiplicity 1}
+  {:aid 27, :source :m1-blocked :target :Trans-11, :name :aa-27, :type :inhibitor, :multiplicity 1}],
+ :history [{:mutate :add-token} {:mutate :add-token} {:mutate :add-trans, :trans :Trans-11} {:mutate :add-token}]}
+
+(defn reachability-aux
+  [pn marking]
+  (if (some #(> % @+k-bounded+) marking)
+    (assoc pn :failure {:reason :not-k-bounded :marking marking})
+    (let [nexts (next-markings pn marking)]
+      (println "Next " (map #(list (:M %) (:fire %)) nexts)) ; POD is :tid helpful? I like :name!
+      (swap! *visited-links* into (map #(list (:M %) (:fire %)) nexts)) ; POD looks wasteful
+      (as-> pn ?pn
+        (update-in ?pn [:M2Mp] into (vec nexts))
+        (reduce (fn [pn nx] (if (:failure pn) pn (reachability-aux pn (:Mp nx))))
+                ?pn
+                nexts)))))
+
+
+I started something using loop, but it isn't going to work:
+(defn reachability-aux
+  [pn marking]
+  (loop [pn pn,
+         marking marking]
+    (let [nexts (next-markings pn marking)]
+      (if (some #(> % @+k-bounded+) marking)
+        (assoc pn :failure {:reason :not-k-bounded :marking marking})
+        (if (not-empty nexts)
+          (do
+            (println "Next " (map #(list (:M %) (:fire %)) nexts))
+            (swap! *visited-links* into (map #(list (:M %) (:fire %)) nexts))
+            (as-> pn ?pn
+              (update ?pn :M2Mp into (vec nexts))
+              (recur
+               (loop [pn ?pn
+          (recur
+        (reduce (fn [pn nx] (if (:failure pn) pn (reachability-aux pn (:Mp nx))))
+                ?pn
+                nexts)))))
+
+I'll look at https://github.com/akhudek/zip-visit tomorrow. 
+
+(pn-steady-state (pnml/read-pnml "data/mypn.xml"))
+
+(defn v-next-markings
+  ;; "Return a seq of maps ({:M <mark> :trans <transition that fired> :Mp <new mark>}...)"
+  [pn marking]
+  (map (fn [l]
+         (let [tr (name2obj pn (second l))]
+           {:M marking
+            :fire (:name tr)
+            :Mp (mark-at-link-head pn l)
+            :rate (:rate tr)}))
+       (filter (fn [link] (not-any? (fn [vis] (= link vis)) @*visited-links*))
+               (map (fn [tr-name] (list marking tr-name)) (fireables pn marking)))))
+
+(defn visit-reach [pn]
+  (let [marking (initial-marking pn)
+        pn (-> pn
+               (assoc :marking-key (:marking-key marking))
+               (assoc :initial-marking (:initial-marking marking)))]
+    (visit (:initial-marking pn) nil [v-next-markings])))
+
+====> zip-visit isn't going to do the job. It doesn't allow one to calculate the graph structure on the fly.
+
+   (binding [*visited-links* (atom [])]
+                                   (as-> m ?pn          
+                                     (assoc ?pn :marking-key (:marking-key im))
+                                     (assoc ?pn :initial-marking (:initial-marking im))
+                                     (assoc ?pn :M2Mp [])
+                                     (next-markings ?pn (:initial-marking im))))
+
+;;;==================================
+;;; "2017-03-19T13:14:19.004-00:00"
+;;;==================================
+
+(def m (pnml/read-pnml "data/mypn.xml"))
+
+Rewriting reachability.
+
+current problem ---> The marking is going high. Probably mis-aligned.
+
+Nope! The added inhibitor is backwards. Pipe doesn't even notice!
+  {:aid 23, :source :Trans-11, :target :m1-blocked, :name :aa-23, :type :inhibitor, :multiplicity 1}
+
+
+But there are more things wrong. Checking what is visited isn't working:
+
+ :M2Mp
+ [{:M [1 0], :fire :T0, :Mp [1 0], :rate 0.6} <------
+  {:M [1 0], :fire :T1, :Mp [0 1], :rate 0.4} 
+  {:M [1 0], :fire :T0, :Mp [1 0], :rate 0.6} <------
+  {:M [1 0], :fire :T1, :Mp [0 1], :rate 0.4} 
+  {:M [0 1], :fire :T2, :Mp [1 0], :rate 0.2}
+  {:M [0 1], :fire :T3, :Mp [0 1], :rate 0.8}],
+
+
+
+#_(defn reachability-aux
+  [pn marking]
+  (if (some #(> % @+k-bounded+) marking)
+    (assoc pn :failure {:reason :not-k-bounded :marking marking})
+    (let [nexts (next-markings pn marking)]
+      (println "Next " (map #(list (:M %) (:fire %)) nexts)) 
+      (swap! *visited-links* into (map #(list (:M %) (:fire %)) nexts)) 
+      (as-> pn ?pn
+        (update-in ?pn [:M2Mp] into (vec nexts))
+        (reduce (fn [pn nx] (if (:failure pn) pn (reachability-aux pn (:Mp nx))))
+                ?pn
+                nexts)))))
+
+(defn reachability [pn])
+#_(defn reachability
+  "Calculate the reachability of the argument graph." 
+  [pn]
+  (reset! +diag+ pn)
+  (binding [*visited-links* (atom [])]
+    (let [marking (initial-marking pn)]
+      (as-pn-ok-> pn ?pn
+                  (renumber-pids ?pn) ; initial-marking sorts by pid. 
+                  (assoc ?pn :marking-key (:marking-key marking))
+                  (assoc ?pn :initial-marking (:initial-marking marking))
+                  (assoc ?pn :M2Mp [])
+                  (reachability-aux ?pn (:initial-marking ?pn))
+                  (update ?pn :M2Mp vec)
+                  (let [m  (set (distinct (map #(:M %) (:M2Mp ?pn))))
+                        mp (set (distinct (map #(:Mp %) (:M2Mp ?pn))))
+                        m-mp (clojure.set/difference m mp)
+                        mp-m (clojure.set/difference mp m)]
+                    (if (and (empty? m-mp) (empty? mp-m))
+                      ?pn
+                      (assoc ?pn :failure {:reason :absorbing-states
+                                           :data {:m-not-mp m-mp :mp-not-m mp-m}})))
+                  (if (empty? (:M2Mp ?pn))
+                    (assoc ?pn :failure {:reason :null-reachability-graph})
+                    ?pn)))))
+
+;;;;============= Back to sinet ==============================
+
+On average, a population of 100 takes about 2 seconds. The typical individual is mutated 2.8 times.
+
+(count (:add-place fff)) 111
+(count (:add-trans fff)) 97
+(count (:add-inhibit fff)) 0
+(count (:add-token fff)) 37
+(count (:remove-token fff)) 129
+(count (get fff nil)) 28
+
+...Mutations by generation should be increasing by at least 75, they are only going up by 2 in one generation!
+
+Doesn't make any sense: It takes two minutes to make the first population and then only 1 sec for each generation thereafter!!!
+
+ALSO: It wasn't sorting before.
+
+Maybe implement :max-states next. DONE. 
+
+
+;;;===================================
+;;; "2017-03-20T17:04:11.906-00:00"
+;;;===================================
+
+--> Currently stuck with it finding a so-so solution soon and sticking with it.
+    (stuck in a local optima).
+
+Possible actions to take:
+  - Write crossover and the rest of the mutation operators (but those delete, which is probably not useful now).
+  - Skew creation of initial population against delete mutations (but use those in generations)
+  - Complete the reduction code and add immediate transitions
+  - Write a better 'eden-individuals' function.
+  - Keep some failed individuals, with the hope that they will be mutated back to good individuals.
+
+I explore the eden-individual function first.
+
+(defn simple-mutate [pn]
+  (let [pnp (mutate-m pn)]
+    (if (pnu/pn? pnp) pnp (simple-mutate pn))))
+
+(defn test-simple-mutate [pn]
+  (repeatedly 200
+              (fn []
+                (as-> pn ?pn
+                  (reduce (fn [pn _] (simple-mutate pn)) ?pn (range 10))
+                  (if (contains? (reach-pn ?pn) :failure) false true)))))
+
+69/200 after 2 mutations
+13/200 after 5
+2/200 after 10
+
+... so at least the task of getting a more diverse population through this simpler means isn't going to help.
+
+NEXT: - Skew creation of initial population against delete mutations (but use those in generations)
+
+---> It appears that getting an initial population with just 'eden-mutations' is difficult (242 seconds).
+It may be the case that prior to eden-mutations, the only individuals that didn't failed were pretty much
+like a eden-individual, undoing every mutation with its inverse. This might account for getting the
+same answer every time.
+
+--> Does 242 seconds make sense? There are 100 individual, each with a minimum of 2 mutations.
+    Yet calculating a new generation (7/8ths with one mutation) only takes a second! Nope, doesn't make sense!
+
+<-- It COULD make sense if scoring is strongly favoring the smaller individuals. The problem with the
+    eden population is that it seems to include individuals that are pretty big. These take some time
+    to compute. FIXED (though some are still 10 seconds, avg is 1.4 sec). 
+
+Two things to work on:
+ - Shrinking PNs (change the distribution)
+ - Mystery of 242 seconds
+
+---> Mystery of 242 seconds: Not so much a mystery. M2Mp of count 3600 takes 25 seconds sometimes.
+What is a mystery is why I can't fail out of these! I *think* I can keep it down to 1 sec / individual
+if it will listen to my pnr/+max-rs+ !!!  :M2Mp NOT :M2mp Ugh! Anyway, about 1.4 sec/individual.  DONE
+
+---> - Shrinking PNs (change the distribution) I also don't insist on sum to 1.0
+
+;;;===================================
+;;; "2017-03-21T19:10:53.901-00:00"
+;;;===================================
+
+Mutation swap-place-vv didn't really help. Results aren't bad, but perhaps it is getting stuck in a local optima.
+
+ - Converge to local optima, even without elite and very little selection pressure.
+ - Evoles toward smaller nets despite higher probability of add- and swap- mutations.
+ - No crossover yet. 
+
+I'm deciding that this is good enough for the ICMR paper. 
+
+;;;==================================
+;;;  "2017-03-22T20:42:35.860-00:00"
+;;;==================================
+
+;;;=================================
+;;; "2017-03-25T14:05:22.744-00:00"
+;;;=================================
+
+I'm developing the Knottenbelt algorithm.
+
+(defn trg
+  "Associate the tangible reachability graph with the argument Petri net.
+   Its nodes are the TRS. It has one arc for each possible PATH in the corresponding
+   RG between the same two nodes. There is some complication for the ECS."
+  [pn]
+  (as-> pn ?pn
+    (assoc ?pn
+           :TRG
+           (vec (reduce (fn [pn [from to]]
+                          (as-> pn ?pnn
+                            (if (= from to)
+                              ?pnn
+                              (update ?pnn :TRG conj {:from from :to to}))))
+                        ?pn
+                        (for [from (:TRS ?pn) to (:TRS ?pn)] (vector from to)))))))
+
+
+Okay, it has to be DFS. Now it is. 
+
+explore =  ({:M [2 0 0], :fire :Tleft, :Mp [1 1 0], :rate 1.0} {:M [2 0 0], :fire :Tright, :Mp [1 0 1], :rate 1.0})
+explore =  [{:M [1 1 0], :fire :Tright, :Mp [0 1 1], :rate 1.0} {:M [2 0 0], :fire :Tright, :Mp [1 0 1], :rate 1.0}]
+explore =  [{:M [0 1 1], :fire :tIMM, :Mp [2 0 0], :rate 1.0} {:M [2 0 0], :fire :Tright, :Mp [1 0 1], :rate 1.0}]
+explore =  [{:M [2 0 0], :fire :Tright, :Mp [1 0 1], :rate 1.0}]
+explore =  [{:M [1 0 1], :fire :Tleft, :Mp [0 1 1], :rate 1.0}]
+explore =  []
+
+
+                     (into (:tangible tan-van) (vec (rest tangible)))
+                     (into (:vanishing tan-van) vanishing)))))))
+
+
+(defn tangible? [pn m]
+  "Return true if marking M is tangible. A marking is vanishing if it
+   enables an immediate transitions. "
+  (let [trans (map :fire (filter #(= m (:M %)) (:explored pn)))]
+    (not-any? #(immediate? pn %) trans)))
+
+(defn trs
+  "Associate the tangible reachability set with the argument Petri net."
+  [pn]
+  (assoc pn :TRS (vec (filter #(tangible? pn %) (distinct (map :M (:explored pn)))))))
+
+;;;=================================
+;;; "2017-04-27T12:31:48.906-00:00"
+;;;=================================
+
+
+;;;=================================
+;;; "2017-04-29T20:08:46.405-00:00"
+;;;=================================
+
+I wrote functions to write and read an initial population. 
+
+I'm looking into values of i-error for the initial population.
+
+The reachability analysis gets into trouble very quickly (3rd individual). Surprise. Surprise.
+There are no IMMs in the PN, yet the search paths are long, like this:
+
+That was a nice hour or so doing work on my thesis. (I try to get one of those in each month.
+Now back to spntools.) One hour later... OK, some bad news on accuracy (match relative to PIPE?)
+of initial-3.xml, but I am back. They both are 205 states, but the results are different.
+Not way off, but different. Does not look like round-off when adding states. I think it is the
+matrix solution. Oh, and mine is 15 times slower.
+
+The problem with the initial population is that some individuals are taking much longer to compute
+than others. These were supposed to be sorted by error, BTW. 
+
+Individual 1 error= 0.7333500000000002 time= 0.028
+Individual 2 error= 1.2245390114897643 time= 0.035
+Individual 3 error= 3.9203460888605357 time= 24.895
+Individual 4 error= 2.666670000000001 time= 0.405
+Individual 5 error= 4.7302730769230825 time= 129.257
+Individual 6 error= 5.6691640094719205 time= 53.865
+Individual 7 error= 7.00975374382967 time= 86.857
+Individual 8 error= 1.4325676930792373 time= 0.019
+Individual 9 error= 1.3333300000000001 time= 0.002
+Individual 10 error= 0.9999899999999999 time= 0.006
+Individual 11 error= 1.3333300000000001 time= 0.005
+Individual 12 error= 5.393492154182595 time= 114.447
+Individual 13 error= 3.057420185607158 time= 0.063
+Individual 14 error= 5.337609239520369 time= 0.219
+Individual 15 error= 1.33333 time= 0.003
+Individual 16 error= 2.0906059050146126 time= 0.15
+Individual 17 error= 0.9333500000000003 time= 0.114
+Individual 18 error= 0.7333499999999996 time= 0.022
+Individual 19 error= 2.73697482357503 time= 5.548
+Individual 20 error= 1.6666700000000003 time= 0.007
+Individual 21 error= 2.6849767648703646 time= 1.199
+Individual 22 error= 1.236283780256564 time= 0.11
+Individual 23 error= 1.3333300000000001 time= 0.003
+Individual 24 error= 2.1032424421932006 time= 1.008
+Individual 25 error= 2.324636225478841 time= 0.766
+Individual 26 error= 3.6666699999999977 time= 23.148
+Individual 27 error= 2.666670000000003 time= 5.448
+Individual 28 error= 2.075917590759077 time= 1.441
+Individual 29 error= 4.068339631600357 time= 10.987
+Individual 30 error= 3.3812619155270833 time= 6.638
+Individual 31 error= 2.1315021883263916 time= 0.126
+Individual 32 error= 0.7333499999999996 time= 0.016
+Individual 33 error= 1.3333300000000001 time= 0.002
+Individual 34 error= 2.902998314349171 time= 5.475
+Individual 35 error= 0.7333500000000001 time= 0.022
+Individual 36 error= 0.855257896200385 time= 0.089
+Individual 37 error= 3.975349940078357 time= 20.598
+Individual 38 error= 3.029552776235948 time= 6.543
+Individual 39 error= 1.827537117864977 time= 0.466
+Individual 40 error= 2.1980091544912264 time= 1.601
+Individual 41 error= 3.0829675251079354 time= 0.463
+Individual 42 error= 4.742440853506555 time= 5.81
+Individual 43 error= 4.242431746458263 time= 1.942
+Individual 44 error= 0.95737514212059 time= 0.105
+Individual 45 error= 6.009070785322211 time= 111.13
+Individual 46 error= 1.1448516134675568 time= 0.095
+Individual 47 error= 1.2359637616095651 time= 0.092
+Individual 48 error= 5.1033997204482215 time= 151.839
+Individual 49 error= 1.3027091441737986 time= 0.029
+Individual 50 error= 4.230853493543698 time= 4.378
+Individual 51 error= 1.3333299999999997 time= 0.004
+Individual 52 error= 4.204860273457146 time= 27.122
+Individual 53 error= 3.6666699999999985 time= 1.564
+Individual 54 error= 4.104872247191009 time= 7.971
+Individual 55 error= 1.666669999999999 time= 0.602
+Individual 56 error= 0.9690122643598997 time= 0.103
+Individual 57 error= 1.8407258292282425 time= 1.152
+Individual 58 error= 1.666670000000002 time= 1.86
+Individual 59 error= 0.86667 time= 0.036
+Individual 60 error= 1.3333300000000001 time= 0.003
+Individual 61 error= 5.228663581697722 time= 103.864
+Individual 62 error= 1.254911960784313 time= 0.169
+Individual 63 error= 6.240842600287913 time= 0.715
+Individual 64 error= 1.414332250639386 time= 0.021
+Individual 65 error= 1.0574201856071583 time= 0.074
+Individual 66 error= 9.999999999E8 time= 27.27   <================ Wasn't supposed to be here?
+Individual 67 error= 4.666670000000002 time= 34.955
+Individual 68 error= 2.5502797839803746 time= 0.355
+Individual 69 error= 4.752525301322544 time= 87.898
+Individual 70 error= 1.6666700000000008 time= 1.867
+Individual 71 error= 2.630995529542922 time= 0.016
+Individual 72 error= 0.7959283673469391 time= 0.03
+Individual 73 error= 3.63218871885344 time= 9.562
+Individual 74 error= 1.6666700000000005 time= 0.942
+Individual 75 error= 2.9103622450638174 time= 3.187
+Individual 76 error= 1.666670000000002 time= 0.673
+Individual 77 error= 4.339719426751593 time= 0.021
+Individual 78 error= 0.915628481012658 time= 0.014
+Individual 79 error= 1.3939427272727272 time= 0.005
+
+Individual 80 error= 5.6972216381908565 time= 401.675
+
+Individual 99 error= 6.75231108976146 time= 398.178  <=== 8 tokens. 490 tangible states. 1.7 seconds on PIPE. 
+
+4-orders of magnitude difference execution between small ones and big ones ! I think the problem is
+the solution of the Q matrix. When it gets around 200x200, it really starts sucking! Note that the
+these solutions have high error. So it isn't surprising that subsequent generations are not
+so bad. I'm going to have to write out a generation once things get moving
+and work with that while I solve the numerical problems with spntools.
+
+---> Problem (well for one, it it is stuck somewhere) but also there are eden individuals
+     with :immediate visible transitions.
+
+;;;==================================
+;;; "2017-05-02T19:33:13.062-00:00"
+;;;==================================
+
+I'm looking into why mutation is so damaging.
+
+jjj.xml is subject to one mutation on iii, which runs just fine. 
+
+(as-> iii  ?i (mutate ?i) (reset! +diag+ ?i) (eval-inv ?i) (i-error ?i))
+(as-> jjj ?i (eval-inv ?i) (i-error ?i))
+ :history ({:mutate :remove-inhibitor, :arc-id 22}),
+
+Ah, what is this!  :failure {:reason :enter-and-exit-trans}}
+
+BTW, PIPE doesn't see anything wrong with it. 
+
+So the problem is that :tadd-3 doesn't have any arcs out of it. The mutation action was
+:remove-inhibitor, :arc-id 22
+
+Looking at iii,
+
+  {:aid 21, :source :m2-starved, :target :tadd-3, :name :aa-21, :type :normal, :multiplicity 1}
+  {:aid 22, :source :tadd-3, :target :m1-blocked, :name :aa-22, :type :normal, :multiplicity 1}
+
+(1) It wasn't an inhibitor that was removed.
+(2) Fix the :arc-id -> :aid
+(3) It will be very difficult to remove arcs successfully when there are so few of them in the Edens!
+
+:add-places looks wrong, but I think it needs more work to force
+
+(ppprint (:pn (reduce (fn [i _] (mutate i #(random-mutation (:eden-dist +gp-params+))))
+                                      iii (range 3))))
+{:skip :swap-places-vv,
+ :msg "no 1st place",
+ :pn
+ {:places ({:name :Place-73, :pid 73, :initial-tokens 0}),
+  :arcs
+  ({:aid 161, :source :Place-73, :target nil, :name :aa-161, :type :normal, :multiplicity 1}
+   {:aid 160, :source nil, :target :Place-73, :name :aa-160, :type :normal, :multiplicity 1})},
+ :history ({:mutate :add-place, :place nil})}
+
+;;;==============================
+;;; "2017-05-03T16:18:27.739-00:00"
+;;;==============================
+
+Complete evaluation of a 100-individual population with read-a-pop through
+to steady state properties in about 1 minute.
+
+I'm working through problems with the mutatation operators.
+If debug stepping doesn't work, I'm considering using the names rather than keywords!
+
+(defn initial-pop [problem]
+  (let [edens (eden-pns problem)
+        fresh-eden (fn [] (map->Inv {:pn (nth edens (rand-int (count edens))) :history []}))
+        start-time (System/currentTimeMillis)]
+    (reset! +old-pop+ [])
+    (let [pns 
+          (loop [popu [],
+                 inv (fresh-eden),
+                 mute-cnt 0,
+                 try 0]
+            (when (and (:debugging? +gp-params+) (> (count popu) (count @+old-pop+)))
+              (swap! +old-pop+ conj (last popu))
+              (println "\nPopulation count:" (count popu))
+              (println "Individual-size (M2Mp):" (count (:M2Mp (last popu))))
+              (println "Time:" (int (/ (- (System/currentTimeMillis) start-time) 1000))))
+            (cond (> try 2000) (throw (ex-info "initial-pop tries" {:individual-cnt (count popu)})),
+                  (>= (count popu) (:pop-size +gp-params+)) popu, ; POD maybe crossover too?
+                  :else (let [m-inv (assoc inv :pn (reduce (fn [i _]
+                                                             (mutate i :pick-fn #(rand-mute-key (:eden-dist +gp-params+))))
+                                                           inv (range 5)))]
+                          (cond (:failure m-inv)
+                                (do (log {:mutate-fails :initial-pop :method (:history m-inv)})
+                                    (if (< mute-cnt 2) ; POD 2 should be a +gp-params+
+                                      (recur popu (fresh-eden) 0 (inc try)) ; start over
+                                      (recur (conj popu inv) (fresh-eden) 0 (inc try)))) ; last one is good enough
+                                (= (:initial-mutations +gp-params+) mute-cnt) ; complete success
+                                (recur (conj popu m-inv) (fresh-eden) 0 (inc try))
+                                :else ; continue mutating
+                                (recur popu m-inv (inc mute-cnt) (inc try))))))]
+      (map #(->Inv {:pn %1 :id %2 :history []})
+           pns (range (count pns))))))
+
+
+(:pn (nth @+pop+ 1)) has just one state.
+
+Fourth one doesn't get through pn analysis. Now named 2017-05-03.xml  It doesn't get through PIPE analysis either!
+In both tools it just sits there.
+
+;;;==================================
+;;; "2017-05-04T13:23:28.712-00:00"
+;;;==================================
+
+The problems above were because it wasn't k-bounded and (1) as-pn-ok-> was wrong !! and (2) in-loop-checks
+wasn't hooked in correctly.
+
+;;;==================================
+;;; "2017-05-05T23:25:02.172-00:00"
+;;;==================================
+
+There are 4500 states with 9748 arcs. The graph is too big to be displayed properly
+The name of the file is data/2017-05-05.xml. I reset the number max-rs to 1000.
+1000 takes 19.5 seconds to compute. But it stopped for not being k-bounded. So nothing makes sense. 
+
+4 out of the first 5, [0 1 3 4] are not k-bounded. Inv 2 has a null reachability graph.
+
+I'm going to have to score the unbounded one based on some criteria!
+I'm going to have to use parts of the unbounded ones based on some criteria!
+Need to research how others did this. There was some researcher looking at 'parts that performed well'
+
+Essentially, I might look at what place is unbounded and depending on its relationship
+with others 
+
+Inv 5 just sits there. I have no idea what it is doing.
+data/2017-05-05-five.xml THIS IS NOT K-BOUNDED! What gives? .... Well, it is basically has
+three active places and it thows tokens into one of them. Given that this is a vanishing state,
+it is not getting picked up. 
+
+
+;;;================================
+;;; "2017-05-10T17:48:46.081-00:00"
+;;;================================
+
+I wrote a PN viewer over the past few days. It should help with debugging and demos.
+Today I finish that up and then start on the CT viewpoint. 
+
+
+No matter what, bkey = :buffer which is the last thing in the positions.
+
+This is why I don't get anything done! (Don't use case this way.)
+
+               (case min?
+                 delem  (-> arg (assoc 0 key) (assoc 1 min?) (assoc 2 false))
+                 dlabel (-> arg (assoc 0 key) (assoc 1 min?) (assoc 2 true))
+                 arg))))
+
+;;;================================
+;;; "2017-06-05T14:16:15.296-00:00"
+;;;================================
+
+Today I start a fitness function for SCADA data. Here is the entire idea:
+
+1) SCADA data provides behaviors. 
+2) Generated PN is a GSPN model of system (provides structure, parameters)
+3) GSPN can be folded into a CGSPN / QPN and mapped to MJPdes
+4) The MJPdes can be mapped to optimization problems (sequencing and line balancing)
+
+The ultimate model will have feeder lines, various buffer disciplines, various blocking disciplines,
+various notions of starvation.
+
+;;;----
+
+What does the data suggest for visible components? There should be a methodology (and tool)
+for generating these.
+
+(def +problem+
+  {:visible-places [:m1-blocked :m1-busy :m2-busy :m2-starved :buffer]
+   :visible-transitions [:m1-finished :m2-finished]
+
+There is, of course, just one :st and one :bl message but in general :st and :bl for both (looking at model f0).
+In actuality, there is no reason for m1-starved nor any reason for m2-blocked. These never happen.
+I think I'll keep these as visible and just let it happen. Post-processing can remove them.
+The alternative is to back down on the visible / hidden idea. 
+
+
+(def f0
+  (map->Model
+   {:line 
+    {:m1 (map->ExpoMachine {:lambda 0.1 :mu 0.9 :W 1.0}) 
+     :b1 (map->Buffer {:N 3})
+     :m2 (map->ExpoMachine {:lambda 0.1 :mu 0.9 :W 1.0})}
+    :number-of-simulations 1
+    :topology [:m1 :b1 :m2]
+    :entry-point :m1
+    :params {:warm-up-time 2000 :run-to-time 10000} ; Was 20000 on training.
+    :jobmix {:jobType1 (map->JobType {:portion 1.0 :w {:m1 1.0, :m2 1.1}})}}))
+
+
+The problem is that in MJP, :bl and :st are aggregate quantities over all the job types.
+It is the machine that starves. This needs more thought, and therefore I'm not aiming for MJP yet.
+First problem will continue to be m2-
+
+???--> Q: What is to prevent infinite buffer sizes?
+       A: In reality, blocking prevents this. But how do I make this happen? Causal knowledge?
+
+
+;;; :aj - (add-job <job-num> <job-type>)
+;;; :ej - (exit-job <job-num> <entry-time>)
+;;; :bj - (buffer-job <job-num> <buffer-num> <buffer-size-before-action>)
+;;; :sm - start job on machine 
+;;; :bl - blocked
+;;; :ub - unblocked
+;;; :st - starved
+;;; :us - unstarved
+
+---> Fix :ej Why does it specify the machine?
+---> Fix :sm Why is it specifying the buffer rather than the machine (won't be good with feeders)
+---> There is some useless stuff in this data (e.g. instant blocking and unblocking)
+??? But don't fix these, because this is what you are given ???
+
+  {:visible-places [:m1-blocked :m1-busy :m2-busy :m2-starved :buffer]
+   :visible-transitions [:m1-finished :m2-finished]
+
+It seems to me that the fastest way to an answer with this data is to follow a
+job (coloured token) through it.
+
+f0: 
+   {:act :aj, :j 1602, :jt :jobType1, :ends 2001.5882553364702, :clk 2000.5882553364702}
+   {:act :bj, :bf :b1, :j 1602, :n 2, :clk 2001.68825533647}
+   {:act :sm, :bf :b1, :j 1602, :n 3, :clk 2004.9882553364698}
+   {:act :ej, :m :m2, :j 1602, :ent 2000.5882553364702, :clk 2006.0882553364697}
+   
+(:m1) ==> :b1 ==> :m2 ==> (out)
+
+Capturing topology is easy with jobs that have IDs. What isn't so easy is capturing
+  - states (starving, blocking) and their probability
+  - synchronization logic (BBS, BAS)                    -- SIMPLE STRUCTURAL DIFFERENCE, YET HARD TO DETECTED
+  - synchronization of feeder lines
+
+The difference between BAS and BBS is:
+  - BBS has an inhibitor of N - 1 from buffer to start job; BAS same but N. 
+  - arc from job completion to buffer in BBS; arc from unblocked to buffer in BAS.
+
+===> Q: In terms of behavior, what is the difference between BBS with N-1 and BAS with N:
+     A: Nothing when N > 1. So just keep N = 1. 
+     The only difference at any N is that BAS can be BUSY with a fully occupied BUFFER while BBS cannot.
+     It looks like a pissing contest everywhere, but especially with N > 1. 
+     It is a matter of the reachability graph.
+
+HOW DOES IT WORK?
+  --> Have individuals generate SCADA event messages. Compare it to "real" SCADA event messages.
+      The neat thing about this is that it wouldn't be tied to a line topology, could do job shop etc. 
+      This gets past the argument that finding the topology is simple!
+      I think this requires some mix of CGSPN and QPN.
+
+There remains the issue that topology is too easy to identify and the rest too trivial.
+Regarding the former, it might be worthwhile to start with a guess at topology in the Eden individual.
+Regarding the latter, there is still the issues of:
+  (1) identifying concurrency / buffering discipline etc.                     in GP
+  (2) splitting into job types,                                               in GP
+  (3) refolding into typed model,                                             later
+  (4) specifying the real-valued parameters and stochastic variables.         later/GP
+  (5) comparing with knowledge of steady-state                                in GP, related to (4)
+  (6) mapping to optimizations (1/2 of the thesis, right?)                    later
+
+HOW TO SPECIFY A PROBLEM:
+ - A job can be followed through a collection of messages, identifying events (transitions), but not the
+   interleaved places.
+ - Suggest that the transitions are exactly those. In below it is:  
+       :aj :bj :sm :ej
+    - 4 is correct and they match up nicely to the m2 PNs.
+    - This pattern suggests that EVERY MESSAGE NAMING A JOB REFERS TO AN ACTION/CHANGE OF STATUS ON THAT JOB.
+    - The other four, which don't mention a job, are assumed to be state of the system:
+      :bl :ub :st :us These don't match places. The places are m1-busy, m2-busy, m1-blocked and m2-starved
+      There are do/undo for these states. There is also a buffer.
+
+
+:bl :st and buffer occupancy are measured quantities (as would be throughput, unfortunately).
+Before we had:
+
+(def +problem+
+  {:visible-places [:m1-blocked :m1-busy :m2-busy :m2-starved :buffer] <--- measured quantities
+   :visible-transitions [:m1-finished :m2-finished] <--- events on jobs
+
+Maybe we just decide that the user declares some measured quantities and
+bounds on those and we start by associating places with them. The causal diagram in .ppt
+might provides something useful too.
+
+
+STUFF THAT NEEDS TO BE DONE:
+ - spntools needs a simulation capability
+ - spntools needs QPN- and CGSPN-like capabilities.
+ - sinet needs a new fitness function, -- lots to this.
+ - sinet needs a new Eden individual (stub it in to a constant)
+ - sinet needs more genetic operators (eventually)
+
+SINET FITNESS FUNCTION
+ - It might be reasonable to not just compare logs but also make note of concurrency
+   so as to reason what could be next. This is essentially an analysis of the
+   reachability graph. 
+
+    
+f0: 
+   {:act :aj, :j 1602, :jt :jobType1, :ends 2001.5882553364702, :clk 2000.5882553364702}
+   {:act :ej, :m :m2, :j 1598, :ent 1995.3679041519729, :clk 2001.68825533647}
+   {:act :sm, :bf :b1, :j 1599, :n 3, :clk 2001.68825533647}
+   {:act :bl, :m :m1, :clk 2001.68825533647}
+   {:act :bj, :bf :b1, :j 1602, :n 2, :clk 2001.68825533647}
+   {:act :ub, :m :m1, :clk 2001.68825533647}
+   {:act :aj, :j 1603, :jt :jobType1, :ends 2002.68825533647, :clk 2001.68825533647}
+   {:act :ej, :m :m2, :j 1599, :ent 1996.4679041519728, :clk 2002.78825533647}
+   {:act :sm, :bf :b1, :j 1600, :n 3, :clk 2002.78825533647}
+   {:act :bl, :m :m1, :clk 2002.78825533647}
+   {:act :bj, :bf :b1, :j 1603, :n 2, :clk 2002.78825533647}
+   {:act :ub, :m :m1, :clk 2002.78825533647}
+   {:act :aj, :j 1604, :jt :jobType1, :ends 2003.9298210860297, :clk 2002.78825533647}
+   {:act :ej, :m :m2, :j 1600, :ent 1997.5679041519727, :clk 2003.88825533647}
+   {:act :sm, :bf :b1, :j 1601, :n 3, :clk 2003.88825533647}
+   {:act :bj, :bf :b1, :j 1604, :n 2, :clk 2003.9298210860297}
+   {:act :aj, :j 1605, :jt :jobType1, :ends 2004.9298210860297, :clk 2003.9298210860297}
+   {:act :ej, :m :m2, :j 1601, :ent 1999.4882553364703, :clk 2004.9882553364698}
+   {:act :sm, :bf :b1, :j 1602, :n 3, :clk 2004.9882553364698}
+   {:act :bl, :m :m1, :clk 2004.9882553364698}
+   {:act :bj, :bf :b1, :j 1605, :n 2, :clk 2004.9882553364698}
+   {:act :ub, :m :m1, :clk 2004.9882553364698}
+   {:act :aj, :j 1606, :jt :jobType1, :ends 2005.9882553364698, :clk 2004.9882553364698}
+   {:act :ej, :m :m2, :j 1602, :ent 2000.5882553364702, :clk 2006.0882553364697}
+   
+;;;=================================
+;;; "2017-06-08T22:23:50.984-00:00"
+;;;=================================
+
+Regarding the PN-side of things, I have QPN/SCADA working. (It took just 8 hours of programming!)
+I do not yet have MJP though. MJP will require a colourized next-link. Also on the ToDO list is
+unfolding of GSPNs. 
+
+The Holy Grail now is bifurcation of job types. But before I do that, I'm going to get 
+m2-bas working with SCADA (perfectly) including estimating rates.
+
+There is going to have to be some sort of mapping language between QPN output and SCADA output.
+I'll start with this. 
+
+;;;=================================
+;;; "2017-06-10T21:02:18.631-00:00"
+;;;=================================
+
+Need a "mapping language" or correspondences between QPN output and SCADA (MJPdes) output.
+
+METHODOLOGY
+The task of GP is to interpret a log of SCADA messages as behaviours of a QPN.
+(i.e. as transitions firing and movement of tokens into/outof places).
+
+The following is a methodology for specifying an interpretation problem to the GP system.
+
+STEP 1: Obtain a log of SCADA messages from the system under study:
+
+Here is some of the log from the system we are studying:
+  [{:act :ej, :m :m2, :j 1597, :ent 1994.267904151973, :clk 2000.5882553364702}
+   {:act :sm, :bf :b1, :j 1598, :n 3, :clk 2000.5882553364702}
+   {:act :bl, :m :m1, :clk 2000.5882553364702}
+   {:act :bj, :bf :b1, :j 1601, :n 2, :clk 2000.5882553364702}
+   {:act :ub, :m :m1, :clk 2000.5882553364702} ...]
+
+STEP 2: Enumerate the various message types encountered:
+        8 types of SCADA messages from this particular system are: (:aj :ej :bj :sm :bl :ub :st :us)
+
+STEP 3: Describe the fields of these messages using the grammar, which identifies POS. 
+	
+ :aj -- start job message type,
+ Example: {:act :aj, :j 1602, :jt :jobType1, :ends 2001.5882553364702, :clk 2000.5882553364702}
+ {:act <message-type= :sj> :j <job-id> :jt <job type> :ends <timept> :clk <timept of occurrence>}
+
+ :ej -- end job message type
+ Example: {:act :ej, :m :m2, :j 1597, :ent 1994.267904151973, :clk 2000.5882553364702}
+ {:act <message-type= :ej> :j <job-id> :ent <timept> :clk <timept of occurrence>}
+
+ :sm -- move job from buffer
+ Example: {:act :sm, :bf :b1, :j 1598, :n 3, :clk 2000.5882553364702}
+ <:act <message-type= :sm> :bf <buffer-id> :j <job-id> :n <size of buffer before occurrence> :clk <timept of occurrence>}
+
+ :bj -- move job to buffer
+ Example: {:act :bj, :bf :b1, :j 1601, :n 2, :clk 2000.5882553364702}
+ <:act <message-type= :bj> :bf <buffer-id> :j <job-id> :n <size of buffer before occurrence> :clk <timept of occurrence>}
+ 
+ :bl -- machine is blocked
+ :example {:act :bl, :m :m1, :clk 2000.5882553364702}
+  <:act <message-type= :bl> :m <machine-id> :clk <timept of occurrence>}
+
+ :ub -- machine is unblocked
+ :example {:act :ub, :m :m1, :clk 2000.5882553364702}
+  <:act <message-type= :bl> :m <machine-id> :clk <timept of occurrence>}
+
+ :st -- machine is starved
+ :example {:act :st, :m :m1, :clk 2000.5882553364702}
+  <:act <message-type= :st> :m <machine-id> :clk <timept of occurrence>}
+
+ :us -- machine is unstarved
+ :example {:act :ub, :m :m1, :clk 2000.5882553364702}
+  <:act <message-type= :us> :m <machine-id> :clk <timept of occurrence>}
+
+STEP 4: Set up GP. 
+
+As it turns out, the best interpretation associates :bj :sj, :ej and :sm with transitions like this:
+    [{:name :m1-complete-job, :tid 6, :type :exponential, :rate 3.9 :fn (fn [tkns] {:act :bj :tkns tkns})}
+     {:name :m1-start-job, :tid 7, :type :immediate, :rate 1.0      :fn (fn [tkns] {:act :aj :tkns tkns})}
+     {:name :m2-complete-job, :tid 8, :type :exponential, :rate 1.0 :fn (fn [tkns] {:act :ej :tkns tkns})}
+     {:name :m2-start-job, :tid 9, :type :immediate, :rate 1.0      :fn (fn [tkns] {:act :sm :tkns tkns})}],
+
+;;; These wouldn't have such fancy names, except 
+    [{:name :m1-complete-job, :tid 6, :type :exponential, :rate 3.9 :fn (fn [tkns] {:act :bj :tkns tkns})}
+     {:name :m1-start-job, :tid 7, :type :immediate, :rate 1.0      :fn (fn [tkns] {:act :aj :tkns tkns})}
+     {:name :m2-complete-job, :tid 8, :type :exponential, :rate 1.0 :fn (fn [tkns] {:act :ej :tkns tkns})}
+     {:name :m2-start-job, :tid 9, :type :immediate, :rate 1.0      :fn (fn [tkns] {:act :sm :tkns tkns})}],
+
+
+The other four message types (:bl :ub :st :us) could associate with tokens moving in and
+m1-blocked, :m2-starved. The easiest situation would be that those are about visible places
+being occupied. Starved is easy enough, but blocked depends on the buffer size.
+I think these naturally apply to places, but it might be interesting to consider
+situations where the relationship between the events and places isn't easy. In these
+situations there is a notion of "hypothesis" or "conceptual design" reflected in the
+relationship.
+
+
+QPN output looks like this:
+   {:act :ej, :tkns [{:type :a, :id 11}]} <-- USED
+   {:on-act :m2-complete-job, :tkn {:type :a, :id 11}, :motion :move, :from :m2-busy, :to :m2-starved}
+   {:act :sm, :tkns [{:type :a, :id 12}]}
+   {:on-act :m2-start-job, :tkn {:type :a, :id 11}, :motion :remove} <-- Part of :ej pattern 
+   {:on-act :m2-start-job, :tkn {:type :a, :id 12}, :motion :move, :from :buffer, :to :m2-busy}
+   {:act :aj, :tkns [{:type :a, :id 18} {:type :a, :id 17}]} <-- USED
+   {:on-act :m1-start-job, :tkn {:type :a, :id 18}, :motion :add}
+   {:on-act :m1-start-job, :tkn {:type :a, :id 17}, :motion :move, :from :m1-blocked, :to :buffer}
+   {:act :bj, :tkns [{:type :a, :id 18}]}
+   {:act :ej, :tkns [{:type :a, :id 13}]} <-- USED -- Note that this and next are in less than ideal order
+   {:on-act :m2-complete-job, :tkn {:type :a, :id 13}, :motion :move, :from :m2-busy, :to :m2-starved}
+
+Correspondences:
+  QPN.tkn.id  *= SCADA.j (congruence)
+  QPN.act(:aj) = SCADA.act(:aj)
+  QPN.act(:ej) = SCADA.act(:ej)
+  QPN.act(:bj) = 
+
+;;;================================
+;;; "2017-06-11T14:51:08.922-00:00"
+;;;================================
+
+First pass through, no grammar, just calculation. fitness.clj
+
+;;;================================
+;;; "2017-06-12T20:41:39.832-00:00"
+;;;================================
+
+
+(defn qpn-all-job-ids
+  "Return a vector of all job-ids found in the data"
+  [data]
+  (sort (distinct (mapcat (fn [msg]
+                            (cond (contains? msg :act) (map :id (:tkns msg))
+                                  (contains? msg :on-act) (vector (-> msg :tkn :id))
+                                  :else nil))
+                           data))))
+...vexing
+
+;;;================================
+;;; "2017-06-15T17:48:35.527-00:00"
+;;;================================
+
+For the time being, steady-state calculations are on hold. Once I get disorder integrated, I should consider
+doing simulations with the PN. This, of course, means mapping the PNs to MJPdes models.
+So I'm not hot on it. (Oh if DSPNs weren't so arduous to implement and limited in ability!)
+
+I am now allowing problems that aren't just serial lines. They would have feeder lines.
+Feeder lines buffering can be exponential; treat them as delivering parts to a buffer at a certain rate. 
+I wrote spntools/data/m3-feeder.xml. PIPE chokes on it. It is worth seeing whether my tools handle it....
+...Mine works. Theirs shows a state with no exit. They have other problems documented in the .xml file. 
+
+;;;.......Back to the regularly scheduled program.
+For the small test case I'm using, 300 simulation steps is plenty.
+I'm now trying to integrate the "disorder" measurement into GP.
+Picking up with this thought from a few days back:
+
+Q: Do I keep the visible/hidden idea? The problem is that it is hard to see the difference between
+   an "event" and a "condition" in the log. I would like "busy" "blocked" and "starved" to be conditions.
+   These come about because of some work finishing. I am presuming that they are boolean values
+   represented by a single place (presence/absence of a token). 
+
+A: At least for the time being,  I'll make this distinction. Thus we have the following
+   visible entities (m2-inhib-bas):
+
+These are visible places:
+  - buffer               --- I don't know how any buffer would be known!
+  - m1-busy              --- These 4 our conditions
+  - m2-busy
+  - m1-blocked
+  - m2-starved
+
+These are visible events:
+  - m1-start-job
+  - m1-complete-job
+  - m2-start-job
+  - m2-complete-job
+
+THUS EVERYTHING NEEDED IS VISIBLE (TOO EASY!) But since there isn't any good reason to
+descriminate events versus conditions, and almost no evidence of buffers, the assertion
+of these events and places has to go away soon. 
+
+;;; The GP should have mutations to change transitions to places (though that is going to be arduous).
+;;; It seems to me that some of these could, in simulation, report on buffer occupancy.
+
+;;;================================
+;;; "2017-06-16T14:38:06.354-00:00"
+;;;================================
+
+[Picking up with "Too Easy!"]...
+...And the larger issue of events vs. conditions is an interesting problem.
+Can I write some of these problem without, for example, blocking places?
+At least m2-inhib-bas cannot be simplified. Maybe the thing to look for is an interesting
+condition (something that would be reasonably reported in SCADA) that corresponds
+to something expressed in the configuration. Maybe a repair procedure that puts
+a part back in the line at an earlier position. "Buffer empty" ...<more?>
+
+So the plan:
+ 1) Debug with complete and accurate specification of places and transitions. (achievable with current code, almost)
+ 2) Remove the stipulation that we know which is which.
+ 3) Develop genetic operators/fitness that exhibit locality and continuity.
+     a) Consider how the dimensions of the fitness value can be dynamically rebalanced as things improve. 
+ 4) Experiment with MJP and job shop routing. 
+ 5) Look into conditions that correspond to configurations of the net, possibly using ANNs.
+
+Start writing at (2).
+
+The principal problems with this is that it required steady-state-props or the score was uniformly 9999999.9
+Thus there was no hill to climb; it was just generate-and-test. We need a hill! I THINK we can run the
+simulation even before doing reachabilty analysis.
+
+The other thing to change is the eden-individual. It need not even look at reachability. 
+
+;;;================================
+;;; "2017-06-17T12:38:20.718-00:00"
+;;;================================
+
+Saturday, start of annual leave!
+
+Do I have things backwards? Should I create patterns for QPN and test those against an unanalyzed SCADA log.... nope. 
+
+I now have fitness in shape ;^). I think I was on the right track a few days ago when I suggested that
+there should be a grammar for messages. Right now, before I even have run the GP, I have visible
+transitions and places. THE REAL WORK OF THIS PROJECT is, given only a SCADA log and its grammar, to figure out what
+is an event, what is an "atomic" condition, and what is a "conjunctive condition."
+
+...But for the time being, I'm going to push on with visible places and transitions.
+
+Here is old stuff I'm not sure I'm going to use. I lieu of this I could let eden-individuals pump out
+individuals with names from the message types. 
+
+;;; SCADA ==============================================================================================
+
+;;; The assumption behind scada-events and scada-conditions ("states" ?) is that s-e report on actions
+;;; on jobs and all the other messsages concern the state of some element of the production system, thus s-s
+;;; The GP should have mutations to change transitions to places (though that is going to be arduous). 
+
+;;; It seems to me that some of these could, in simulation, report on buffer occupancy.
+(defn scada-events
+  "Suggest a set of events that will be the visible transitions. 
+   For each of these create a message generator."
+  [log]
+  (let [events (reduce (fn [events msg]
+                         (if (contains? msg :j)
+                           (conj events (:act msg))
+                           events))
+                       #{} log)]
+    (zipmap
+     (map identity events)
+     (map #(fn [j] {:act % :j j}) events))))
+
+(defn scada-states
+  "Suggest messages that will be visible places."
+  [log]
+  (let [places (reduce (fn [places msg]
+                         (if (not (contains? msg :j))
+                           (conj places (:act msg))
+                           places))
+                       #{} log)]
+    (zipmap
+     (map identity places)
+     (map #(fn [j] {:act % }) places))))
+
+(def +scada-log+
+  "a log of events redefined elsewhere"
+  nil)
+
+(def +event-fns+
+  "a map keyed by event type name; value is a fn of one argument (job id) producing a message"
+  (scada-events +scada-log+))
+
+;;;================================
+;;; "2017-06-18T15:09:25.807-00:00"
+;;;================================
+
+Spent to 4PM trying to get basic Sente working inside my project.
+The problem was that there should be a link to main.js in resources/public.
+
+It seems to get hung-up when I add <canvas>best-pn</canvas>. ....wrong. Where <script> and <canvas> are placed???
+The <script> has be at the bottom of the .html.
+
+It runs the quil PN just fine when the sente stuff is removed.
+(It is not enough to just not call start! (it seems to get started regardless).
+
+Even having the namespaces in the draw file is too much!
+
+Ugh! Still had draw.cljs in src/draw.cljs ... Probably wrong about a problem with start! commented out.
+
+It runs quil with all the sente code loaded, just don't do start!
+
+Now I'm confused "in the other direction." I have defsketch commented out and it is still being displayed.
+...but the sente code isn't re
+
+----> Another one in src/draw.cljs ..... Who is doing this?
+
+-----------------------
+FIGWHEEL
+ - :optimization :whitespace -- it doesn't like this
+ - lein start-repl -- Waits for cider-connect (then what)
+
+
+Then do this https://github.com/bhauman/lein-figwheel/wiki/Using-the-Figwheel-REPL-within-NRepl
+Is that really what I want? "A repl within nrepl"???
+
+I was missing the start line!
+
+;;; The client repl 
+lein start-repl
+cider-connect
+(use 'figwheel-sidecar.repl-api)
+(start-figwheel!)
+(cljs-repl) -- At this point you have a REPL into clojurescript. 
+
+;;; The server repl
+cider-connect
+(start!) 
+
+;;; You can pass a configuration straight into the figwheel-sidecar.repl-api/start-figwheel! function if you prefer:
+(def figwheel-config 
+      {:figwheel-options {}
+       :build-ids [:cljs-client]
+       :all-builds
+       [{:id :cljs-client
+         :figwheel true
+         :source-paths ["src"]
+         :compiler {:main "gov.nist.sinet.util.client"
+                    :asset-path "js/out"
+                    :output-to  "resources/public/js/main.js"
+                    :output-dir "resources/public/js/out" 
+                    :optimizations :none 
+                    :pretty-print true}}]})
+
+;;;=======================================
+;;; "2017-06-20T18:00:57.603-00:00"
+;;;=======================================
+
+I am trying to get drawing to update.
+
+*figwheel* REPL works:
+(gov.nist.sinet.util.client/->output! "hear this?") from the *figwheel* repl and it shows up in the console.
+
+(So shouldn't setting draw/+display-pn+ also work?)
+
+It looks like client doesn't see things in draw. It doesn't handle namespace aliases ???
+
+And also   (.addEventListener target-el "click"
+does so multiply.
+
+Something like this might work.
+(g-events/removeAll (.getElementById js/document "btn2") "click")
+But better is to just reload the page.
+
+I can set +display-pn+ by hand. I cannot get a button of call from the server to set it.
+This true even after using fq namespaces.
+
+(defn server>user-push-pn
+  "Push Petri net (with its geometry) to the user "
+  [pn]
+  (doseq [uid (:any @connected-uids)]
+    (chsk-send! uid [:sinet/new-pn pn])))
+
+(:any @connected-uids) returns #{} !!!
+
+I spent the first part of the day on a simple error with as->. I spend the second half
+of the day forgetting that swap! takes a function!!!
+
+;;;==================================
+;;;  "2017-06-21T16:07:06.773-00:00"
+;;;==================================
+
+I am back on connecting up the CQPN GP.
+
+Having a little problem with sente dropping a uid. (-> @connected-uids :ws first)
+Might have somthing to do with :ws-kalive-ms  (though the value is in seconds, not msec).
+https://github.com/ptaoussanis/sente/issues/259
+
+Right now it is okay. When it drops, you can in the "Reconnect" button. 
+
+Need a way to send server messages to the console, BTW.
+
+---> I think the way to get this to interact correctly is to push messages from
+the server about events (such as "new generation") and let the client GET whatever
+it wants. 
+
+Almost! For a moment, "View Pop +" was returning something {:geom  nil} or some such thing.
+Now we are back to timing out. 
+
+---> I can had reset! +display-pn+ and get a picture, so things aren't entirely hosed.
+     Don't even need FQ ns for draw.
+
+{:places [{:name :m2-starved, :pid 6, :initial-tokens 1, :visible? true} {:name :m2-busy, :pid 7, :initial-tokens 0, :visible? true} {:name :m1-busy, :pid 8, :initial-tokens 0, :visible? true} {:name :m1-blocked, :pid 9, :initial-tokens 0, :visible? true} {:name :buffer, :pid 10, :initial-tokens 0, :visible? true} {:name :Place-12, :pid 12, :initial-tokens 0}], :transitions [{:name :m1-complete-job, :tid 6, :type :exponential, :rate 1.0, :visible? true} {:name :m1-start-job, :tid 7, :type :exponential, :rate 1.0, :visible? true} {:name :m2-complete-job, :tid 8, :type :exponential, :rate 1.0, :visible? true} {:name :m2-start-job, :tid 9, :type :exponential, :rate 1.0, :visible? true} {:name :tadd-1, :tid 10, :type :immediate, :rate 1.0} {:name :Trans-12, :tid 12, :type :immediate, :rate 1.0}], :arcs [{:aid 11, :source :m1-busy, :target :m1-complete-job, :name :aa-11, :type :normal, :multiplicity 1} {:aid 12, :source :m1-complete-job, :target :m2-busy, :name :aa-12, :type :normal, :multiplicity 1} {:aid 13, :source :m2-busy, :target :m1-start-job, :name :aa-13, :type :normal, :multiplicity 1} {:aid 14, :source :m1-start-job, :target :m2-starved, :name :aa-14, :type :normal, :multiplicity 1} {:aid 15, :source :m2-starved, :target :m2-complete-job, :name :aa-15, :type :normal, :multiplicity 1} {:aid 16, :source :m2-complete-job, :target :m1-blocked, :name :aa-16, :type :normal, :multiplicity 1} {:aid 17, :source :m1-blocked, :target :m2-start-job, :name :aa-17, :type :normal, :multiplicity 1} {:aid 18, :source :m2-start-job, :target :buffer, :name :aa-18, :type :normal, :multiplicity 1} {:aid 19, :source :buffer, :target :tadd-1, :name :aa-19, :type :normal, :multiplicity 1} {:aid 20, :source :tadd-1, :target :m1-busy, :name :aa-20, :type :normal, :multiplicity 1} {:aid 26, :source :m2-starved, :target :Trans-12, :name :aa-26, :type :normal, :multiplicity 1} {:aid 27, :source :Trans-12, :target :m1-blocked, :name :aa-27, :type :normal, :multiplicity 1} {:aid 28, :source :m2-starved, :target :m1-start-job, :name :aa-28, :type :inhibitor, :multiplicity 1} {:aid 29, :source :Trans-12, :target :Place-12, :name :aa-29, :type :normal, :multiplicity 1} {:aid 30, :source :Place-12, :target :tadd-1, :name :aa-30, :type :normal, :multiplicity 1} {:aid 31, :source :buffer, :target :m1-start-job, :name :aa-31, :type :inhibitor, :multiplicity 1}], :geom {:m1-complete-job {:x 444, :y 387, :label-x-off 13, :label-y-off 19}, :m2-starved {:x 484, :y 263, :label-x-off 13, :label-y-off 19}, :tadd-1 {:x 444, :y 139, :label-x-off 13, :label-y-off 19}, :m1-start-job {:x 208, :y 463, :label-x-off 13, :label-y-off 19}, :m1-busy {:x 103, :y 387, :label-x-off 13, :label-y-off 19}, :m1-blocked {:x 103, :y 139, :label-x-off 13, :label-y-off 19}, :m2-start-job {:x 208, :y 63, :label-x-off 13, :label-y-off 19}, :m2-busy {:x 339, :y 463, :label-x-off 13, :label-y-off 19}, :buffer {:x 339, :y 63, :label-x-off 13, :label-y-off 19}, :m2-complete-job {:x 63, :y 263, :label-x-off 13, :label-y-off 19}}}
+
+======> HERE IS THE PROBLEM!!! Many changes to the SERVER are not seen unless you restart!
+This might be due to the way he define defmulti, etc.
+
+Another problem, the server is being loaded as cljs!!!!
+
+Compiling ClojureScript...
+#error {
+ :cause No namespace: gov.nist.sinet.core found
+ :via
+ [{:type clojure.lang.Compiler$CompilerException
+   :message java.lang.Exception: No namespace: gov.nist.sinet.core found, compiling:(gov/nist/sinet/util/server.clj:19:1)
+   :at [clojure.lang.Compiler load Compiler.java 7391]}
+  {:type java.lang.Exception
+   :message No namespace: gov.nist.sinet.core found
+   :at [clojure.core$the_ns invokeStatic core.clj 4032]}]
+
+I'll try a cljs directory...
+
+Now it looks like this:
+
+Compiling ClojureScript...
+Compiling "resources/public/js/main.js" from ["src/cljs"]...
+Successfully compiled "resources/public/js/main.js" in 8.085 seconds.  <============================================
+#error {
+ :cause Could not locate sinet/clj/util/server__init.class or sinet/clj/util/server.clj on classpath.
+ :via
+
+;;;================================
+;;; "2017-06-22T15:05:37.236-00:00"
+;;;================================
+
+The weirdest thing: I couldn't get things to compile, saying that there was no such
+namespace as gov.nist.spntools.util.utils. I *guessed* that maybe I should use
+#?(:clj on the macros in that file. WHY? It is just compiled as clojure. Nonetheless,
+that seems to have fixed it. 
+
+pop+ button was clicked (get-individual-plus)
+Received this: {:pn {:geom {}}}
+
+That is what I get before I load the server.
+
+The server gets the message (as has been the case for a day now)
+17-06-22 15:18:59 P646746 INFO [gov.nist.sinet.util.server:152] - Send individual {:id 3}
+but its response is not received by the client
+
+After I change the client pop- to some undefined message type :foo-get-individual, the server
+responds with this:
+
+17-06-22 15:25:22 P646746 ERROR [taoensso.sente:1549] - Chsk router `event-msg-handler` error: [:draw/get-individual {:id -2}]
+... and a stack trace.
+
+making me think that I still need to restart the server often. (There should be no :draw/get-individual but one executed,
+and why it chose this is beyond me.
+
+dispatch, event id =  :chsk/uidport-open   huh?
+
+When I restart, I get the same thing. Maybe something is wrong on the client side???
+
+dispatch, event id =  :chsk/uidport-open
+17-06-22 15:49:53 P646746 DEBUG [gov.nist.sinet.util.server:165] - Unhandled event: [:chsk/uidport-open :taoensso.sente/nil-uid]
+
+I thought that somehow how I changed defmulti might have hosed things, but no. No matter what
+I do, it doesn't handle the :get-indivdual msg anymore. (This morning it at least reported as running it.)
+
+=====================> It doesn't like sending my Inv record type. It is fine with PNs. 
+=====================> I think you only have to start from scratch when you recompile the entire server. C-c C-k
+
+12:57: I am off and running!
+
+...but should I look at this?
+17-06-22 16:52:52 P646746 DEBUG [gov.nist.sinet.util.server:200] - Unhandled event: [:chsk/ws-ping]
+
+;;;================================
+;;; "2017-06-24T02:52:49.648-00:00"
+;;;================================
+
+I'm back! (From a one-day vacation doing quil / pn drawing).
+Now of course, I cannot see these PNs
+It has a PN but it doesn't have any :taken processing on it.
+
+The transitions need :fn (fn [tkns] {:act :bj :tkns tkns}). The :act should be the same as the name
+of the transition. These can be added on creation of individuals. 
+
+;;;================================
+;;; "2017-06-25T16:40:40.160-00:00"
+;;;================================
+
+If a PN doesn't add or remove jobs, its log is going to only show the one job bounding around.
+If it removes jobs but doesn't add any, it is going to be very short. In the former case,
+I think the best thing to do is find the cycle in that job, cut it to length, and test it.
+In the latter case, I think the best thing to do is similarly measure that one job. 
+
+NOTE FOR PAPERS: The "discontinuity of naive PN genetic operators" is the idea that a single
+such operator can have immense effect on the behavior of the PN. I am suggesting looking
+at the reachability graph as a better measure of fitness than strict "job queue" like behavior.
+Akin to comparing behavior to the reachability graph is this issue of getting only one job
+bouncing around, or going extinct after very few jobs. I need to write about this and also
+compare my process disorder measurement to what Alves de Medieros did. (Hmm... is that who
+I want? She didn't do GP. Maybe it doesn't matter.)
+
+
+;;;=================================
+;;; "2017-06-26T20:40:44.875-00:00"
+;;;=================================
+
+Why do the queues have :cnt in them, and why is there a place nil? 
+
+  :state
+  {:m2-starved [],
+   :m2-busy [],
+   :m1-busy [{:color :blue, :cnt 1, :id 4} {:color :blue, :cnt 0, :id 5}],
+   :m1-blocked [],
+   :buffer [],
+   :Place-11 [{:color :blue, :cnt 1, :id 3}],
+   nil ({:color :blue, :cnt 0, :id 2} {:type :a, :id 1})},
+  :old-state
+  {:m2-starved [],
+   :m2-busy [{:color :blue, :cnt 0, :id 2}],
+   :m1-busy [],
+   :m1-blocked [],
+   :buffer [],
+   :Place-11 [{:color :blue, :cnt 1, :id 3}],
+   nil ({:type :a, :id 1})}}}
+nil
+
+One generation takes 272 seconds with map. 88 seconds with pmap. 3 times speed up
+(I really think we have 4 cores, not 8!)
+
+Now to the problem of everything evaluating to a perfect score!
+
+
+iii has just two tasks :bj and :sm which happen in that order.
+Since :bj comes before :sm there is no violation. Since there are no
+other actions, there are no other violations!
+
+NOTE FOR PAPERS:
+
+???--> give one point for each missing act or give one point (or less?) for each relation that
+cannot be shown because of lack of data.
+
+I think giving 1 or even 0.5 points for not possessing the act necessary for the relation will
+really add up on large processes because there are many more precedence constraints on those
+(Think about a GM line of 200 machines). So FTTB I'm going with 1 point for missing the act. 
+For that matter, the QPN job could have MORE acts than the pattern!
+
+;;;===============================
+;;; "2017-06-27T21:31:50.990-00:00"
+;;;===============================
+ 
+I could waste more time trying to understand why I still can't display anything.
+The server gets the msg, the msg is routed to the client. The client times out.
+On an example method, it gets a response just fine. So I get it must be that the
+code running on that method doesn't work, right?
+
+After adding parameters for :max-steps and :max-job, things are much faster!
+I can usually find an answer in <30 seconds. When it can't find one, it is
+because all the individuals are low max-tkn. (about 4, those need a bigger demerit).
+
+The problem I thought was with elite, seems to be with scoring (running it multiple
+times results in different values), or disturbing the elite. There CAN be different
+values from different runs because of choice of paths.
+
+Generation: 7
+Population size: 100
+Total mutations: 1064
+Failed individuals: 0
+Elapsed time (secs): 19
+Best error: 1.045454545454545
+ID of best: 17
+     Median error: 1.933333333333333
+     Average PN size: 30.13
+======================
+Generation: 8
+Population size: 100
+Total mutations: 1227
+Failed individuals: 0
+Elapsed time (secs): 22
+Best error: 1.125
+ID of best: 17
+
+These numbers suggest that maybe I should up the number of steps
+
+(#Inv [id=17, err=  1.59]
+ #Inv [id=17, err=  1.46]
+ #Inv [id=17, err=  1.79]
+ #Inv [id=17, err=  1.30]
+ #Inv [id=17, err=  1.39]
+ #Inv [id=17, err=  1.44]
+ #Inv [id=17, err=  1.35]
+ #Inv [id=17, err=  1.50]
+ #Inv [id=17, err=  1.19]
+ #Inv [id=17, err=  1.50])
+
+The other thing to note is that the genetic operators aren't doing anything
+useful. It is also useful to look at the median error. High selection pressure
+probably has an effect there. It may be the case that I should add more
+mutation (back, I removed some) to the Eden individuals. 
+
+;;;================================
+;;; "2017-06-28T14:44:36.150-00:00"
+;;;================================
+
+Yesterday's difficulty with the cljs were due to the PNs now having :fn in them; these cannot be transmitted.
+
+;;;====================================
+;;;  "2017-06-29T19:59:01.361-00:00"
+;;;====================================
+
+I'm using reagent, but sente doesn't like using a file: protocol. Time to look at rente. 
+
+Ugh! It seems to be loading my src into the browser again! Fixed. 
+
+What is in the rente index.html looks a lot like what is in the client.js
+<script>goog.require("gov.nist.sinet.client");</script>');
+
+----Mine
+
+~/Documents/git/sinet > lein figwheel
+Figwheel: Cutting some fruit, just a sec ...
+Figwheel: Validating the configuration found in project.clj
+Figwheel: Configuration Valid :)
+Figwheel: Starting server at http://0.0.0.0:3449
+Figwheel: Watching build - client
+Compiling "resources/public/js/app.js" from ("src/gov/nist/sinet/client" "dev")...
+Successfully compiled "resources/public/js/app.js" in 1.507 seconds.
+Figwheel: Starting CSS Watcher for paths  ["resources/public/css"]
+
+--- His
+~/Documents/clojure/rente > lein figwheel
+Figwheel: Cutting some fruit, just a sec ...
+Figwheel: Validating the configuration found in project.clj
+Figwheel: Configuration Valid :)
+Figwheel: Starting server at http://0.0.0.0:3449
+Figwheel: Watching build - client
+Compiling "resources/public/js/app.js" from ("src/rente/client" "dev")...
+Successfully compiled "resources/public/js/app.js" in 1.173 seconds.
+Figwheel: Starting CSS Watcher for paths  ["resources/public/css"]
+
+--- Mine
+~/Documents/git/sinet > lein run
+Compiling ClojureScript...
+21:57:17.307 [main] DEBUG gov.nist.sinet.ws - WebSocket connection stopped
+21:57:17.315 [main] DEBUG gov.nist.sinet.ws - WebSocket connection started
+21:57:17.318 [main] DEBUG gov.nist.sinet.app - Application logic started
+21:57:17.319 [main] DEBUG gov.nist.sinet.server - HTTP server stopped
+21:57:17.349 [main] DEBUG gov.nist.sinet.server - HTTP server started
+21:57:17.350 [main] INFO gov.nist.sinet.run - rente started
+
+-- His
+2017-06-30T02:03:04,316Z [main] INFO  rente.run - rente started
+Unhandled event: %s [:chsk/uidport-open :taoensso.sente/nil-uid]
+
+;;;================================================
+;;;  "2017-07-04T00:11:46.391-00:00"
+;;;================================================
+
+I was screwing around with Bootstrap. Highlighting and color control doesn't work
+on the menu items at the top of the screen, however, there is some interesting stuff
+about radium (google it). But it doesn't work for me, perhaps because I don't have
+ordinary buttons when using Bootstrap
+
+ :style {:color "#fff" :hover {:color "#f4511e" :background-color "#fff"}}}
+OOPS It was that the stylesheet wasn't being picked up when I set it to
+<link rel="stylesheet" href="public/css/style.css"/>
+(Drop the "public" from the path and it works!)
+
+Now I'm back on trying to decode component. (The video is doesn't answer my question:
+How do you get at these so-called entry points?)
+
+I can at least do (component/start (ws/new-ws-connection)) by hand and get back an object
+that I think would work. It looks like user.clj user/start would set an object called
+user/system, but that crashes everything.
+
+run.clj:
+(defn -main [& args]
+  (let [config (config/get-config)]
+    (component/start (system config))
+    (log/info "Sinet started")))
+
+system.clj: -- This sets up the records like new-ws-connect, new-http-server and new-app.
+You'd write your own start and stop methods. I guess I would load +pop+ 
+(defn system [config]
+  (component/system-map
+   :ws-connection (ws/new-ws-connection)
+   :http-server (component/using (server/new-http-server (:port config)) [:ws-connection])
+   :app (component/using (app/new-app) [:ws-connection]))) ; POD GP goes here!
+
+;;;================================
+;;; "2017-07-04T19:04:31.064-00:00"
+;;;================================
+
+Today I'm starting by trying to make it possible to start and stop the system
+from user. The problem seems to be in preprocessing the scada data and providing
+a population. The objective is to get this to work and remove stuff from gp.clj.
+
+Eventually, I will have things working where the scada log is generated dynamically
+perhaps stored in a datomic database. 
+
+The system is indeed defined as user/system. 
+
+---> When you try to stop it, things crash hard.
+
+:ws-connection contains:
+ :stop-the-thing #function[taoensso.sente/-start-chsk-router!/stop!--14248]},
+
+But the code (ws.clj) looked wrong:
+
+Was: 
+  (stop [component]
+    (when ch-recv (async/close! ch-recv))
+    (log/debug "WebSocket connection stopped")
+    (:stop-the-thing component)
+    (assoc component
+      :ch-recv nil :connected-uids nil :send-fn nil :ring-handlers nil))
+
+Should be: 
+  (stop [component]
+    (when ch-recv (async/close! ch-recv))
+    (log/debug "WebSocket connection stopped")
+    ;; stop is called from start; in that case, stop-fn won't be set. (And it needs to be called!)
+    (when-let [stop-fn (:stop-the-thing component)] (stop-fn)) 
+    (assoc component
+      :ch-recv nil :connected-uids nil :send-fn nil :ring-handlers nil)))
+
+Now the problem is again with app.clj
+   Insufficient data to find a pattern  {}
+
+Now is time to start using the entry point! The problem is that I don't know how to
+do it without the 
+
+(component/start (:app user/system))
+
+It might be that the namespace "app" must be the stuff currently in gp. 
+
+Second note to rente:
+Shouldn't this be
+user.clj:
+(defn init []
+  (alter-var-root #'system (fn [_] (system/system (config/get-config))))) 
+
+(with an argument to the function).
+
+I'm stuck in cycles-of-references-hell. I wrote app/app-info which won't do any good
+because it won't be updated (even if I could reference it from gp/ !!!)
+Even if I do get through this, there is the problem of the order in which things are built:
+I want to use app-info in 
+
+Things work!
+
+I did have to write to "nasty" functions for gp.clj.
+I'll probably need something similar elsewhere soon:
+;;; POD Two nasty functions...
+(defn app-info []
+  ((resolve 'gov.nist.sinet.run/app-info)))
+
+(defn update-pop! [pop]
+  (alter-var-root
+   (resolve 'gov.nist.sinet.run/system)
+   #(assoc-in % [:app :pop] pop)))
+   
+;;;=================================
+;;; "2017-07-05T18:42:53.666-00:00"
+;;;=================================
+
+Maybe this stuff still have value, but I don't want it in gp.clj
+
+;;;==================== Diagnostics ========================================
+;;; POD Problem with this in that it doesn't save :visible?
+#_(defn read-a-pop []
+  (reset! +pop+
+          (map (fn [ix]
+                 (as-> (pnml/read-pnml (str "data/pops/initial-" ix ".xml")) ?i
+                   (map->Inv {:pn ?i :id ix :history []})
+                   (eval-inv ?i)))
+               (range 100))))
+
+#_(defn write-a-pop
+  "Return a population of the argument problem sorted by error.
+   The best individual in this population is data/initial-1.xml."
+  [problem]
+  (let [pnum (atom 0)]
+    (map #(pnml/write-pnml
+           (:pn %)
+           :file (str "data/junk/initial-" (:id %) ".xml")
+           :positions (:geom problem))
+         (reset! +pop+ (-> problem initial-pop sort-by-error)))))
+
+#_(defn write-gen
+  "Write a population as 'data/gen-<gen>/individual-n.xml'"
+  [popu gen]
+  (dotimes [n (count popu)]
+    (let [filename (str "data/pops/gen-" gen "/individual-" (inc n) ".xml")]
+      (clojure.java.io/make-parents filename)
+      (pnml/write-pnml
+       (nth popu n)
+       :file filename
+       :positions (pr-param :geom)))))
+
+#_(defn diag-eval-pop
+  "Return score and compute times for each individual in the population, updating +pop+."
+  []
+  (let [initial-start-time (System/currentTimeMillis)]
+    (doseq [inv @+pop+]
+      (let [start-time (System/currentTimeMillis)]
+        (cl-format *out* "~%Individual ~A err: ~A time: ~A"
+                   (:id inv)
+                   (do (swap! +pop+ #(assoc % (:id inv) (-> inv eval-inv i-error)))
+                       (if (:err inv) (cl-format nil "~8,3F" (:err inv)) "NA"))
+                   (/ (- (System/currentTimeMillis) start-time) 1000.0))))
+    (cl-format *out* "~%Complete execution time: ~A"
+               (/ (- (System/currentTimeMillis) initial-start-time) 1000.0))))
+
+;;;===================================================================================
+;;;============================= Two machine 1 buffer spot ===========================
+;;;===================================================================================
+
+;;; Rates :m1 1.0, :m2 1.0  data/m2-inhib-bbs-balanced.xml
+(def +m2-11+
+  {:buffer     0.33333
+   :m1-blocked 0.33333
+   :m1-busy    0.66667
+   :m2-busy    0.66667
+   :m2-starved 0.33333})
+
+;;; Rates :m1 1.4, :m2 0.89  data/m2-inhib-bbs.xml
+(def +m2-1489+
+  {:buffer     0.49023
+   :m1-blocked 0.49023
+   :m1-busy    0.50977
+   :m2-busy    0.80188
+   :m2-starved 0.19812})
+
+;;; POD these are starvation values for :m2 on MJPdes/data/submodel-1.clj.
+;;; Unlike LS's model, I don't have pairs of (x, f(x)). These are just f(x)
+;;; for x = (and (feed-buffer-empty? <machine>) (not (busy? <machine>))).
+#_(def +target-data+ ; Here is one of the values from data/submodel-1-out.clj.
+  {:TP 0.8616667,
+   :number-of-jobs 15510,
+   :jobmix {:jobType1 {:w {:m1 1.0, :m2 1.0}, :portion 1.0}},
+   :avg-buffer-occupancy {:b1 1.5226589467929488},
+   :status nil,
+   :runtime 12.36,
+   :starved {:m1 0.0, :m2 0.03542190667446635},
+   :observed-residence-time 4.046157396269706,
+   :blocked {:m1 0.0, :m2 0.0},
+   :bottleneck-machine :m1,
+   :process-id 0})
+
+#_(map->Model
+ {:line
+  {:m1 (map->ExpoMachine {:lambda 0.1 :mu 0.9 :W 1.0})
+   :b1 (map->Buffer {:N 3})
+   :m2 (map->ExpoMachine {:lambda 0.1 :mu 0.9 :W 1.0})}
+  :number-of-simulations 20
+  :topology [:m1 :b1 :m2]
+  :entry-point :m1
+  :params {:warm-up-time 2000 :run-to-time 20000}
+  :jobmix {:jobType1 (map->JobType {:portion 1.0 :w {:m1 1.0, :m2 1.0}})}})
+
+#_(def submodel-1
+  (mjp/map->Model
+   {:line
+    {:m1 (mjp/map->ExpoMachine {:lambda 0.1 :mu 0.9 :W 1.0})
+     :b1 (mjp/map->Buffer {:N 3})
+     :m2 (mjp/map->ExpoMachine {:lambda 0.1 :mu 0.9 :W 1.0})}
+    :number-of-simulations 1
+    :topology [:m1 :b1 :m2]
+    :entry-point :m1
+    :params {:warm-up-time 2000 :run-to-time 20000} ; Was 20000 on training.
+    :jobmix {:jobType1 (mjp/map->JobType {:portion 1.0 :w {:m1 1.0, :m2 1.0}})}}))
+
+The code in server.clj makes it look like the fields are immutable. They are not!
+(I believe they are on types, but not records):
+
+(defrecord HttpServer [port ws-connection server-stop]
+  component/Lifecycle
+  (start [component]
+    (if server-stop
+      component
+      (let [component (component/stop component)
+
+            {:keys [ajax-post-fn ajax-get-or-ws-handshake-fn]}
+            (ws/ring-handlers ws-connection)
+
+            handler (handler ajax-post-fn ajax-get-or-ws-handshake-fn)
+
+            server-stop (run-server (app handler) {:port port})]
+        (log/debug "HTTP server started")
+        (assoc component :server-stop server-stop)))) <======= Should have no effect!
+	
+Example:
+(defprotocol pcol (meth [_]))
+(defrecord foo [slot] pcol (meth [f] (assoc f :slot :new-val) f))
+(def fff (map->foo {:slot :val}))
+(meth fff)
+#gov.nist.sinet.run.foo{:slot :val}
+
+I try this, but it is pointless:
+(stop [component]
+    (reset! +diag+ {:server-stop (:server-stop component)})
+    (when-let [stop (:server-stop component)] (stop))
+    (log/debug "HTTP server stopped")
+    (assoc component :server-stop nil))
+
+
+Anyway, the problem is with shutting down is probably elsewhere,
+but I do not see where it gets a value for stop-server.
+
+(defn system [config]
+  (component/system-map
+   :ws-connection (ws/new-ws-connection)
+   :http-server (component/using (server/new-http-server (:port config)) [:ws-connection])
+   :app (component/using (app/new-app) [:ws-connection])))
+
+(defn new-http-server [port]
+  (map->HttpServer {:port port}))
+
+I wasted the day between this and views.cljs, not getting either to work and somehow
+screwing up the latter. (the <body> isn't unmountable problem is new AFAIK)
+
+... No it is NOT new. I'll continue with what I have.
+
+The other weirdness is that it doesn't seem to be looking at views very hard!
+I can remove the buttons down the bottom; no change. 
+
+;;;==================================
+;;; "2017-07-09T23:53:49.084-00:00"
+;;;==================================
+
+Reading the issues against rente, I see that he never really figured out how to use component.
+I see that rente never calls make-channel-socket-server! in the ws.clj code. (nor anywhere else)
+
+The problem I am having now:
+ Invariant violation in `taoensso.sente:?`. Test form: `(server-event-msg? event-msg)` with failing input: `<nil>`
+
+Comes down to sente.cljc:
+(defn- -start-chsk-router!
+  [server? ch-recv event-msg-handler opts]
+  (let [{:keys [trace-evs? error-handler simple-auto-threading?]} opts
+        ch-ctrl (chan)
+
+        execute1
+        #?(:cljs (fn [f] (f))
+           :clj
+           (if simple-auto-threading?
+             (fn [f] (future-call f))
+             (fn [f] (f))))]
+
+    (go-loop []
+      (let [[v p] (async/alts! [ch-recv ch-ctrl])
+            stop? (= p ch-ctrl)]
+
+        (when-not stop?
+          (let [{:as event-msg :keys [event]} v]
+
+            (execute1
+              (fn []
+                (enc/catching
+                  (do
+                    (when trace-evs? (tracef "Pre-handler event: %s" event))
+                    (event-msg-handler
+                      (if server?
+                        (have! server-event-msg? event-msg)  <------------------------------
+                        (have! client-event-msg? event-msg))))
+
+
+Anyway, I broke things even further. Now the ws doesn't work. I get an error in the client
+about the handshake not being handled (a problem with the http server?).
+On "Evolve" I get Null pointer on
+17-07-10 00:43:19 P646746 ERROR [taoensso.sente:1549] - Chsk router `event-msg-handler` error: [:sinet/evolve {:status :best-wishes}]
+
+I did move things around in ws.clj 
+
+I think I'll try to back up and move on. There is no way to fix the problem with component stop
+without MUCH MORE understanding of how this stuff works. So basically, this whole experiment with
+component has failed!
+
+;;;================================
+;;; "2017-07-10T15:07:06.007-00:00"
+;;;================================
+
+It doesn't like the change system --> the-system !
+
+I'm not sure of that. The failure of the unhandled :chsk/handshake was simply because
+it didn't have (defmethod event-msg-handler :chsk/handshake.
+
+I went back and forth between mine and one on git. Mine works now, though the only
+difference I can point to that seems to matter is the the-system one. (reconfirm this).
+
+The original problem in sente, see <------------ above
+can be traced to start-server-chsk-router!
+
+By the way what it defn- -start-chsk-router! returns in the stop function is
+    (fn stop! [] (async/close! ch-ctrl))
+    
+The stuff that is failing is in a core.async go-loop
+
+I *think* I can send it start-server-chsk-router! an :error-handler  (error-handler e1 event-msg)
+
+Did nothing, but I'll leave it for later examination.
+
+Now I'm looking for ways to display the PN when it first comes up.
+
+  (js/setTimeout #(view-pop @viewing-pn) 2000) in main works, but seems quite cheezy.
+
+There is :component-did-mount ....
+
+;;;==================================
+;;; "2017-07-14T01:19:19.464-00:00"
+;;;==================================
+
+I might have gludged by way past the problem with sente not stopping nicely.
+line 1532 of sente.cljc:  event-msg ;POD(have! server-event-msg? event-msg)
+
+Now it simply does this while stopping (which is in my code) Unhandled event:  nil id =  nil
+
+--> Fixed the bug where mutation was failing and adding to the populatin things that are not Invs. 
+
+;;;================================
+;;; "2017-07-14T22:58:24.695-00:00"
+;;;================================
+
+For today's two pages (trying to catch up) I'm adding ontology content to the mapping paper.
+I'm writing code to scape the turtle.
+
+;;; Zip, bad start. 
+Sucks:
+;;;=================================
+;;; "2017-07-15T16:18:53.682-00:00"
+;;;=================================
+
+The problem with this one is that it uses zip/right when it wants all the rights.
+If I use rights, I get nodes not locs. Maybe I should zip right collecting keyword nodes?
+
+
+I think there is something wrong today. I spent 4 hours yesterday and so far 2 hours today
+on just a dozen lines of zipper code, with no end in sight. 
+
+--> I have not been using the list structure I intended!
+
+;;;=================================================================================
+;;; Screwing around with tawny since it doesn't seem like anything will read SPARQL
+;;; and tawny is still actively being developed. 
+;;;=================================================================================
+
+(rowl/read :iri "http://gov.nist.modelmetho/ontology.owl"
+	    :location (clojure.java.io/file "modeling.ttl"))
+
+            (tawny.util/with-types
+              [location [java.io.File java.io.InputStream
+                         IRI org.semanticweb.owlapi.io.OWLOntologyDocumentSource]]
+
+;;; Finally: Tawny-owl it is!!!
+
+(def iii (owl/direct-subclasses onto.model/Abstract))
+(get-prefix (get-current-ontology))
+onto.model/Abstract
+(look/named-entity-as-string onto.model/Abstract)
+
+(map look/named-entity-as-string (owl/direct-subclasses onto.model/Abstract))
+
+
+;;;================================
+;;; "2017-07-16T15:12:28.674-00:00"
+;;;================================
+
+For a while I thought (-> onto-index clojure.set/map-invert clojure.set/map-invert))
+was what I want. It doesn't have nested structure!
+
+Keeping my functions from yesterday. Now turning it into a vector. Almost:
+
+(clojure.walk/prewalk #(if (keyword? %) % (vec %)) foo)
+
+What I have now (using the above):
+[[:a [[:b [[:c []] [:d []]]]]]]
+
+What I want:
+{:a {:b {:c {} :d {}}}} ---> [:a [:b [:c [] :d []]]]
+
+Use interleave instead:
+(clojure.walk/prewalk #(if (keyword? %) % (vec (interleave (keys %) (vals %)))) foo)
+
+(query/into-map onto.model/Abstract)
+{:type (:class), :annotation ((:comment (:literal "Aspect with neither a spatial nor a temporal location" :type :RDF_PLAIN_LITERAL)))}
+
+Jackpot!!!
+http://owlcs.github.io/owlapi/apidocs_5/org/semanticweb/owlapi/search/EntitySearcher.html
+
+(EntitySearcher/getSuperClasses c ont)
+(EntitySearcher/getSubClasses clz o)
+(EntitySearcher/getDisjointClasses ^OWLClass a o)
+(EntitySearcher/getEquivalentClasses ^OWLClass a o) b)
+
+(EntitySearcher/getDomains p ont)
+(EntitySearcher/getRanges p ont)
+(EntitySearcher/getTypes p ont)
+(EntitySearcher/getDisjointProperties ^OWLProperty a o)
+(EntitySearcher/getEquivalentProperties ^OWLProperty a o)
+(EntitySearcher/getInverses p1 o) p2))
+(EntitySearcher/getSubProperties
+(EntitySearcher/getSuperProperties
+(EntitySearcher/isTransitive p ont)
+(EntitySearcher/isFunctional p ont)
+(EntitySearcher/isInverseFunctional p ont)
+(EntitySearcher/isSymmetric p ont)
+(EntitySearcher/isAsymmetric p ont)
+(EntitySearcher/isIrreflexive p ont)
+(EntitySearcher/isReflexive p ont)
+(EntitySearcher/getSameIndividuals p o)
+(EntitySearcher/getDifferentIndividuals p o)
+(EntitySearcher/getObjectPropertyValues p ont)
+(EntitySearcher/getDataPropertyValues p ont)
+(EntitySearcher/getNegativeObjectPropertyValues p ont)
+(EntitySearcher/getNegativeDataPropertyValues p ont)
+
+(EntitySearcher/getAnnotations e o)
+(EntitySearcher/getAnnotationObjects
+
+(EntitySearcher/getIndividuals clz o)
+(EntitySearcher/getDifferentIndividuals i1 to)
+
+
+;;;================================
+;;; "2017-07-17T15:03:01.610-00:00"
+;;;================================
+
+
+#_(->> onto-root
+       zip/vector-zip
+       (iterate zip/next) ; a lazy seq of locs in pre-order.
+       (take-while #(not (zip/end? %))) ; stop producing at end.                   
+  
+(defn latex-onto-root [onto-vec]
+  (as-> (-> onto-vec zip/vector-zip zip/down) ?loc
+    (loop [loc ?loc]
+      (as-> loc ?loc2
+        (if (var? (zip/node ?loc2))
+          (zip/edit ?loc2 latex-class-desc)
+          ?loc2)
+        (zip/next ?loc2)
+        (if (zip/end? ?loc2)
+          ?loc2
+          (recur ?loc2))))
+    (zip/root ?loc)))
+
+
+(defn has-items? [branch]
+  (some map? (zip/children branch)))
+
+(defn has-subsections? [branch]
+  (some vector? (zip/children branch)))
+
+#_(defn branch-not-empty? [loc]
+  (when (zip/branch? loc)
+    (-> loc zip/next not-empty)))
+
+;;;=================================
+;;; "2017-07-18T16:11:26.553-00:00"
+;;;=================================
+
+Still pushing to get 7 pages out of the ontology!
+
+Right now, things are not printing in the right order.
+latex-leaf-nodes DID NOT mess things up; I'm just not processing things in the right order. 
+
+(-> onto-root zip/vector-zip zip/down zip/next zip/down zip/next zip/children)
+(#'onto.model/ModelPropertyMeasurementUncertainty [] #'onto.model/ProbabilisticModelFormUncertainty [])
+gov.nist.sinet.onto> (map :short-name (-> onto-root latex-leaf-nodes zip/vector-zip zip/down zip/next zip/down zip/next zip/children))
+("ModelPropertyMeasurementUncertainty" nil "ProbabilisticModelFormUncertainty" nil)
+
+I need to split these into pairs:
+
+Class: clojure.lang.PersistentVector
+Contents: 
+  0. { :short-name "UncertaintySource", ... }
+  1. [ { :short-name "ModelPropertyMeasurementUncertainty", ... } [] { :short-name "ProbabilisticModelFormUncertainty", ... } [] ]
+  2. { :short-name "Fidelity", ... }
+  3. []
+  4. { :short-name "Credibility", ... }
+  5. []
+  6. { :short-name "ModelAbstraction", ... }
+  7. [ { :short-name "Equation", ... } [ { :short-name "RegressionEquation", ... } [] { :short-name "ObjectiveFunction", ... } [] { :short-name "PhysicalEquation", ... } ... ] { :short-name "ModelProperty", ... } [ { :short-name "BasicVariable", ... } [] { :short-name "ModelParameter", ... } [] { :short-name "CausalViewpointVariable", ... } ... ] { :short-name "Symbol", ... } ... ]
+  8. { :short-name "ModelingConcept", ... }
+  9. [ { :short-name "RangeDeclaration", ... } [] { :short-name "DomainDeclaration", ... } [] { :short-name "TypeDeclaration", ... } ... ]
+  10. { :short-name "Uncertainty", ... }
+  11. [ { :short-name "AleatoryUncertainty", ... } [] { :short-name "PropertyMeasurementUncertainty", ... } [] { :short-name "ModelUncertainty", ... } ... ]
+  12. { :short-name "MeasurementError", ... }
+  13. []
+
+;;;================================
+;;; "2017-07-21T20:25:13.668-00:00"
+;;;================================
+
+I'm writing stuff for the ontolatex code (which is no longer part of this project!).
+
+Reading operations onto pulls in things from modeling onto. This is okay because in writing,
+we specify the root classess of the document.
+
+
+;;;================================
+;;; "2017-07-22T19:22:59.111-00:00"
+;;;================================
+
+"hasDimensionalConsistency value false"
+
+
+This shows up under "SubClass Of" Regression Equation. I think that means that something
+with this property can be inferred to be a regression equation. I don't want that, but
+I'm going to leave it (fix write-subclasses to avoid these things)
+
+
+         (assoc ?map :subclass-of (doall (map short-name ; POD there are other ways. See notes 2017-07-22. 
+                                              (filter #(instance? OWLClass %)
+                                                      (owl/direct-superclasses obj)))))
+
+The note above refers to the idea that I could have used :super that I get from
+
+(apply hash-map (tawny.render/as-form obj :keyword true))
+
+But that has:
+{:super
+ ((:iri "http://modelmeth.nist.gov/modeling#Equation")
+  (:has-value (:iri "http://modelmeth.nist.gov/modeling#hasDimensionalConsistency") (:literal "false" :type :XSD_BOOLEAN))),
+
+;;;================================
+;;; "2017-07-23T19:29:33.814-00:00"
+;;;================================
+
+(Sunday) I am back on the actual sinet code.
+I am working on the first part of this comment:
+
+;;; POD This needs lots of work. What I should be doing is not to have +problem+
+;;; elements, but rather build several (20?) circular (Eden) individuals by
+;;; dropping into the log at random places and creating Edens from what I learn
+;;; by following a small part of the process. The search operators might then
+;;; be less likely to add places and transition; more likely to add arcs and
+;;; inhibitors. They might also look to combine eden processes (as though there
+;;; were multiple job types. Then of course there needs to be higher level operations
+;;; These include (1) recognizing subsystems and preserving them from further mucking.
+;;; (2) adding feeder lines, (3) messing with buffer size. The setting of rates
+;;; and distributions of timed transitions will be another process, one that also
+;;; looks at the default causal knowledge. See Sankaran Mahadevan's paper with Sudarsan
+;;; "Automated uncertainty quantification analysis using a system model and data"
+
+--> Even further, each Eden individual ought to be its own interpretation of the log.
+    By this I mean that it is free to decide what messages to look at. For example,
+    nothing currently is looking at :bl, :ub, :st, and :us, yet these could be associated
+    with places (AND THE COUNT/appearance COULD BE USED in fitness. Neural net idea. 
+    See notes in fitness.clj.)
+    
+--> Also, each message might be associated with a transition or a place. I think
+    being associated with a place means either that when that place changes value
+    OR changes from occupied to unoccupied, you get a message. If I do this however,
+    there are situations where I wouldn't need the NN interpretation. 
+
+--> The calculation of disorder should not be touched. What we are after is only
+    a new set of Eden individuals and a removal of the "known" problem parameters:
+
+   :visible-places [:buffer :m1-blocked :m1-busy :m2-busy :m2-starved]
+   :visible-transitions [:m1-complete-job :m1-start-job :m2-complete-job :m2-start-job]
+
+   To make things more readable, it would be good to come up with some sort of
+   translation process for the known scada events: :scada-events [:bj :aj :ej :sm]
+   Each of these references a machine
+
+   :aj = add job. It doesn't mention the machine. Assumed to be the first. 
+   {:act :aj, :j 1602, :jt :jobType1, :ends 2001.5882553364702, :clk 2000.5882553364702}
+
+   :sm = start on machine. It doesn't mention the machine but the buffer it pulls from.
+   {:act :sm, :bf :b1, :j 1599, :n 3, :clk 2001.68825533647}
+
+   :bj = buffer job. No machine. 
+   {:act :bj, :bf :b1, :j 1601, :n 2, :clk 2000.5882553364702}
+
+   :ej = end job.  Machine. 
+   {:act :ej, :m :m2, :j 1599, :ent 1996.4679041519728, :clk 2002.78825533647}
+
+I'll write something that looks through the log and infers the visible-places
+and visibile transitions. BUT MAYBE THAT CAN WAIT...since it is only going to
+reproduce the vectors above.
+
+Basically we need a way to describe what each of the messages entails. For example, 
+the presence of :b1 in the log implies the existance of a m1. Could also use the
+block and starve messages. 
+
+Also in the log:
+     {:act :bl, :m :m1, :clk 2002.78825533647}
+     {:act :ub, :m :m1, :clk 2002.78825533647}
+     {:act :st, :m :m2, :clk 2046.7873753977783}
+     {:act :us, :m :m2, :clk 2046.9570986285405}
+
+---> visible-places and visible-transitions ought to be decided on the basis of individuals. 
+
+;;;=================================
+;;; "2017-07-24T14:34:00.093-00:00"
+;;;=================================
+
+;;; This was a nice function...
+(defn pick-from-atom!
+  [atom]
+  (let [picked (nth @atom (rand-int (count @atom)))]
+    (swap! atom (fn [a] (remove #(= picked %) a)))
+    picked))
+
+I suddenly realized that this is going to be difficult! It doesn't hit
+:blocked and :starved very often... Maybe that's ok if they are just
+unnamed places (i.e. places where no message is generated). Needs thought.
+This might be a place for neural nets!  Might be a good idea to create
+a "fake" NN, work it into the architecture, and then if it works, back-fill it. 
+
+;;;=================================
+;;; "2017-07-25T15:47:25.509-00:00"
+;;;=================================
+
+---> Nominally, the new initial population works, but the individuals (almost all) have
+     only 4 elements (and even one of those is an add!).
+
+Have I removed the blocking/starving messages? No, there just isn't much starvation
+(and no blocking) in this model. I go back to create data with more blocking or starvation,
+on the way, I notice that main- wasn't written correctly and that the documentation
+had everything wrong WRT running the program. I spent a few hours fixing this. 
+
+It might be worthwhile to review how SCADA patterns are created. Are these still legit?
+
+BUG! Running the evolution of this thing by hand (BTW DON'T USE PMAP WHEN DOING THAT!)
+the arc points to a source that isn't in the marking key. Updating the PN means updating
+the marking key! reach/renumber-pids
+
+{:mark! [1 0 0 0],
+:arc {:aid 19728, :source :m1-complete-job, :target :m2-unstarved, :name :aa-19728, :type :normal, :multiplicity 1,
+      :bind {:jtype :blue}},
+:mkey [:enter-job :m2-starved :m2-unstarved :exit-job]}
+
+BTW, this namespace code [clojure.tools.namespace.repl :refer [refresh refresh-all]] is sorta nice in
+that it uninterns all defn vars (at least) before reloading.
+
+STILL A BUG!
+
+Same place. The problem (the above was a wrong but maybe not at fault) is that it is
+checking an arc that has a transition as its source, not a place.  
+
+ :arc {:aid 23080, :source :m1-complete-job, :target :m2-unstarved, :name :aa-23080,
+ :type :normal, :multiplicity 1, :bind {:jtype :blue}},
+
+
+Way to go! They are :source and :target are both transitions!
+
+ {:aid 23750, :source :m1-complete-job, :target :m2-unstarved, :name :aa-23750, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+
+ :transitions
+ [{:name :m2-unstarved,
+   :tid 11874,
+   :type :exponential,
+   :rate 1.0,
+   :visible? true,
+   :fn #function[gov.nist.sinet.gp/add-scada-report-fns/report-fn--77341/fn--77342]}
+  {:name :m1-complete-job,
+   :tid 11875,
+   :type :exponential,
+   :rate 1.0,
+   :visible? true,
+   :fn #function[gov.nist.sinet.gp/add-scada-report-fns/report-fn--77341/fn--77342]}],
+
+Problem looks to be with initial creation of eden individual.
+
+Same transition twice in plan:
+
+Class: clojure.lang.PersistentArrayMap
+Contents: 
+  0. [ :p [ :enter-job :m2-starved :m1-start-job :exit-job ] ]
+  1. [ :t [ :m2-unstarved :m1-complete-job :m2-unstarved :tadd-1 ] ]
+  2. [ :t-adds #{ :tadd-1 } ]
+
+:us :m2 is happening twice in this job:
+[{:trace
+  ({:act :aj, :j 1066, :jt :jobType1, :ends 2338.724035765752, :clk 2336.724035765752, :line 911}
+   {:act :us, :m :m2, :clk 2336.724035765752, :line 913}
+   {:act :st, :m :m2, :clk 2337.524035765752, :line 915}
+   {:act :bj, :bf :b1, :j 1066, :n 0, :clk 2338.724035765752, :line 916}
+   {:act :us, :m :m2, :clk 2338.724035765752, :line 918}
+   {:act :sm, :bf :b1, :j 1066, :n 1, :clk 2339.1670944604266, :line 919}
+   {:act :ej, :m :m2, :j 1066, :ent 2336.724035765752, :clk 2339.967094460427, :line 920})}]
+
+Things are running but we have a convergence problem: Everything scores 5.0 !
+
+(1) There isn't enough variation, even with :keep-vs-ignore.
+(2) It may be that all the simulations are failing.
+(3) There isn't nearly enough elements in the PN (typically 4). The correct answer has 9.
+(4) Sometimes no places have a token. 
+
+(-> (app-info) :pop (nth (rand-int 100)) :history ppprint)
+
+ :geom
+ {:enter-job {:x 100, :y 0, :label-x-off 10, :label-y-off 15},
+  :m2-unstarved {:x 0, :y 100, :label-x-off 10, :label-y-off 15},
+  :m2-starved {:x -100, :y 0, :label-x-off 10, :label-y-off 15},
+  :exit-job {:x 0, :y -100, :label-x-off 10, :label-y-off 15}},
+
+---> I think we need to go back to messages representing events (transitions) AND
+     MAYBE OK to name the messages that we are interested in [:aj :sm :bj :ej]
+     (things that reference jobs). ... At least do that to re-establish a running code.
+
+;;;==================================
+;;; "2017-07-27T21:41:18.052-00:00"
+;;;==================================
+
+Selection pressure is currently 70! In examples, Spector uses 7 on a population of 1000!
+
+Selection pressure= 3/100. elite-individuals = 0
+
+20 generations: Still all the individuals are err=5.000
+
+(remaining-ancestors) ==> (50 7 37 17 1)
+
+SD Error: 0.000
+SD Arc count: 6.688
+SD Trans count: 1.203
+SD Place count: 1.675
+Remaining ancestors: (50 7 37 17 1)
+
+1) It must be that something is wrong with the fitness calc.
+2) Trans and place count are two low. Maybe eliminate add arc.
+
+BTW :
+ - Call if "fit" not error. 
+ - Remove ID (not intersting)
+
+
+;;;POD This will go away. 
+#_(def eden-dist "for creation of eden individual, which are already rather sparse"
+  [[:add-place        2/10]
+   [:add-token        2/10]
+   [:add-trans        2/10]
+   [:add-arc          2/10]
+   [:add-inhibitor    2/10]
+   [:swap-places-vv   2/10]])
+
+;;; ===============================
+;;; "2017-07-28T04:33:45.693-00:00"
+;;; ===============================
+
+SD Error: 0.000
+SD Arc count: 5.671   (removed :add-arc)
+SD Trans count: 2.099
+SD Place count: 1.684
+Remaining ancestors: (7 8 19 1 18)
+
+Starts like this:
+Avg Arc count: 5.280
+Avg Trans count: 2.640
+Avg Place count: 2.640
+SD Arc count: 1.001
+SD Trans count: 0.500
+SD Place count: 0.500
+
+Ends like this:
+Avg Error: 5.000
+Avg Arc count: 7.820
+Avg Trans count: 4.170
+Avg Place count: 2.400
+SD Error: 0.000
+SD Arc count: 5.570
+SD Trans count: 1.059
+SD Place count: 1.903
+Remaining ancestors: (8 63 1)
+
+Basically, this is what happens when there is not fitness function.
+So what's up there? 
+
+
+  [{:act :us, :tkns [{:jtype :blue, :id 1}], :machine 2}
+   {:on-act :m2-unstarved, :tkn {:jtype :blue, :id 1}, :motion :move, :from :enter-job, :to :m2-starved}
+   {:act :bj, :tkns [{:jtype :blue, :id 1}], :machine 1}
+   {:on-act :m1-complete-job, :tkn {:jtype :blue, :id 1}, :motion :move, :from :m2-starved, :to :exit-job}
+   {:on-act :tadd-1, :tkn {:jtype :blue, :id 1}, :motion :move, :from :exit-job, :to :enter-job}
+   {:act :us, :tkns [{:jtype :blue, :id 1}], :machine 2}
+   {:on-act :m2-unstarved, :tkn {:jtype :blue, :id 1}, :motion :move, :from :enter-job, :to :m2-starved}
+   {:act :bj, :tkns [{:jtype :blue, :id 1}], :machine 1}
+   {:on-act :m1-complete-job, :tkn {:jtype :blue, :id 1}, :motion :move, :from :m2-starved, :to :exit-job}
+   {:on-act :tadd-1, :tkn {:jtype :blue, :id 1}, :motion :move, :from :exit-job, :to :enter-job}
+   {:act :us, :tkns [{:jtype :blue, :id 1}], :machine 2}
+   {:on-act :m2-unstarved, :tkn {:jtype :blue, :id 1}, :motion :move, :from :enter-job, :to :m2-starved}
+   {:act :bj, :tkns [{:jtype :blue, :id 1}], :machine 1}
+   {:on-act :m1-complete-job, :tkn {:jtype :blue, :id 1}, :motion :move, :from :m2-starved, :to :exit-job}
+   {:on-act :tadd-1, :tkn {:jtype :blue, :id 1}, :motion :move, :from :exit-job, :to :enter-job}
+   {:act :us, :tkns [{:jtype :blue, :id 1}], :machine 2}
+   {:on-act :m2-unstarved, :tkn {:jtype :blue, :id 1}, :motion :move, :from :enter-job, :to :m2-starved}
+   {:act :bj, :tkns [{:jtype :blue, :id 1}], :machine 1}
+   {:on-act :m1-complete-job, :tkn {:jtype :blue, :id 1}, :motion :move, :from :m2-starved, :to :exit-job}
+   {:on-act :tadd-1, :tkn {:jtype :blue, :id 1}, :motion :move, :from :exit-job, :to :enter-job}
+   {:act :us, :tkns [{:jtype :blue, :id 1}], :machine 2}
+
+(qpn-typical-jobs @diag) [[]]
+
+Lowest token is 1. tkn-id below was returning 0. 
+
+  (let [tkn-id (Math/round (/ (-> pn :sim :max-tkn) 2.0)))]
+
+So I added the max...
+  (let [tkn-id (max (Math/round (/ (-> pn :sim :max-tkn) 2.0)) 1)]
+
+(qpn-typical-jobs @diag)
+[[{:act :us, :tkns [{:jtype :blue, :id 1}], :machine 2}
+  {:act :bj, :tkns [{:jtype :blue, :id 1}], :machine 1}]]
+
+(workflow-fitness pnpn)
+3.00001
+
+But maybe they are all 3.00001 now!
+
+Avg Error: 3.260
+Avg Arc count: 11.250
+Avg Trans count: 3.840
+Avg Place count: 3.280
+SD Error: 1.128
+SD Arc count: 2.647
+SD Trans count: 0.845
+SD Place count: 0.665
+Remaining ancestors: (11 61)
+
+No, best is 2.0 (after 20 generations)
+
+When you add/remove an arc, transition or place you have to update the flow-balance!
+So basically need it for every mutation except add-remove token. I'll run it everywhere.
+Need to allow :add-arcs ! DONE
+
+I think random-intro is goofed up. It shouldn't be so random!
+I think I'm going to have to limit multiplicity to 1 for everything execept inhibitors.
+I might have to assign bindings to arcs to say which one goes where. This might
+be a subject to mutation. 
+
+;;;================================
+;;; "2017-07-28T13:21:24.575-00:00"
+;;;================================
+
+More thought on the flow balance issue: I think I am going about it the wrong way. A 
+better way is to provide a semantics to PNs, namely, a priority assignment where 
+arcs gets the oldest/newest tokens (IN RUNTIME) according to their priority. New arcs
+from mutation have lowest priority, but there is a mutation for priority ordering too.
+
+Removal: Oldest tokens would be take out, with the oldest tokens being preserved in 
+assignment to the arc (its target) with highest priority, according to multiplicity.* 
+
+Addition: Oldest tokens go to arcs with highest priority; new tokens go to lowest priority,
+according to multiplicity.*
+
+Mutation side-effect: New arcs get the lowest priority. Lower-priority arcs remaining after
+a delete move up in priority.
+
+Mutation: It swaps the priority on two arcs. (Of course first there has to BE a transition
+with imbalance and two arcs on one side of it!)
+
+* "According to multiplicity" means that tokens are added/removed to satisfy a multiplicity
+before applying the same rule to the next-highest priority. 
+
+
+(defn flow-balance-accounted?
+  "Except with Edens, there can already be :intro/:remove on arcs. 
+   Returns 0 if :remove and :into acts account for the flow correctly.
+   Otherwise, returns a positive number to be added or a negative number to be removed."
+  [pn trans diff]
+  (- (map 
+
+;;; This gets called for Eden PNs and after every mutation (though not needed for add/remove-token).
+;;; POD This assumes just one color currently. 
+(defn adjust-flow-balance [inv] 
+  "Add color binding to arcs. To address imbalance, add :remove acts and (randomly) add :intro acts."
+    (assoc-in
+     inv [:pn :arcs]
+     (:arcs
+      (reduce
+       (fn [pn trans]
+         (let [arcs (map :name (into (pnu/arcs-into pn trans) (pnu/arcs-outof pn trans)))
+               diff (flow-balance pn trans)
+               diff (flow-balance-accounted pn trans diff)]
+           (as-> pn ?pn
+             (cond (< diff 0) ; if < 0, arbitrary (first) removes tkns.
+                   (update-in ?pn [:arcs 0 :bind]
+                              #(-> % (assoc :act :remove) (assoc :cnt (Math/abs diff))))
+                   (> diff 0) ; add diff tokens somewhere randomly.
+                   (let [intro-plan (random-intro ?pn trans diff)]
+                     (reduce (fn [pn arc]
+                               (update-in pn [:arcs (arc-index pn arc) :bind]
+                                          #(-> % (assoc :act :intro) (assoc :cnt (arc intro-plan)))))
+                             ?pn
+                             (map :name (pnu/arcs-outof ?pn trans))))
+                   :else ?pn))))
+       (:pn inv)
+       (->> inv :pn :transitions (map :name))))))
+
+;;; POD This will need to be more sophisticated when there is colour.
+;;; NB It matters on what arc you add tokens, but it doesn't matter on which you :elim them.
+;;; POD This might be goofed up. See notes 2017-07-28
+(defn random-intro
+  "Define a 'random plan' (a map) to :intro CNT tokens to the outbound arcs of the trans."
+  [pn trans cnt]
+  (let [arcs (map :name (pnu/arcs-outof pn trans))
+        narcs (count arcs)]
+    (reduce (fn [tally _] (update-in tally [(nth arcs (rand-int narcs))] inc))
+            (zipmap arcs (repeat narcs 0))
+            (range cnt))))
+
+;;; This is what I'd do if there were no priorities
+(defn eden-assign-flow-priorities
+  "Randomly assign flow priorities to arcs out of the transitions.
+   The overall strategy for handling introducing and eliminating tokens
+   during simulation is described in the comment above this function."
+  [pn trans]
+  (let [aout (pnu/arcs-outof pn trans)
+        pick-plan (random-index (count aout))
+        pick-map (zipmap pick-plan (map :name aout))]
+    (update-in pn [:arcs]
+               #(reduce (fn [arcs [priority aname]]
+                          (assoc-in arcs [(arc-index pn aname) :priority] (inc priority)))
+                        %
+                        pick-map))))
+
+
+;;; Likewise stuff is removed from simulate.clj:
+
+;;; POD Maybe throw instead of this??? It is a programming mistake. 
+(defn check-token-flow-balance
+  [pn link a-in a-out a-in- a-out+]
+  (let [diff (map - (:Mp link) (map count (vals (-> pn :sim :queues))))
+        delta (reduce (fn [sum n] (+ sum n)) 0 diff)]
+    (if (not (= delta
+                (+ (- (apply + (map :multiplicity a-out))  (apply + (map :multiplicity a-in)))
+                   (- (apply + (map :multiplicity a-out+)) (apply + (map :multiplicity a-in-))))))
+      (assoc pn :failure {:reason "token flow imbalance" :transition (:target a-in)})
+      pn)))
+
+;;; :act (bad choice of tag!) was the tag used from :intro :remove which is now gone. 
+
+(defn step-state
+  "Update the (-> pn :sim :queues) for the effect of firing the argument transition."
+  [pn link]
+  (let [fire (:fire link)
+        mkey (:marking-key pn)
+        a-in-raw (remove #(= :inhibitor (:type %)) (pnu/arcs-into pn fire))
+        a-out-raw (pnu/arcs-outof pn fire)
+        a-in   (remove #(contains? (:bind %) :act) a-in-raw)
+        a-out  (remove #(contains? (:bind %) :act) a-out-raw)
+        a-in-  (filter #(contains? (:bind %) :act) a-in-raw)   ; POD can only add or remove 1. OK?
+        a-out+ (filter #(contains? (:bind %) :act) a-out-raw)]
+    (as-pn-ok-> pn ?pn
+      (assoc-in ?pn [:sim :old-queues] (-> ?pn :sim :queues))
+      (move-tokens ?pn a-in a-out a-in- a-out+)
+      (update-log-for-move ?pn fire))))
+
+(defn add-token-to-arc
+  "Create a new token as specified in the argument arc."
+  [pn arc]
+  (as-> pn ?pn
+    (update-in ?pn [:sim :max-tkn] inc)
+    (update-in ?pn [:sim :queues (:target arc)]
+               #(conj % {:jtype (-> arc :bind :jtype) :id (-> ?pn :sim :max-tkn)}))))
+
+(defn move-tokens
+  "Return (-> pn :sim :queues) updated according to argument arc info which are collections of arcs."
+  [pn a-in a-out a-in- a-out+]
+  (as-> pn ?pn
+    ;; Remove tokens that are being eliminated.
+    (reduce (fn [pn arc] (update-in pn [:sim :queues (:source arc)] #(vec (next %)))) ?pn a-in-)
+    ;; Add tokens that are being introduced
+    (reduce (fn [pn arc] (add-token-to-arc pn arc)) ?pn a-out+)
+    ;; Move remaining tokens from input places to output places.
+    (reduce (fn [pn [in out]]
+              (let [tkn (first ((:source in) (-> pn :sim :queues)))]
+                (as-> pn ?pn2
+                  (update-in ?pn2 [:sim :queues (:source in)] #(vec (next %)))
+                  (update-in ?pn2 [:sim :queues (:target out)] #(conj % tkn)))))
+            ?pn
+            (binding-pairs a-in a-out))))
+
+;;; POD currently expects matching pairs and multiplicity=1
+(defn binding-pairs
+  "Return pairs of in/out arcs that agree on bindings."
+  [ins outs]
+  (let [matched (map (fn [i]
+                       (first ; POD should only be one. Needs to be checked?
+                        (filter (fn [o]
+                                  (and (= (set (keys (:bind o))) (set (keys (:bind i))))
+                                       (every? #(= (get o %) (get i %)) (keys (:bind i)))))
+                                outs)))
+                     ins)]
+    (map #(vector %1 %2) ins matched)))
+
+;;;==================================
+;;; "2017-07-29T12:34:49.905-00:00"
+;;;==================================
+
+Little problem with pull-tokens: The trimming of queues is not right.
+
+{:aid 546, :source :enter-job, :target :m2-starved, :name :aa-546, :type :normal, :multiplicity 1, :bind {:jtype :blue}})
+
+We expect to take one out of :enter-job.
+{:enter-job [{:jtype :blue, :id 1}], :m1-complete-job [], :m2-unstarved []}
+That should work. It looks like it was the other arc that was the problem.
+
+Bug in spntools! The problem is that I have TWO arcs from :enter-job to the transition.
+That is, I have one arc with multiplicity=2!  I'm going to log this as a bug with spntools.
+
+I wrote all this code, then chickened out! I think with :binding and similar I should be
+more careful and stop this at the level of mutation. That is, when adding an arc (ONLY PLACE???)
+check whether there already is one and instead change the multiplicity. I think this can only
+happen at add-arc, add place or add transition will (duh!) not have the same source and target.
+
+(defn compact-groups
+  "Whether or not I SHOULD allow this, I am: I am allowing the case of 
+   multiple arcs of the same type between the same source and target.
+   This is useful for the PN GP algorithm, at least. (Could have stopped
+   it there, but it didn't seem right to do that.)"
+  [groups key]
+  (update groups key
+          (fn [grps]
+            (reduce (fn [collected arc]
+                      (if (some #(and (= (:source %) (:source arc)) ; already processed this key-pair.
+                                      (= (:target %) (:target arc))) collected)
+                        collected
+                        (let [not-me (remove #(= % arc) (grps key))]
+                          (if-let [like-me (not-empty
+                                            (filter #(and (= (:source %) (:source arc))
+                                                          (= (:target %) (:target arc)))
+                                                    not-me))]
+                            (conj collected (reduce (fn [arc o]
+                                                      (update-in arc [:multiplicity] #(+ % (:multiplicity o))))
+                                                    arc like-me))
+                            (conj collected arc))))))
+            [] (key groups))))
+                                     
+                                  
+(defn fireable? 
+  "Return true if transition is fireable under the argument marking."
+  [pn mark tr-name]
+  (reset! diag {:pn pn :mark mark :tr-name tr-name})
+  (let [arcs (arcs-into pn tr-name)
+        arc-groups (group-by :type arcs)
+        arc-groups (compact-group arc-groups :normal)
+        arc-groups (compact-group arc-groups :inhibitor)
+
+----> Problem
+While I'm on the issue of fixing this, there are other problems with the search operators.
+A critical problem with these is :add-inhibitor / :remove-inhibitor. If you are trying to
+create a queue of size 20, you will never make it! Need a 'bump inhibitor-5' or 'bump inhibitor-10'
+AND :remove-arc/inhibitor should only change the multiplicity by -1 (removing if it is =1).
+
+This works:    (update-in (-> (:inv @diag) :pn :arcs (nth 2)) [:multiplicity] inc)
+This does not: (update-in (-> (:inv @diag) :pn :arcs) [2 :multiplicity] inc)
+
+Ugh! someone didn't make it a vector! I spent at least an hour on this!
+It was wrong in two places in code from yesterday or the day before. :places and :transitions
+were ok, just :arcs.
+
+The answer has 5 places, four transitions, and 11 arcs, 1 of which is an inhibitor.
+
+I cut down :add-arcs to 1/20:
+
+Best Error: 2.000
+Avg Error: 2.700
+Avg Arc count: 8.150
+Avg Trans count: 3.530
+Avg Place count: 3.120
+SD Error: 0.975
+SD Arc count: 2.118
+SD Trans count: 0.624
+SD Place count: 0.571
+Remaining ancestors: (33 15 64 44)
+
+I don't think screwing around with the mutation mix is going to solve the problem.
+There is fundamentally no flexibility here. (No moving/swapping places and trans?)
+I add :swap-trans... no help.
+
+The idea I'm trying today is that the job patterns stay as they are and transitions
+AND places can provide messages. Measurement is currently against scada job trace
+order violations. 
+
+;;; DO THIS NEXT <========================================================= Make sure :rep has it right; I'm using it!
+
+(1) {:act :ej, :tkns [{:jtype :blue, :id 2}], :machine nil}   <--- :machine nil
+
+
+(2) :form [{:act :aj, :jt \*} {:act :bj, :bf \*, :n \*} {:act :sm, :bf \*, :n \*} {:act :ej, :m \*}],
+   :sm and :ej should have a :m VALUE --- DONE (:aj doesn't have one. Assumes :m1)
+ 
+What a mess!
+
+(defn eden-pn
+  "Return a PN expressing the places and transitions of the argument 'plan.'
+   It is a loop made by using visible places and transitions with additional
+   hidden places and transitions necessary to close the loop."
+  [plan]
+  (reset! diag {:plan plan})
+  (as-> {:places [] :transitions [] :arcs []} ?pn
+    (reduce (fn [pn pl] (pnu/add-pn pn (pnu/make-place pn :name pl))) ?pn (:p plan))
+    (update-in ?pn [:places 0 :initial-tokens] inc) ; Add a token to make it alive
+    (reduce (fn [pn tr] (pnu/add-pn pn (pnu/make-transition pn :name tr)))
+            ?pn (:t plan))
+    (reduce (fn [pn [from to]] (pnu/add-pn pn (pnu/make-arc pn from to)))
+            ?pn
+            (map vec (partition
+                      2 (interleave
+                         (vec (interleave (:p plan) (:t plan)))
+                         (vec (interleave (:t plan)
+                                          (conj (vec (rest (:p plan)))
+                                                (first (:p plan)))))))))
+    ;; Initialize to :visible? true, then dissoc where added.
+    (assoc ?pn :places (vec (map #(assoc % :visible? true) (:places ?pn))))
+    (assoc ?pn :transitions (vec (map #(assoc % :visible? true) (:transitions ?pn))))
+    (if (:p-adds plan)
+      (assoc ?pn :places
+             (vec (map #(if (contains? (:p-adds plan) (:name %)) (dissoc % :visible?) %)
+                       (:places ?pn))))
+      (assoc ?pn :transitions
+             (vec (map (fn [trans]
+                         (if (contains? (:t-adds plan) (:name trans))
+                           (as-> trans ?t
+                             (dissoc ?t :visible?)
+                             (assoc ?t :type (if (= 0 (rand-int 2)) :exponential :immediate)))
+                           trans))
+                       (:transitions ?pn)))))
+    (eden-display-geometry ?pn)))
+
+
+--> A flaw with this design seems to be that all the edens use the first event as a place, then
+    the next as a transition. I think I'll fix that now, but more generally, we'll need to move
+    messages around.  ... Done. 
+
+
+;;; POD This interprets/translates the SCADA log. We'll need to generalize it someday.
+#_(defn translate-transition
+  "Return a SCADA :act and machine/buffer reference for a given transition name."
+  [tname]
+  (let [tstr (subs (str tname) 1)
+        rexp [{:r #"enter-job" :act :aj} {:r #"exit-job" :act :ej} {:r #"m(\d+)-start-job" :act :sm}
+              {:r #"m(\d+)-complete-job" :act :bj} {:r #"m(\d+)-blocked" :act :bl}
+              {:r #"m(\d+)-unblocked" :act :ub} {:r #"m(\d+)-starved" :act :st}
+              {:r #"m(\d+)-unstarved" :act :us}]]
+    (some #(when-let [mat (re-matches (:r %) tstr)]
+             {:act (:act %) :m (when (vector? mat) (read-string (second mat)))})
+          rexp)))
+
+
+Where I left things:
+ - I have :fn in :arcs and :places. I haven't carried this through to simulation / fitness.
+{:places
+ [{:name :m2-unstarved,
+   :rep {:name :m2-unstarved, :act :us, :m :m2},
+   :visible? true,
+   :fn #function[gov.nist.sinet.gp/add-scada-report-fns/report-fn--54940/fn--54941]}
+  {:name :m1-complete-job,
+   :rep {:name :m1-complete-job, :act :bj, :m :m1},
+  {:name :exit-job,
+   :rep {:name :exit-job, :act :ej, :m :m2},
+ :transitions
+ [{:name :enter-job,
+   :rep {:name :enter-job, :act :aj},
+  {:name :m2-starved,
+   :rep {:name :m2-starved, :act :st, :m :m2},
+  {:name :m1-start-job,
+   :rep {:name :m1-start-job, :act :sm, :m :m1},
+   
+{:act :st, :m :m2, :clk 2000.0999689870002}
+{:act :bj, :bf :b1, :j 909, :n 0, :clk 2001.4107836841713}
+{:act :aj, :j 910, :jt :jobType1, :ends 2003.4107836841713, :clk 2001.4107836841713}
+{:act :sm, :bf :b1, :j 909, :n 1, :clk 2001.4107836841713}
+{:act :us, :m :m2, :clk 2001.4107836841713}
+{:act :ej, :m :m2, :j 909, :ent 1999.2999689870003, :clk 2002.2107836841712}
+{:act :st, :m :m2, :clk 2002.2107836841712}
+
+gp> (-> (app-info) :problem :scada-patterns)
+({:id 1, :
+  form [{:act :aj, :jt :*}
+        {:act :bj, :bf :b1, :n :*}
+	{:act :sm, :bf :b1, :n :*}
+	{:act :ej, :m :m2}],
+
+I need to think through AGAIN what I should be doing to build PNs like the message structure.
+Remember that what I have now looks only at ordering violations. It doesn't
+care whether or not there are intervening messages. This should be a good thing. 
+I intended to make PNs that looked like individual traces. I don't know how I got into
+the :fn on places business! Maybe the problem is that I have a 1-1 relationship where
+I could have multiple messages due to one transition. Put more messages on the
+transition. Make the :j ones mandatory???
+
+Elem-assoc gets more than job-trace.
+It gets everything between that doesn't obviously refer to another job:
+
+(scada/random-job-trace) > 
+({:act :aj, :j 1033, :jt :jobType1, :ends 2270.5449144662107, :clk 2268.5449144662107, :line 723}
+ {:act :us, :m :m2, :clk 2268.5449144662107, :line 725}
+ {:act :st, :m :m2, :clk 2269.344914466211, :line 727}
+ {:act :bj, :bf :b1, :j 1033, :n 0, :clk 2270.5449144662107, :line 728}
+ {:act :sm, :bf :b1, :j 1033, :n 1, :clk 2270.5449144662107, :line 730}
+ {:act :us, :m :m2, :clk 2270.5449144662107, :line 731}
+ {:act :ej, :m :m2, :j 1033, :ent 2268.5449144662107, :clk 2272.2256470365332, :line 732})
+
+Can there be a 1-1 relationship between transitions and :j messages? Is that's a reach.
+
+READ THE ALPHA-ALGORITHM!
+
+Thought about it overnight: Put multiple messages on the transitions; nothing on places.
+Emitting these extra messages won't hurt anything (now) because the test is just precedence relations.
+
+;;;================================
+;;; "2017-08-01T23:57:38.480-00:00"
+;;;================================
+
+OK, I've read the alpha-algorithm and a bunch of other stuff. I think I should have stuck with
+events on transitions only, and cueing off job-id (that part is still intact, I think).
+So a little work on gp.clj and I should be back....
+
+So screwed up!
+
+  0. { :name :enter-job, :act :aj }
+  1. { :name :m2-complete-job, :act :bj, :bf :b1 }
+  2. { :name :m2-start-job, :act :sm, :bf :b1 }
+  3. { :name :exit-job, :act :ej, :m :m2 }
+
+
+(defn add-extra-nodes
+  "Return a map {:t <> :p <> :t-adds, :p-adds} naming nodes (transitions or places) to be added.
+   Used to make the ring-shaped Eden individual."
+  [prob]
+  (let [cnt-p (count (:p prob))
+        cnt-t (count (:t prob))]
+    (as-> {:p (:p prob) :t (:t prob)} ?p
+      (cond (= cnt-p cnt-t) ?p
+            (> cnt-p cnt-t)
+            (update ?p :t
+                    into (for [n (range (- cnt-p cnt-t))]
+                           {:name (keyword (str "tadd-" (inc n))) :silent? true}))
+            (> cnt-t cnt-p)
+            (update ?p :p
+                    into (for [n (range (- cnt-t cnt-p))]
+                           {:name (keyword (str "padd-" (inc n))) :silent :true}))))))
+
+;;;================================
+;;; "2017-08-06T01:11:00.798-00:00"
+;;;================================
+PN only updates once I reload the cljs.
+
+FIXED. I don't even recall what the point of this code was!
+#_(defn quil-pn
+  "Form-3 component for quil Petri net"
+  []  
+  (let [pn @(rf/subscribe [:pn])
+        a-closed-over-val nil]        ;; <-- closed over by lifecycle fns
+      (reagent/create-class            ;; <-- expects a map of functions 
+       {:component-did-mount           ;; the name of a lifecycle function
+        #(when (contains? pn :places)
+           (reset! draw/+display-pn+ pn)
+           (draw-it))
+        
+        :component-will-mount            ;; the name of a lifecycle function
+        #(println "quil-pn-will-mount")  ;; your implementation
+        
+        :display-name  "quil-pn"  ;; for more helpful warnings & errors
+        
+        :reagent-render  ;; Note:  is not :render
+        (fn []           ;; remember to repeat parameters
+          [:canvas {:id "best-pn"}])})))
+
+
+ToDo (trivial, ignore!):
+  1) Put the :geom code in the client.
+  2) Reset :requested PN to :none when starting.
+  3) Geom code belongs on client, not server. 
+
+ToDo FOR REAL
+  Get the GP algorithm working!
+   1) Basic fitness is botched.
+   2) Match multiple patterns
+   3) MJP (Crossover operator)
+   
+
+;;;=================================
+;;; "2017-08-06T18:10:25.415-00:00"  (Sunday 2pm)
+;;;=================================
+
+I'm cleaning up the trivial ignore issues ;^)
+
+Everything is fitness 5.0001
+
+I think I should fix this!
+ {:tkns [{:jtype :blue, :id 1}], :rep {:name :m2-complete-job, :rep {:act :ej, :m :m2}}}
+
+
+Okay, sort of running.
+This one scores 0.050, but it's not even well formed (:m1-complete-job) exit arcs only:
+
+{:places
+ [{:name :place-1, :pid 77, :initial-tokens 1, :rep {:name :place-1}, :visible? true}
+  {:name :place-2, :pid 78, :initial-tokens 0, :rep {:name :place-2}, :visible? true}
+  {:name :place-3, :pid 79, :initial-tokens 0, :rep {:name :place-3}, :visible? true}
+  {:name :place-4, :pid 80, :initial-tokens 0, :rep {:name :place-4}, :visible? true}],
+ :transitions
+ [{:name :m1-start-job,
+   :tid 77,
+   :type :immediate,
+   :rate 1.0,
+   :rep {:name :m1-start-job, :act :aj, :m :m1},
+   :visible? true,
+   :fn #function[gov.nist.sinet.gp/add-scada-report-fns/report-fn--100667/fn--100668]}
+  {:name :m1-complete-job,
+   :tid 78,
+   :type :immediate,
+   :rate 1.0,
+   :rep {:name :m1-complete-job, :act :bj, :m :m1, :bf :b1},
+   :visible? true,
+   :fn #function[gov.nist.sinet.gp/add-scada-report-fns/report-fn--100667/fn--100668]}
+  {:name :m2-start-job,
+   :tid 79,
+   :type :immediate,
+   :rate 1.0,
+   :rep {:name :m2-start-job, :act :sm, :m :m2, :bf :b1},
+   :visible? true,
+   :fn #function[gov.nist.sinet.gp/add-scada-report-fns/report-fn--100667/fn--100668]}
+  {:name :m2-complete-job,
+   :tid 80,
+   :type :exponential,
+   :rate 1.0,
+   :rep {:name :m2-complete-job, :act :ej, :m :m2},
+   :visible? true,
+   :fn #function[gov.nist.sinet.gp/add-scada-report-fns/report-fn--100667/fn--100668]}],
+ :arcs
+ [{:aid 153, :source :place-1, :target :m1-start-job, :name :aa-153, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+  {:aid 154, :source :m1-start-job, :target :place-2, :name :aa-154, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 155, :source :place-2, :target :m2-start-job, :name :aa-155, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+  {:aid 156, :source :m2-start-job, :target :place-4, :name :aa-156, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 157, :source :place-4, :target :m2-complete-job, :name :aa-157, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+  {:aid 158, :source :m2-complete-job, :target :place-3, :name :aa-158, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 160, :source :m1-complete-job, :target :place-1, :name :aa-160, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 1104, :source :m1-complete-job, :target :place-3, :name :aa-1104, :type :normal, :multiplicity 1, :bind {:jtype :blue}, 
+     :priority 2}],
+
+
+Now I'm wishing I didn't kill the history.
+
+--> I put history back. Needs testing.
+--> pnu/validate-pn could be a lot better!
+
+;;;==================================
+;;; "2017-08-07T16:52:41.944-00:00"
+;;;==================================
+
+I think every transition should start out timed. Done.
+
+This is a mess! And because it is a mess in spntools, it needs to be moved over here!
+
+   {:tkns [{:jtype :blue, :id 1} {:jtype :blue, :id 2}], :rep {:name :m1-complete-job, :act :bj, :m :m1, :bf :b1}}
+   {:on-act :m1-complete-job, :tkn {:jtype :blue, :id 2}, :motion :add}
+   {:tkns [], :rep {:name :m2-start-job, :act :sm, :m :m2, :bf :b1}}
+   {:tkns [{:jtype :blue, :id 1}], :rep {:name :m2-complete-job, :act :ej, :m :m2}}
+   {:on-act :m2-complete-job, :tkn {:jtype :blue, :id 1}, :motion :move, :from :place-2, :to :place-1}
+   {:tkns [{:jtype :blue, :id 2}], :rep {:name :m1-start-job, :act :aj, :m :m1}}
+   {:on-act :m1-start-job, :tkn {:jtype :blue, :id 2}, :motion :move, :from :place-4, :to :place-2}
+   {:tkns [], :rep {:name :m1-start-job, :act :aj, :m :m1}}
+   {:tkns [{:jtype :blue, :id 3} {:jtype :blue, :id 1}], :rep {:name :m1-complete-job, :act :bj, :m :m1, :bf :b1}}
+   {:on-act :m1-complete-job, :tkn {:jtype :blue, :id 3}, :motion :add}
+   {:on-act :m1-complete-job, :tkn {:jtype :blue, :id 1}, :motion :move, :from :place-1, :to :place-2}
+   {:tkns [], :rep {:name :m2-start-job, :act :sm, :m :m2, :bf :b1}}
+   {:tkns [{:jtype :blue, :id 3}], :rep {:name :m1-start-job, :act :aj, :m :m1}}
+   {:on-act :m1-start-job, :tkn {:jtype :blue, :id 3}, :motion :move, :from :place-4, :to :place-2}
+   {:tkns [{:jtype :blue, :id 2}], :rep {:name :m2-complete-job, :act :ej, :m :m2}}
+   {:on-act :m2-complete-job, :tkn {:jtype :blue, :id 2}, :motion :move, :from :place-2, :to :place-1}
+   {:tkns [{:jtype :blue, :id 4} {:jtype :blue, :id 2}], :rep {:name :m1-complete-job, :act :bj, :m :m1, :bf :b1}}
+
+;;;================================
+;;; "2017-08-08T21:39:48.288-00:00"
+;;;================================
+
+I'm going to have to leave it now due to the new date to submit things. Get them to Mey on the 21st or so....
+Gives me less than two weeks!
+
+I had just moved simulate into sinet. The plan here was to clean up the map structures above so that
+I can read/debug them. Is the :tkns one the important one? Get the :act on a :name (transition) where I can
+see it. Also the partial ordering functions need not be functions. The principal problem is that
+I'm getting false positives (score=0) where the PN is not right. Need to characterize what about it
+is not right. Once that is fixed, must experiment with population size. (Way too small now, right?)
+Then go to 3,4,5 machines. Dream on. Some ideas about locality of edits. Some ideas about marking
+the place between one machine output and the next machine input as a :visible buffer. 
+
+
+;;;=================================
+;;;  "2017-08-09T20:09:34.308-00:00"
+;;;=================================
+
+I think also this one doesn't have the correct intro/elim (See screen shot)
+
+;;;=================================
+;;; "2017-08-10T13:53:45.644-00:00"
+;;;=================================
+
+The system runs after a logout. You can cider-connect to it etc. But no shell
+remains from where I started the program with lein.
+
+;;;================================
+;;; "2017-08-11T20:11:09.587-00:00"
+;;;=================================
+
+I'm running this model.
+ (map->Model
+  {:line 
+   {:m1 (map->ExpoMachine {:lambda 0.1 :mu 0.9 :W 1.0}) 
+    :b1 (map->Buffer {:N 2})
+    :m2 (map->ExpoMachine {:lambda 0.1 :mu 0.9 :W 1.0})}
+   :number-of-simulations 1
+   :report {:log? true :max-lines 1000}
+   :topology [:m1 :b1 :m2]
+   :entry-point :m1
+   :params {:warm-up-time 2000 :run-to-time 10000}
+   :jobmix {:jobType1 (map->JobType {:portion 1.0 :w {:m1 2.0, :m2 0.8}})}})
+
+
+I should probably write functions pn2sim, sim2pn, but for now, let's 
+just grab something like m2-inhib-bas and see what its fitness would be. 
+
+(m2-inhib-bas)
+3.00001
+
+Yeah, that explains a few things!!!! But can it be due to intro/elim backwards? 
+
+I'm back on trivial stuff, of course:
+(interleave
+  (->> pn :places (map :name))
+  (->> pn :transitions (map :name))) ; Of course that doesn't work so well when there aren't same number....
+
+Should probably start on a visible transition....
+BTW -- we lost visible places since the ICMR code...Ugh!
+
+;;;=============================================================
+;;; "2017-09-08T20:30:57.994-00:00" (Loughborough, Friday night, local time is +1)
+;;;=============================================================
+
+I'm trying to track down a bug where things hang in some limbo state where
+it seems to have completed just one to four i-error and hasn't started any more.
+
+According to entering...exiting sort-by-error, it is out of sort-by-error when
+it hangs. Then why isn't check-i-error all :out ?
+
+I started using clojure.tools.trace. The problem looks to be in make-next-gen.
+
+---> Can pretty much stop using this entering...exiting thing. Trace takes care of
+if nice enough. Of course the map being passed around is kind of big....
+
+;;;================================
+;;; "2017-09-09T15:59:37.940-00:00"
+;;;================================
+
+;;; Each transition and place represents something in the log. 
+;;; SCADA log example: {:act :ej, :m :m2, :j 909, :ent 1999.3, :clk 2002.21}
+(defn add-scada-report-fns [inv] ; POD This could be eliminated now that we have :rep. 
+  "Add SCADA report functions to transitions and places."
+  (let [report-fn (fn [rep] (fn [tkns] {:tkns tkns :rep rep}))]
+    (update-in inv [:pn :transitions]
+               #(vec (map (fn [t] (assoc t :fn (report-fn (:rep t)))) %)))))
+
+ :transitions
+ [{:name :m1-start-job,
+   :tid 33,
+   :type :exponential,
+   :rate 1.0,
+   :rep {:name :m1-start-job, :act :aj, :m :m1},
+   :visible? true,
+   :fn #function[gov.nist.sinet.gp/add-scada-report-fns/report-fn--56379/fn--56380]}
+
+Wrote uuid diag code to track history of a PN nicely. 
+
+---> Lots of these:
+[{:reason "PN not bipartite", :arc :aa-861}
+ {:reason "PN not bipartite", :arc :aa-862}]
+
+Problem is that a reference place Place-408, was removed:
+ [:remove-place :Place-408 :from "6186778e-78c1-4568-bc8d-b8ebf8937a6f"]]
+ 
+Need to remove the arcs too!
+
+;;;================================
+;;; "2017-09-10T09:34:07.267-00:00"
+;;;================================
+
+[{:reason "Places without both in/outbound", :place :Place-401}]
+ [:remove-or-dec-arc :aa-807 :from "5112d03f-8c94-4bde-ab62-b558c04d1181"]]
+
+Removed this. 
+ [:remove-or-dec-arc :aa-807 :from "5112d03f-8c94-4bde-ab62-b558c04d1181"]]
+
+This is indded and error. Take :aa-807 away and :place-401 isn't the target of any arc.
+
+
+--->    {:id "3de6dc96-728c-4b52-b8a4-6885b65f1e08",
+         :errors [{:reason "Places without both in/outbound", :place :Place-402}]}
+
+ [:remove-or-dec-arc :aa-810 :from "d6ea16f6-62ec-49bf-9f38-d3927f58901b"]]
+
+
+
+--->    {:id "43878327-aefe-4b71-86d4-ce876d0285f7",
+         :errors [{:reason "Transition without both in/outbound", :trans :Trans-482}]}
+
+
+ [:remove-place :Place-412 :from "229cb2b7-9556-40f8-a874-cf5ee16f12ce"]]
+
+
+--->    {:id "43bcb461-2448-4b36-bc10-a517714771f6",
+         :errors [{:reason "Transition without both in/outbound", :trans :m2-complete-job}]}
+
+
+ [:remove-place :Place-425 :from "569a0c51-e6a3-40e5-862e-b1c664abd821"]]
+
+Correct. Once you remove place-425 :m2-complete-job is screwed.
+
+
+------------------- Now mutations pn-validate -------------------------------
+
+Running sim/simulate, tokens aren't moving out of buffers!
+
+Log has :on-act , but not :act.
+
+Now we have :act...
+
+ {:log
+  [{:act :aj, :m :m1, :j [0 1], :fire :m1-start-job}
+   {:on-act :m1-start-job, :tkn {:jtype :blue, :id 0}, :motion :add}  <================= 0 and 1 reversed? 
+   {:on-act :m1-start-job, :tkn {:jtype :blue, :id 1}, :motion :move, :from :place-1, :to :place-2}
+   {:act :sm, :m :m2, :bf :b1, :j [], :fire :m2-start-job}            <================= does not look good!
+   {:act :bj, :m :m1, :bf :b1, :j [1], :fire :m1-complete-job}
+   {:on-act :m1-complete-job, :tkn {:jtype :blue, :id 0}, :motion :remove}
+   {:on-act :m1-complete-job, :tkn {:jtype :blue, :id 1}, :motion :move, :from :place-2, :to :place-3}
+   {:act :ej, :m :m2, :j [1], :fire :m2-complete-job}
+   {:on-act :m2-complete-job, :tkn {:jtype :blue, :id 1}, :motion :move, :from :place-3, :to :place-1}
+   {:act :aj, :m :m1, :j [1 2], :fire :m1-start-job}
+   {:on-act :m1-start-job, :tkn {:jtype :blue, :id 2}, :motion :add}
+   {:on-act :m1-start-job, :tkn {:jtype :blue, :id 1}, :motion :move, :from :place-1, :to :place-2}
+   {:act :sm, :m :m2, :bf :b1, :j [], :fire :m2-start-job}
+   {:act :ej, :m :m2, :j [1], :fire :m2-complete-job}
+
+
+This is m2-inhib-bas: (priority assignment is arbitrary.)
+
+{:places
+ [{:name :buffer, :pid 0, :initial-tokens 0}
+  {:name :m1-blocked, :pid 1, :initial-tokens 0}
+  {:name :m1-busy, :pid 2, :initial-tokens 1}
+  {:name :m2-busy, :pid 3, :initial-tokens 1}
+  {:name :m2-starved, :pid 4, :initial-tokens 0}],
+ :transitions
+ [{:name :m1-complete-job, :tid 6, :type :exponential, :rate 0.9}
+  {:name :m1-start-job, :tid 7, :type :immediate, :rate 1.0}
+  {:name :m2-complete-job, :tid 8, :type :exponential, :rate 1.0}
+  {:name :m2-start-job, :tid 9, :type :immediate, :rate 1.0}],
+ :arcs
+ [{:aid 10, :source :buffer, :target :m1-start-job, :name :aa-10, :type :inhibitor, :multiplicity 1, :bind {:jtype :blue}}
+  {:aid 11, :source :buffer, :target :m2-start-job, :name :aa-11, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+  {:aid 12, :source :m1-blocked, :target :m1-start-job, :name :aa-12, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+  {:aid 13, :source :m1-busy, :target :m1-complete-job, :name :aa-13, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+  {:aid 14, :source :m1-complete-job, :target :m1-blocked, :name :aa-14, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 15, :source :m1-start-job, :target :buffer, :name :aa-15, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 2}
+  {:aid 16, :source :m1-start-job, :target :m1-busy, :name :aa-16, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 17, :source :m2-busy, :target :m2-complete-job, :name :aa-17, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+  {:aid 18, :source :m2-complete-job, :target :m2-starved, :name :aa-18, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 19, :source :m2-start-job, :target :m2-busy, :name :aa-19, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 20, :source :m2-starved, :target :m2-start-job, :name :aa-20, :type :normal, :multiplicity 1, :bind {:jtype :blue}}],
+ :marking-key [:buffer :m1-blocked :m1-busy :m2-busy :m2-starved],
+ :initial-marking [0 0 1 1 0],
+ :initial-tangible [0 0 1 1 0],
+ :sim
+ {:log
+  [{:on-act :m2-complete-job, :tkn {:jtype :blue, :id 2}, :motion :move, :from :m2-busy, :to :m2-starved}
+   {:on-act :m1-complete-job, :tkn {:jtype :blue, :id 1}, :motion :move, :from :m1-busy, :to :m1-blocked}
+   {:on-act :m1-start-job, :tkn {:jtype :blue, :id 1}, :motion :move, :from :m1-blocked, :to :m1-busy}
+   {:on-act :m1-start-job, :tkn {:jtype :blue, :id 2}, :motion :move, :from :m2-starved, :to :buffer}
+   {:on-act :m2-start-job, :tkn {:jtype :blue, :id 2}, :motion :move, :from :buffer, :to :m2-busy}
+   {:on-act :m1-complete-job, :tkn {:jtype :blue, :id 1}, :motion :move, :from :m1-busy, :to :m1-blocked}
+   {:on-act :m1-start-job, :tkn {:jtype :blue, :id 1}, :motion :move, :from :m1-blocked, :to :m1-busy}
+   {:on-act :m1-start-job, :tkn {:jtype :blue, :id 2}, :motion :move, :from :m2-busy, :to :buffer}
+   {:on-act :m2-start-job, :tkn {:jtype :blue, :id 2}, :motion :move, :from :buffer, :to :m2-busy}
+   {:on-act :m1-complete-job, :tkn {:jtype :blue, :id 1}, :motion :move, :from :m1-busy, :to :m1-blocked}
+   {:on-act :m1-start-job, :tkn {:jtype :blue, :id 1}, :motion :move, :from :m1-blocked, :to :m1-busy}
+   {:on-act :m1-start-job, :tkn {:jtype :blue, :id 2}, :motion :move, :from :m2-busy, :to :buffer}
+   {:on-act :m2-start-job, :tkn {:jtype :blue, :id 2}, :motion :move, :from :buffer, :to :m2-busy}
+   {:on-act :m1-complete-job, :tkn {:jtype :blue, :id 1}, :motion :move, :from :m1-busy, :to :m1-blocked}
+   {:on-act :m1-start-job, :tkn {:jtype :blue, :id 1}, :motion :move, :from :m1-blocked, :to :m1-busy}
+   {:on-act :m1-start-job, :tkn {:jtype :blue, :id 2}, :motion :move, :from :m2-busy, :to :buffer}
+   {:on-act :m1-complete-job, :tkn {:jtype :blue, :id 1}, :motion :move, :from :m1-busy, :to :m1-blocked}],
+  :max-tkn 2,
+  :queues
+  {:buffer [{:jtype :blue, :id 2}], :m1-blocked [{:jtype :blue, :id 1}], :m1-busy [], :m2-busy [{:jtype :blue, :id 2}], :m2-starved []},
+  :old-queues
+  {:buffer [{:jtype :blue, :id 2}], :m1-blocked [], :m1-busy [{:jtype :blue, :id 1}], :m2-busy [{:jtype :blue, :id 2}], :m2-starved []},
+  :to-assign []}}
+
+
+WRITE diag-force-priority
+
+;;;================================
+;;; "2017-09-11T09:12:01.163-00:00"
+;;;================================
+
+WRITE diag-force-priority --> Done
+
+(gov.nist.sinet.gp/diag-force-priority [{:source :m1-start-job, :target :m1-busy :priority 2}])
+  {:aid 15, :source :m1-start-job, :target :buffer, :name :aa-15, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 16, :source :m1-start-job, :target :m1-busy, :name :aa-16, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 2}
+
+The oldest tokens go to the highest priority arc. That means pushing to :buffer and adding a new token to :m1-busy.
+That's all good. The problem is that the movements are not at all right!
+
+   {:on-act :m1-start-job, :tkn {:jtype :blue, :id 1}, :motion :move, :from :m1-blocked, :to :buffer}
+   {:on-act :m1-start-job, :tkn {:jtype :blue, :id 2}, :motion :move, :from :m2-busy, :to :m1-busy}
+
+Also, we are back to no :act msgs. (These weren't in m2-inhib-bas yesterday anyway.)
+

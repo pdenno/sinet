@@ -230,4 +230,3 @@
       gov.nist.sinet.gp/add-color-binding
       (gov.nist.sinet.gp/diag-force-priority [{:source :m1-start-job, :target :m1-busy :priority 2}])
       (simulate :max-steps 15)))
-
