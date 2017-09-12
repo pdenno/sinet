@@ -167,9 +167,7 @@
       (push-tokens ?pn a-out)
       ;; Note change in queues with log messages.
       (update-log-for-step ?pn fire) 
-      (if *debugging*
-        (do (println "Queues:" (-> ?pn :sim :queues)) ?pn)
-        ?pn))))
+      #_(do (println "Queues:" (-> ?pn :sim :queues)) ?pn))))
 
 (defn validate-pulled
   "Check that pulled doesn't have multiple of a token."
@@ -189,7 +187,8 @@
     (when (not= (count tkns) (count (dedupe tkns)))
       (reset! diag pn)
       (throw (ex-info "Same token found in two places."
-                      {:queues (-> pn :sim :queues)})))))
+                      {:queues (-> pn :sim :queues)}))))
+  pn)
 
 (defn validate-remove
   "There are two methods that remove could be calculated; check that
@@ -201,11 +200,10 @@
         new (-> queues     vals flatten set)
         removed1 (clojure.set/difference old new)
         removed2 (-> pn :sim :removed set)]
-    (when (> (-> pn :sim :max-tkn) 20) ; This isn't necessarily true during warm-up. 
-      (when (not= removed1 removed2)   ; POD This is probably temporary. 
-        (reset! diag pn)
-        (throw (ex-info "Calculations of removed differ"
-                        {:rem1 removed1 :rem2 removed2})))))
+    (when (not= removed1 removed2)   ; POD This is probably temporary. 
+      (reset! diag pn)
+      (throw (ex-info "Calculations of removed differ."
+                      {:rem1 removed1 :rem2 removed2}))))
   pn)
 
 (defn validate-move

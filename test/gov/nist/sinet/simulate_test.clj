@@ -33,13 +33,15 @@
 
 (deftest m2-inhib-bas-processes-serially
   (testing "serial processing of a simple PN"
-    (is true (->> (m2-inhib-bas-sim 200)
-                  :sim 
-                  :log
-                  (filter #(= :remove (:motion %)))
-                  (map :tkn)
-                  (map :id)
-                  sequential?))))
+    (is true
+        (binding [*debugging* true]
+          (->> (m2-inhib-bas-sim 200)
+               :sim 
+               :log
+               (filter #(= :remove (:motion %)))
+               (map :tkn)
+               (map :id)
+               sequential?)))))
 
       
     
