@@ -6,6 +6,8 @@
             [gov.nist.sinet.scada :as scada]
             [gov.nist.sinet.gp :as gp]))
 
+
+
 (def mutation-dist "The pdf for ordinary mutations (not eden mutations)"
   [[:add-place        1/10]    ; Add place (mine can't be absorbing, thus Nobile 1&2).
    [:add-token           0]    ; Add token to some place (visible or hidden).
@@ -23,26 +25,28 @@
    [:swap-priority    1/10]])
 
 (def gp-params
-  {:pn-elements [:place :token :normal-arc :inhibitor-arc :expo-trans #_:immediate-trans #_:fixed-trans]
-   :pop-size 100
-   :aqpn-warm-up 5 ; "Ignore this number of tokens on both ends of the log."
-   :max-gens 30
-   :debugging? true
-   :pn-k-bounded 10 ; When to give up on computing the reachability graph.
-   :pn-max-rs 1000
-   :crossover-to-mutation-ratio 0.5
-   :select-pressure 4 ; POD not normalized to pop-size! Spector: 7/1000
-   :elite-individuals 1
-   :timeout-secs 60
-   :no-new-jobs-penalty 1.00001
-   :crossover-keeps-parents? true ; NYI
-   :mutation-dist mutation-dist})
+  (atom
+   {:pn-elements [:place :token :normal-arc :inhibitor-arc :expo-trans #_:immediate-trans #_:fixed-trans]
+    :pop-size 100
+    :aqpn-warm-up 5 ; "Ignore this number of tokens on both ends of the log."
+    :max-gens 30
+    :debugging? true
+    :pn-k-bounded 10 ; When to give up on computing the reachability graph.
+    :pn-max-rs 1000
+    :crossover-to-mutation-ratio 0.5
+    :select-pressure 4 ; POD not normalized to pop-size! Spector: 7/1000
+    :elite-individuals 1
+    :timeout-secs 60
+    :no-new-jobs-penalty 1.00001
+    :crossover-keeps-parents? true ; NYI
+    :mutation-dist mutation-dist}))
 
 (def problem
-  {:use-cpus (.availableProcessors (Runtime/getRuntime)) ; Counts hyperthreading, apparently. 
-   :keep-vs-ignore 0.8
-   :scada-data-file  "data/SCADA-logs/scada-f0-imbalanced.clj"
-   :pattern-reserves #{:act :jt :bf :m :n}})
+  (atom 
+   {:use-cpus (.availableProcessors (Runtime/getRuntime)) ; Counts hyperthreading, apparently. 
+    :keep-vs-ignore 0.8
+    :scada-data-file  "data/SCADA-logs/scada-f0-imbalanced.clj"
+    :pattern-reserves #{:act :jt :bf :m :n}}))
 
 (defn gp-system []
   {:evolve-chan (async/chan)
@@ -53,7 +57,7 @@
   component/Lifecycle
   (start [component]
     (as-> component ?c
-      (assoc ?c :gp-params gp-params :problem problem :gp-system (gp-system))
+      (assoc ?c :gp-params @gp-params :problem @problem :gp-system (gp-system))
       (assoc-in ?c [:problem :scada-log] (-> ?c :problem :scada-data-file scada/load-scada))
       (assoc-in ?c [:problem :scada-patterns] ; Needs :pattern-reserves defined.
                 (-> ?c :problem :scada-log scada/scada-patterns))))

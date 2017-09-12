@@ -1,7 +1,8 @@
 (ns gov.nist.sinet.util
   "General sorts of things needed in several places in the sinet project."
   {:author "Peter Denno"}
-  (:require [clojure.pprint :refer (cl-format pprint)]))
+  (:require [clojure.pprint :refer (cl-format pprint)]
+            [clojure.tools.namespace.repl :as ns]))
 
 (defn app-info []
   ((resolve 'gov.nist.sinet.run/app-info)))
@@ -15,6 +16,9 @@
 (defn reset
   "Reset the systems, reloading changed code."
   []
+  ;; Disable-reload! so that the atoms app/problem and app/gp-params don't get redefined.
+  ;; I can then update them (e.g. in testing) to run various scenarios. 
+  (ns/disable-reload! (find-ns 'gov.nist.sinet.app)) 
   ((resolve 'gov.nist.sinet.run/reset)))
 
 (def +log+ (atom []))

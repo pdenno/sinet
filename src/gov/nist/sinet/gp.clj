@@ -671,7 +671,7 @@
 (defn diag-run
   "Run the GP in diagnostic mode from the REPL. A very useful function!"
   []
-  (binding [*debugging* true]
+  (binding [*debugging* false]
     (reset! diag-all-inv {})
     (let [p (promise)]
       (as-> (evolve-init) ?w

@@ -6,7 +6,7 @@
             [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp)]
             [gov.nist.spntools.util.reach :as pnr :refer (reachability)]
             [gov.nist.sinet.simulate :as sim :refer-only (simulate)]
-            [gov.nist.sinet.util :as util :refer (app-info)]))
+            [gov.nist.sinet.util :as util :refer (app-info reset)]))
 
 ;;; ToDo: Currently fitness only concerns violation of partial orders it should
 ;;;       additionally include:
@@ -218,17 +218,3 @@
   [inv]
   (let [patterns (-> (util/app-info) :problem :scada-patterns)
         sim (-> inv :pn (sim/simulate :max-steps (* 50 (avg-scada-process-steps patterns))))]))
-
-;;; Commented because needs gp (load order doesn't have this yet.)
-#_(defn m2-inhib-bas
-  "Does 'the' correct answer score 0?"
- []       ;     cartier...
-  (as-> "/Users/peterdenno/Documents/git/spntools/data/m2-inhib-bas.xml" ?inv
-    (util/map->Inv {:pn (pn/run-ready ?inv)})
-    (gov.nist.sinet.gp/add-color-binding ?inv)
-    (update ?inv :pn
-            (fn [pn]
-              (reduce (fn [pn trans] (gov.nist.sinet.gp/assign-flow-priorities pn trans))
-                      pn
-                      (->> pn :transitions (map :name)))))
-    (workflow-fitness ?inv)))
