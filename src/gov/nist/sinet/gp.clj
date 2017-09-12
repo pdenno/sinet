@@ -739,4 +739,17 @@
                                    (assoc-in arcs [(pnu/arc-index pn (:name ar)) :priority] (:priority pr))
                                    arcs))
                                arcs priority-maps)))))
-                                           
+
+;;; [{:name :m1-start-job, :act :aj, :m :m1}
+;;;  {:name :m1-complete-job, :act :bj, :m :m1, :bf :b1}
+;;;  {:name :m2-start-job, :act :sm, :m :m2, :bf :b1}
+;;;  {:name :m2-complete-job, :act :ej, :m :m2}]
+(defn diag-force-rep
+  "Set the :rep of each transition according to the argument map."
+  [pn rep-vec]
+  (update pn :transitions
+          (fn [t]
+            (reduce (fn [tvec cmd]
+                      (update-in tvec [(pnu/trans-index pn (:name cmd)) :rep]
+                                 #(merge % (dissoc cmd :name))))
+                    t rep-vec))))

@@ -3142,3 +3142,89 @@ That's all good. The problem is that the movements are not at all right!
 
 Also, we are back to no :act msgs. (These weren't in m2-inhib-bas yesterday anyway.)
 
+OK, wrote diag-force-rep to add :rep to transitions. Now we get :act on simulate.
+Some of them look good. These  don't:
+
+   {:on-act :m1-start-job, :tkn {:jtype :blue, :id 2}, :motion :move, :from :m2-starved, :to :m1-busy}
+   {:on-act :m2-start-job, :tkn {:jtype :blue, :id 2}, :motion :move, :from :buffer, :to :m1-busy}
+   {:on-act :m2-start-job, :tkn {:jtype :blue, :id 2}, :motion :move, :from :buffer, :to :m1-busy}
+
+Looking at these two:
+   {:on-act :m2-start-job, :tkn {:jtype :blue, :id 2}, :motion :move, :from :buffer, :to :m1-busy}
+   {:on-act :m2-start-job, :tkn {:jtype :blue, :id 2}, :motion :move, :from :buffer, :to :m1-busy}
+   
+The likely problem is that I'm not filtering inhibitors. (Although I'd more expect that on :m1-start-job)
+.... inhibitor filtering looks ok.
+
+:nyi
+
+   
+Looking at this one:
+   {:on-act :m1-start-job, :tkn {:jtype :blue, :id 2}, :motion :move, :from :m2-starved, :to :m1-busy}
+
+Should not be possible because these are the only arcs from :m1-start-job:
+  {:aid 15, :source :m1-start-job, :target :buffer, :name :aa-15, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 16, :source :m1-start-job, :target :m1-busy, :name :aa-16, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 2}
+
+
+The queues aren't being updated correctly:
+  :queues {:buffer [], :m1-blocked [], :m1-busy [{:jtype :blue, :id 2}], :m2-busy [{:jtype :blue, :id 2}], :m2-starved []},
+
+
+This looks wrong: 
+   {:act :sm, :m :m2, :bf :b1, :j [3], :fire :m2-start-job}                  OK...
+   {:on-act :m2-start-job, :tkn {:jtype :blue, :id 2}, :motion :remove}      ... :m2-start-job shouldn't be removing anything.
+... Fixed   
+
+This is wrong: 
+   {:on-act :m1-start-job, :tkn {:jtype :blue, :id 1}, :motion :remove}
+   {:on-act :m1-start-job, :tkn {:jtype :blue, :id 3}, :motion :add}
+
+But this is right: 
+   {:on-act :m2-start-job, :tkn {:jtype :blue, :id 2}, :motion :remove}
+   {:on-act :m2-start-job, :tkn {:jtype :blue, :id 3}, :motion :move, :from :buffer, :to :m2-busy}
+
+The oddness of the above is that I'm not getting errors on (!= remove1 remove2), yet it
+is wrong that a token is removed at :m1-start job!
+
+
+
+---> New problem!
+
+  [{:act :ej, :m :m2, :j [2], :fire :m2-complete-job}
+   {:on-act :m2-complete-job, :tkn {:jtype :blue, :id 2}, :motion :move, :from :m2-busy, :to :m2-starved}
+   {:act :bj, :m :m1, :bf :b1, :j [1], :fire :m1-complete-job}
+   {:on-act :m1-complete-job, :tkn {:jtype :blue, :id 1}, :motion :move, :from :m1-busy, :to :m1-blocked}
+   {:act :aj, :m :m1, :j [3 1], :fire :m1-start-job}
+   {:on-act :m1-start-job, :tkn {:jtype :blue, :id 3}, :motion :add}
+   {:on-act :m1-start-job, :tkn {:jtype :blue, :id 1}, :motion :move, :from :m1-blocked, :to :buffer}
+   {:act :sm, :m :m2, :bf :b1, :j [2], :fire :m2-start-job}
+   {:on-act :m2-start-job, :tkn {:jtype :blue, :id 1}, :motion :remove}
+   {:on-act :m2-start-job, :tkn {:jtype :blue, :id 2}, :motion :move, :from :m2-starved, :to :m2-busy}
+
+tkn 2 :m2-complete-job moving it to :m2-starved, then tkn 1 roles in from the buffer and gets removed.
+I don't think there is a good way out of this. I think this part of the log should be ignored as 'warm up'
+Jobs only come in at one point. I *think* it will straighten out.
+
+====> It might be a mistake to always remove the oldest token. It should be more explicit.
+
+   {:on-act :m1-start-job, :tkn {:jtype :blue, :id 20}, :motion :add}
+   {:on-act :m1-start-job, :tkn {:jtype :blue, :id 19}, :motion :move, :from :m1-blocked, :to :buffer}
+   {:act :ej, :m :m2, :j [], :fire :m2-complete-job}
+   {:act :sm, :m :m2, :bf :b1, :j [19], :fire :m2-start-job}
+   {:on-act :m2-start-job, :tkn {:jtype :blue, :id 19}, :motion :move, :from :buffer, :to :m2-busy}
+   {:act :bj, :m :m1, :bf :b1, :j [20], :fire :m1-complete-job}
+   {:on-act :m1-complete-job, :tkn {:jtype :blue, :id 20}, :motion :move, :from :m1-busy, :to :m1-blocked}
+   {:act :aj, :m :m1, :j [20], :fire :m1-start-job}
+
+
+;;;================================
+;;; "2017-09-12T10:38:02.341-00:00"
+;;;================================
+
+I have refactored update-log-for-step.
+
+===>   Same token found in two places.
+   {:queues {:buffer [{:jtype :blue, :id 3}], :m1-blocked [],
+            :m1-busy [{:jtype :blue, :id 3}], :m2-busy [{:jtype :blue, :id 2}], :m2-starved []}}
+
