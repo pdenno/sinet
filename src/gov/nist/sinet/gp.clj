@@ -114,7 +114,7 @@
 ;;; looks at the default causal knowledge. See Sankaran Mahadevan's paper with Sudarsan
 ;;; "Automated uncertainty quantification analysis using a system model and data"
 ;;; (4) The NN problem with blocking/starvation. 
-(declare eden-places eden-trans eden-arcs eden-display-geometry)
+(declare eden-places eden-trans eden-arcs)
 (defn eden-pn
   "Return a PN expressing the places and transitions of the argument 'plan.'
    It is a loop made by using visible places and transitions with additional
@@ -525,7 +525,7 @@
 (defn i-error 
   "Compute the individual's score."
   [inv]
-  (assoc inv :err (fit/workflow-fitness inv)))
+  (fit/workflow-fitness inv))
 
 (defn sort-by-error
   "Add value for :err to each PN and used it to sort the population; best first."
@@ -671,7 +671,7 @@
 (defn diag-run
   "Run the GP in diagnostic mode from the REPL. A very useful function!"
   []
-  (binding [*debugging* false]
+  (binding [*debugging* false] ;<===== Whether or not to save every individual
     (reset! diag-all-inv {})
     (let [p (promise)]
       (as-> (evolve-init) ?w

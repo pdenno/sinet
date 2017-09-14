@@ -2,7 +2,7 @@
   "General sorts of things needed in several places in the sinet project."
   {:author "Peter Denno"}
   (:require [clojure.pprint :refer (cl-format pprint)]
-            [clojure.tools.namespace.repl :as ns]))
+            [clojure.tools.namespace.repl :as nsp]))
 
 (defn app-info []
   ((resolve 'gov.nist.sinet.run/app-info)))
@@ -14,11 +14,20 @@
   (-> (app-info) :problem name))
 
 (defn reset
-  "Reset the systems, reloading changed code."
+  "Reset the system, reloading changed code."
   []
-  ;; Disable-reload! so that the atoms app/problem and app/gp-params don't get redefined.
+  ;; Disable-reload! is here so that the atoms app/problem and app/gp-params don't get redefined.
   ;; I can then update them (e.g. in testing) to run various scenarios. 
-  (ns/disable-reload! (find-ns 'gov.nist.sinet.app)) 
+  (nsp/disable-reload! (find-ns 'gov.nist.sinet.app)) 
+  ((resolve 'gov.nist.sinet.run/reset)))
+
+;;; POD This isn't helping, but I'll leave it here and work on it next time I get stuck. 
+(defn big-reset
+  "Reset the system, getting out of a jam if possible."
+  []
+  (nsp/clear)
+  #_(nsp/set-refresh-dirs)
+  (nsp/refresh)
   ((resolve 'gov.nist.sinet.run/reset)))
 
 (def +log+ (atom []))

@@ -52,7 +52,9 @@
   {:evolve-chan (async/chan)
    :pause-evolve? (atom false)})
 
-;;; I *think* that start and stop will reset the component to what is returned here. 
+;;; Start and stop will reset the component to what is returned here. Thus I use atoms
+;;; for things that I want to change and I do not reload this file on reset.
+;;; See use of (nsp/disable-reload! (find-ns 'gov.nist.sinet.app)) in util.clj.
 (defrecord App [ws-connection]
   component/Lifecycle
   (start [component]

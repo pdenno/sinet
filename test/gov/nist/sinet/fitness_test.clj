@@ -71,11 +71,11 @@
                  {:name :m2-start-job, :act :sm, :m :m2, :bf :b1}
                  {:name :m2-complete-job, :act :ej, :m :m2}])
                (sim/simulate :max-steps steps))]
-    (map->Inv {:pn pn})))
+    (fit/workflow-fitness (map->Inv {:pn pn}))))
 
 (deftest perfect-fitness-scores-zero
   (testing "That a PN matching the log scores zero."
-    (is (=* 0.0 0.0 #_(m2-inhib-bas-fit 200) 0.01))))
+    (is (=* 0.0 (m2-inhib-bas-fit 200) 0.01))))
 
 (defn problem-setting-fixture
   "Set the 'problem' (the log we look at) to the m2-inhib-bas problem."

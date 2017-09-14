@@ -1,7 +1,7 @@
 (ns gov.nist.sinet.fitness
   "Compute the fitness of an individual"
-  (:require [medley.core :refer (abs)]
-            [clojure.pprint :refer (cl-format pprint)]
+  (:require [clojure.pprint :refer (cl-format pprint)]
+            [clojure.set :as set]
             [gov.nist.spntools.core :as pn :refer :all]
             [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp)]
             [gov.nist.spntools.util.reach :as pnr :refer (reachability)]
@@ -27,12 +27,16 @@
 ;;; QPN
 ;;;===========================================
 ;;; POD only collects from :act messages currently (no :on-act)
+;;;  {:act :ej, :m :m2, :j [46], :fire :m2-complete-job}
 (defn qpn-gather-tkn
   "Return every mention of token id in chronological order."
   [log tkn-id]
   (filter (fn [msg]
-            (and (contains? msg :rep)
-                 (some #(= (:id %) tkn-id) (:tkns msg))))
+            (and (contains? msg :act)
+                 #_(some #(= % tkn-id) (:j msg))
+                 ;; POD not too sure about just using the newest token here. 
+                 (when (not-empty (:j msg))
+                   (== tkn-id (apply max (:j msg))))))
           log))
 
 (declare act2trans)
@@ -49,7 +53,7 @@
 ;;; An example is {:act :aj, :tkns [{:type :a, :id 23} {:type :a, :id 22}]} above.
 ;;; Here I remove those. 
 (defn qpn-log-about
-  "Return in chronologicl order log entries about the argument tkn-id.
+  "Return in chronological order log entries about the argument tkn-id.
    This removes messages concerning the introduction of a token that is not the argument token."
   [pn tkn-id]
   (remove (fn [msg]
@@ -112,21 +116,36 @@
       (/ (apply + (map #(* (/ (:njobs %) njobs) (count (:form %))) patterns))
          npat))))
 
+;;; Example scada pattern:
+;;;({:id 3,
+;;;    :form [{:act :aj, :jt :*} {:act :bj, :bf :b1, :n :*} {:act :sm, :bf :b1, :n :*} {:act :ej, :m :m2}],
+;;;    :relations
+;;;    [#function[gov.nist.sinet.scada/ordering-fn/fn--19018]...]
+;;;    :njobs 244})
+
 ;;; +1 for every precedence constraint violated. +1 for each act not manifest in the QPN log. 
 ;;; Will need something more for loops, but we'll get to that later.
 (defn calc-process-disorder
-  "Return the best score from matching the argument job against every SCADA pattern."
-  [job patterns]
+  "For a single QPN job-trace, return a map {:score <> :pattern-id <>} indicating the 
+   score and pattern-id from the best matching SCADA patterns. Note that in assembly lines,
+   there is only one SCADA pattern."
+  [job-trace patterns]
   (loop [pats patterns
-         start-score 99999]
-    (let [nact-diff (Math/abs (- (count job) (count (:form (first pats)))))
-          nviolates (reduce (fn [score rel] (if (violates? job rel) (inc score) score))
+         best {:score 99999 :pattern-id -1}]
+    (let [pat (first pats)
+          nact-diff (Math/abs (- (count job-trace)
+                                 (count (set/intersection (set (map :act (:form pat)))
+                                                          (set (map :act job-trace))))))
+          nviolates (reduce (fn [score rel] (if (violates? job-trace rel) (inc score) score))
                             0
-                            (:relations (first pats)))
+                            (:relations pat))
           this-score (+ nact-diff nviolates)]
-      (cond (= this-score 0) 0
-            (empty? (next pats)) this-score
-            :else (recur (next pats) (min this-score start-score))))))
+      (cond (== this-score 0) {:score 0 :pattern-id (:id pat)}
+            (empty? (next pats)) best
+            :else (recur (next pats)
+                         (if (< this-score (:score best))
+                           {:score this-score :pattern-id (:id pat)}
+                           best))))))
 
 (defn trunc-qpn-log-at-cycle
   "Return a log that stops when it sees the same message a second time on the same job."
@@ -138,33 +157,88 @@
         short-log
         (recur (next log) (conj short-log msg))))))
 
+;;; In principle, SCADA log processes produces multiple patterns. In practice, there is only
+;;; one pattern per colour for a transfer/flow or assembly line. Associated with each colour-tagged
+;;; pattern are sojourn times and breakdown/repair rates. 
+;;; workflow-fitness looks at a range (tkn-range) of qpn jobs, finding the error in each relative
+;;; to the (typically one) SCADA log pattern, producing the average error relative to this pattern.
+
+;;; What is the GP doing?
+;;;   1) It is finding a PN that best matches the log. That PN has colour. SCADA logs
+;;;      also have colour. The PNs could have multiple paths for different job types or
+;;;      could combine paths where that makes more sense. 
+
+;;; The individuals have to cope with all job types. I will keep scores on how well
+;;; the PN does against each SCADA job type (colour). Then I can use crossover to combine
+;;; the best of multiple colour paths. (One Inv does well on blue, another does well on red...)
+;;; Maybe the GP is two-phase, where the first phase optimises for individual colours (no crossover)
+;;; and the second phase predominantly does crossover on these individuals. Maybe they aren't
+;;; so much phases as a function that increases the portion of crossovers as the colour-wise
+;;; scores increase. Early on, perhaps scoring is about being good at one color, and later about
+;;; being good at all of them. Maybe in addition to increasing cross-over, I penalize more for
+;;; not handling multiple types (and do this by weighting, according to the proportion of each job
+;;; type seen).
+
+;;; So that's all good, but what do I mean by "does well on blue" etc.? With the SCADA log
+;;; I'll have information about workstation reliability, colour of jobs, and time spent on
+;;; at each workstation. I can keep patterns for each color. Indeed, it is not even necessary
+;;; that something is reported at each workstation -- some workstations in the line could
+;;; "disappear" and there would be a different section of path for some color where this occurs.
+;;; I don't think there is a challenge here except in finding buffer sizes. Maybe that is a good
+;;; thing. Do the ANN on the buffer size and be done with it. (BTW, maybe there are similar
+;;; problems such as not having sufficient carriers, etc.)
+
+;;; A problem here is that I don't have anything in the GP fitness measurement currently that
+;;; would encourage the introduction of inhibitor arcs (and their multiplicity) as means of
+;;; specifying buffer capacity. Should I just explicitly edit the PN according to the results
+;;; of the ANN classification? (And how exactly do you I get the ANN to tell me that it is
+;;; focusing on the quantity of tokens in place x?)
+
+;;; The steady-state and dynamic analyses are looking more and more like validation activities.
+;;; Maybe I translate to DES to do these. (Do I feed back the results? How? What?)
+
+;;; A potentially negative aspect of the above is that it may completely separates jobs of
+;;; different types. Can this be fixed with flexible cross-over? For example, I could 
+;;; make some part of the red/blue, another part of the path separate red and blue. 
+
+
+
+
+
 ;;; (workflow-fitness (:pn i1) (:scada-patterns +problem+)) ; i1 is in the file data/test-m2-bas.clj
 ;;; Problem here is to run enough steps to get enough jobs to be able to trim some.
 ;;; POD Note that this treats jobs that return to workstation as damaged. 
 (defn workflow-fitness
-  "Generate a QPN log for the PN and return the score WRT SCADA patterns. The score is the
-   average (across all complete jobs) of the process disorder of the best matched process.
-   If there are very few jobs (perhaps because :elim :intro weirdness), then just score them."
+  "Generate a QPN log for the PN and return the score WRT SCADA patterns. The disorder score is the
+   average (across a range of complete QPN jobs) of the process disorder of the best matched process.
+   If there are very few jobs (perhaps because :elim :intro weirdness), then just score them.
+   The total score is (currently) disorder score + weighted number of vertices in the individual.
+   That latter term is intended to discourage individuals that add pointless structure. "
   [inv]
   (let [patterns (-> (util/app-info) :problem :scada-patterns)
         no-new-jobs-penalty (-> (util/app-info) :gp-params :no-new-jobs-penalty)
         pn (sim/simulate (:pn inv) :max-steps (* 50 (avg-scada-process-steps patterns)))
         max-tkn (-> pn :sim :max-tkn) ; max-tkn is number of tokens generated by sim.
-        warm-up (-> (util/app-info) :gp-params :aqpn-warm-up)]
-    (if (> max-tkn 20)
-      (let [tkn-range (range warm-up (- (-> pn :sim :max-tkn) warm-up))
-            total-error (reduce (fn [sum tkn-id] ; sum disorder on simulation job. 
-                                  (+ sum (calc-process-disorder (qpn-log-about pn tkn-id) patterns)))
-                                0
-                                tkn-range)]
-        (double (/ total-error (count tkn-range))))
-      ;; Otherwise just a few jobs. It is likely to be not eliminating jobs-ids, so
-      ;; we'll truncated it at the first cycle. 
-      (let [tkn-id (max (Math/round (/ (-> pn :sim :max-tkn) 2.0)) 1)]
-        (+ no-new-jobs-penalty
-           (calc-process-disorder
-            (-> pn (qpn-log-about tkn-id) trunc-qpn-log-at-cycle)
-            patterns))))))
+        warm-up (-> (util/app-info) :gp-params :aqpn-warm-up)
+        disorder (if (> max-tkn 20)
+                   (let [tkn-range (range warm-up (- (-> pn :sim :max-tkn) warm-up))
+                         sum-error (reduce (fn [sum tkn-id] ; sum disorder on simulation job. 
+                                               (+ sum (calc-process-disorder (qpn-log-about pn tkn-id) patterns)))
+                                             0
+                                             tkn-range)]
+                     ;; Average over all the jobs. Q: Is this really what I want? A: I think so,
+                     ;; because 
+                     (double (/ sum-error (count tkn-range))))
+                   ;; Otherwise just a few jobs. It is likely to be not eliminating jobs-ids, so
+                   ;; we'll truncated it at the first cycle. 
+                   (let [tkn-id (max (Math/round (/ (-> pn :sim :max-tkn) 2.0)) 1)]
+                     (+ no-new-jobs-penalty
+                        (calc-process-disorder
+                         (-> pn (qpn-log-about tkn-id) trunc-qpn-log-at-cycle)
+                         patterns))))]
+;;;        ;; POD Once we start considering coloured PNs (multiple paths) this will need to be adjusted.
+;;;        score [(+ disorder
+    (assoc inv :err disorder)))
 
 ;;; These are useful to understanding how things work. 
 ;;; This one for an Eden INV:
@@ -205,16 +279,25 @@
            (when (> (-> pn :sim :log count) 20) %))
         (-> (util/app-info) :pop)))
 
-(defn diag-simulate
-  "Run the individual a bit an print its log."
-  [inv]
-  (let [pn (sim/simulate (:pn inv) :max-steps 50)]
-;    (doall (map println (-> pn :sim :log)))
-    pn))
-
 ;;; POD NYI    
-(defn diag-process-disorder
+#_(defn diag-process-disorder
   "Report how messed up this PN is." 
   [inv]
   (let [patterns (-> (util/app-info) :problem :scada-patterns)
         sim (-> inv :pn (sim/simulate :max-steps (* 50 (avg-scada-process-steps patterns))))]))
+
+;;; This needs to be commented out. (load order)
+#_(defn m2-inhib-bas
+  "Setup the m2-inhib-bas PN for a fitness test"
+  [steps]       ;     Change...
+  (let [pn (-> "/Users/peterdenno/Documents/git/spntools/data/m2-inhib-bas.xml" 
+               gov.nist.spntools.core/run-ready
+               gov.nist.sinet.gp/add-color-binding
+               (gov.nist.sinet.gp/diag-force-priority [{:source :m1-start-job, :target :buffer :priority 2}])
+               (gov.nist.sinet.gp/diag-force-rep
+                [{:name :m1-start-job, :act :aj, :m :m1}
+                 {:name :m1-complete-job, :act :bj, :m :m1, :bf :b1}
+                 {:name :m2-start-job, :act :sm, :m :m2, :bf :b1}
+                 {:name :m2-complete-job, :act :ej, :m :m2}])
+               (sim/simulate :max-steps steps))]
+    (workflow-fitness (util/map->Inv {:pn pn}))))

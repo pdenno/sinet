@@ -477,9 +477,12 @@
 (defn pn-geom
   "Compute reasonable display placement (:geom) for the argument PN."
   [pn]
-  (let [elems (interleave
-               (->> pn :places (map :name))
-               (->> pn :transitions (map :name)))
+  (let [places (->> pn :places (map :name))
+        trans  (->> pn :transitions (map :name))
+        elems  (-> (interleave places trans)
+                   (into places)
+                   (into trans)
+                   (distinct))
         angle-inc (/ (* 2 Math/PI) (count elems))
         angle (atom (- angle-inc))]
     (-> pn 

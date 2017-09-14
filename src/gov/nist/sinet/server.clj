@@ -45,6 +45,7 @@
     (if server-stop
       (server-stop)
       (log/debug "Not HTTP server on component stop!"))
+    ((:stop-fn ws-connection)) ; Added in an attempt to get big-reset working. No help?
     (log/debug "HTTP server stopped")
     (assoc component :server-stop nil)))
 

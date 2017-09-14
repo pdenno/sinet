@@ -174,7 +174,7 @@
   ([pn] (validate-pulled pn "no message"))
   ([pn msg]
    (let [tkns (map :id (-> pn :sim :pulled))]
-     (when (not= (count tkns) (count (dedupe tkns)))
+     (when (not= (count tkns) (count (distinct tkns)))
        (reset! diag pn)
        (throw (ex-info (str "Same token in pulled twice: " msg)
                        {:pulled (-> pn :sim :pulled)}))))
@@ -184,7 +184,7 @@
   "Check that queues do not have duplicate tokens."
   [pn]
   (let [tkns (map :id (-> pn :sim :queues vals flatten))]
-    (when (not= (count tkns) (count (dedupe tkns)))
+    (when (not= (count tkns) (count (distinct tkns)))
       (reset! diag pn)
       (throw (ex-info "Same token found in two places."
                       {:queues (-> pn :sim :queues)}))))

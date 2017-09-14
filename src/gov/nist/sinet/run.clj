@@ -23,7 +23,6 @@
 (defn run []
   (init)
   (start)
-  ;(Thread/sleep 2000)
   (gp/start-evolve-loop!)
   system)
 
