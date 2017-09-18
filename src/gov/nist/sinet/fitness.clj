@@ -157,9 +157,9 @@
         short-log
         (recur (next log) (conj short-log msg))))))
 
-;;; In principle, SCADA log processes produces multiple patterns. In practice, there is only
-;;; one pattern per colour for a transfer/flow or assembly line. Associated with each colour-tagged
-;;; pattern are sojourn times and breakdown/repair rates. 
+;;; SCADA log processes produces multiple patterns. There is one pattern per colour for
+;;; a transfer/flow or assembly line. Associated with each colour-tagged
+;;; pattern are sojourn times and breakdown/repair rates. (POD, that is a ToDo!)
 ;;; workflow-fitness looks at a range (tkn-range) of qpn jobs, finding the error in each relative
 ;;; to the (typically one) SCADA log pattern, producing the average error relative to this pattern.
 
@@ -202,9 +202,6 @@
 ;;; make some part of the red/blue, another part of the path separate red and blue. 
 
 
-
-
-
 ;;; (workflow-fitness (:pn i1) (:scada-patterns +problem+)) ; i1 is in the file data/test-m2-bas.clj
 ;;; Problem here is to run enough steps to get enough jobs to be able to trim some.
 ;;; POD Note that this treats jobs that return to workstation as damaged. 
@@ -222,23 +219,23 @@
         warm-up (-> (util/app-info) :gp-params :aqpn-warm-up)
         disorder (if (> max-tkn 20)
                    (let [tkn-range (range warm-up (- (-> pn :sim :max-tkn) warm-up))
-                         sum-error (reduce (fn [sum tkn-id] ; sum disorder on simulation job. 
-                                               (+ sum (calc-process-disorder (qpn-log-about pn tkn-id) patterns)))
-                                             0
-                                             tkn-range)]
-                     ;; Average over all the jobs. Q: Is this really what I want? A: I think so,
-                     ;; because 
+                         sum-error (reduce (fn [sum tkn-id] ; sum disorder on simulation job.
+                                             ;; POD I am not using :pattern-id yet. Needs thought. 
+                                             (+ sum (:score (calc-process-disorder (qpn-log-about pn tkn-id) patterns))))
+                                           0
+                                           tkn-range)]
+                     ;; Average over all the jobs. 
                      (double (/ sum-error (count tkn-range))))
                    ;; Otherwise just a few jobs. It is likely to be not eliminating jobs-ids, so
                    ;; we'll truncated it at the first cycle. 
                    (let [tkn-id (max (Math/round (/ (-> pn :sim :max-tkn) 2.0)) 1)]
                      (+ no-new-jobs-penalty
-                        (calc-process-disorder
-                         (-> pn (qpn-log-about tkn-id) trunc-qpn-log-at-cycle)
-                         patterns))))]
-;;;        ;; POD Once we start considering coloured PNs (multiple paths) this will need to be adjusted.
-;;;        score [(+ disorder
-    (assoc inv :err disorder)))
+                        (:score (calc-process-disorder
+                                 (-> pn (qpn-log-about tkn-id) trunc-qpn-log-at-cycle)
+                                 patterns)))))]
+    (-> inv
+        (assoc :disorder disorder)
+        (assoc :err      disorder))))
 
 ;;; These are useful to understanding how things work. 
 ;;; This one for an Eden INV:

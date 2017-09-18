@@ -528,11 +528,17 @@
   (fit/workflow-fitness inv))
 
 (defn sort-by-error
-  "Add value for :err to each PN and used it to sort the population; best first."
+  "Add value for :err to each PN and used it to sort the population by disorder.
+   Where disorder is equal, prefer the one with less structure."
   [popu]
   (as-> popu ?i
     (pmap i-error ?i) ; POD pmap
-    (vec (sort #(< (:err %1) (:err %2)) ?i))))
+    (vec (sort #(do (reset! diag {:one %1 :two %2})
+                    (cond (< (:err %1) (:err %2)) true,
+                          (and (== (:err %1) (:err %2))
+                               (< (pnu/pn-size (:pn %1)) (pnu/pn-size (:pn %2)))) true,
+                          :else false))
+               ?i))))
 
 (defn select
   "Select an individual from a sorted population using a tournament of given size."

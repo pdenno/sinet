@@ -4,13 +4,23 @@
   (:require [clojure.pprint :refer (cl-format pprint)]
             [clojure.tools.namespace.repl :as nsp]))
 
-(defn app-info []
+(defn app-info
+  "The way into the app for reading."
+  []
   ((resolve 'gov.nist.sinet.run/app-info)))
 
-(defn gp-param [name]
+(defn set-param!
+  "The way into the app for writing."
+  (alter-var-root
+   #'gov.nist.sinet.run/system
+
+(defn gp-param
+  "Convenience way into gp parameters"
+  [name]
   (-> (app-info) :gp-params name))
 
 (defn pr-param [name]
+  "Convenience way into problem parameters"
   (-> (app-info) :problem name))
 
 (defn reset
@@ -52,12 +62,12 @@
             []
             (range n))))
 
-(defrecord Inv [pn id error history])
+(defrecord Inv [pn id err disorder types history])
 
 (defn print-inv [p writer]
   (.write writer (cl-format nil "#Inv [err=~A]"
-                            (if (number? (:err p))
-                              (cl-format nil "~6,2F" (:err p))
+                            (if (number? (:disorder p)) ; POD temporary. Should be :err
+                              (cl-format nil "~6,2F" (:disorder p))
                               :NA))))
 
 (defmethod print-method Inv [p writer]

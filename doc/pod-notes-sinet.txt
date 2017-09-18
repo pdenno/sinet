@@ -3287,3 +3287,11 @@ Diag run with *debugging* = false: "Elapsed time:  58843.506617 msecs"
     http://clojure.github.io/tools.namespace/ has some stuff disable-reload! that looks useful.
     Further, for more general problem solving with tools.namespace checkout clear, and refresh. 
 
+;;;================================
+;;; "2017-09-15T11:36:55.658-00:00"
+;;;================================
+
+Among individuals with the same disorder score, I now prefer (in sort) ones of smaller size.
+Nonetheless, I'm still getting superfluous structure. Is the population too small? 
+
+
