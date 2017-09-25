@@ -3295,3 +3295,118 @@ Among individuals with the same disorder score, I now prefer (in sort) ones of s
 Nonetheless, I'm still getting superfluous structure. Is the population too small? 
 
 
+;;;=================================
+;;; "2017-09-23T16:22:38.087-00:00"
+;;;=================================
+
+I'M BACK!
+
+Where I was is that I'm wondering why PNs with unnecessary structure are scoring better
+than ones without. (Do they all have unnecessary structure? I thought that the basic net wouldn't)
+
+--> A problem with sorting them as I do is that it is relative. There is an absolute better
+PN, but if I don't see it, I won't know that it exists. Also, should the Eden PN be perfect
+(in this case, with only one job type)?
+
+This comes in second and has error of 1.00; I think it should be first and be 0.
+
+{:places
+ [{:name :place-1, :pid 1, :initial-tokens 1, :visible? true}
+  {:name :place-2, :pid 2, :initial-tokens 0, :visible? true}
+  {:name :place-3, :pid 3, :initial-tokens 0, :visible? true}
+  {:name :place-4, :pid 4, :initial-tokens 0, :visible? true}],
+ :transitions
+ [{:name :m1-start-job, :tid 1, :type :exponential, :rate 1.0, :rep {:act :aj, :m :m1}, :visible? true}
+  {:name :m1-complete-job, :tid 2, :type :exponential, :rate 1.0, :rep {:act :bj, :m :m1, :bf :b1}, :visible? true}
+  {:name :m2-start-job, :tid 3, :type :exponential, :rate 1.0, :rep {:act :sm, :m :m2, :bf :b1}, :visible? true}
+  {:name :m2-complete-job, :tid 4, :type :exponential, :rate 1.0, :rep {:act :ej, :m :m2}, :visible? true}],
+ :arcs
+ [{:aid 1, :source :place-1, :target :m1-start-job, :name :aa-1, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+  {:aid 2, :source :m1-start-job, :target :place-2, :name :aa-2, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 3, :source :place-2, :target :m1-complete-job, :name :aa-3, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+  {:aid 4, :source :m1-complete-job, :target :place-3, :name :aa-4, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 5, :source :place-3, :target :m2-start-job, :name :aa-5, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+  {:aid 6, :source :m2-start-job, :target :place-4, :name :aa-6, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 7, :source :place-4, :target :m2-complete-job, :name :aa-7, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+  {:aid 8, :source :m2-complete-job, :target :place-1, :name :aa-8, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}]}
+
+Nope! It gets the no-new-job-penalty.
+
+---> This gets an error of just 1.00 ???
+
+{:places
+ [{:name :place-1, :pid 269, :initial-tokens 1, :visible? true}],
+ :transitions
+ [{:name :m1-start-job,
+   :tid 269,
+   :type :exponential,
+   :rate 1.0,
+   :rep {:act :aj, :m :m1},
+   :visible? true}],
+ :arcs
+ [{:aid 537,
+   :source :place-1,
+   :target :m1-start-job,
+   :name :aa-537,
+   :type :normal,
+   :multiplicity 1,
+   :bind {:jtype :blue}}
+  {:aid 538,
+   :source :m1-start-job,
+   :target :place-1,
+   :name :aa-538,
+   :type :normal,
+   :multiplicity 1,
+   :bind {:jtype :blue},
+   :priority 1}]}
+
+The simulation look like this:
+{:act :aj, :m :m1, :j [], :fire :m1-start-job} over and over again.
+
+There is no qpn log, since there is no jobs showing up.
+Either get a token or a log, or penalize for no log whatsoever.
+
+                     (+ no-new-jobs-penalty
+                        (:score (calc-process-disorder
+                                 (-> pn (qpn-log-about tkn-id) trunc-qpn-log-at-cycle)
+                                 patterns)))))]
+
+There are no jobs because no tokens move. Well, more precisely a token DOES get consumed AND PUT BACK into
+the same place from which it was consumed. Can I count that as consumed without screwing things up?
+I doubt it. That's certainly not the job of moved-tkns:
+
+(defn moved-tkns
+  "Study queues to determine what tokens have moved."
+  [pn]
+    (let [qs  (-> pn :sim :queues)
+          oqs (-> pn :sim :old-queues)
+          old (-> oqs vals flatten set)
+          new (->  qs vals flatten set)
+          remain  (clojure.set/intersection old new)
+          find-at (fn [tkn queues] (some (fn [[key val]] (when (some #(= % tkn) val) key)) queues))]
+      (reduce (fn [mvd stay]
+                (if (= (find-at stay qs) (find-at stay oqs))
+                  mvd
+                  (conj mvd stay)))
+              [] remain)))
+
+There well may be such things in the PN, but they won't represent jobs, really. They will be control tokens.
+So what I think I need is a 'no qpn log penalty'. I'll make it 3.00
+
+--> I fixed a bug in calc-process-disorder where it was returning with the initial score in some cases.
+
+---> Time to move on to new capabilities! I am going to try 2 job types on three machines!
+
+BTW, MJPdes is exiting before calculating useful final stuff. 
+{:residence-sum 39135.05454510398,
+ :njobs 5279,
+ :m1 {:blocked 219.49056861300733, :starved 0.0, :bs nil, :ss nil},
+ :m2 {:blocked 59.817939137892154, :starved 280.3137668417264, :bs nil, :ss nil},
+ :m3 {:blocked 0.0, :starved 582.3777962126412, :bs nil, :ss nil},
+ :b1 {0 2008.9291027193572, 1 2591.811795662201, 2 3399.206677138638, :lastclk 9999.947575520197},
+ :b2 {0 3342.4488726581476, 1 2623.334686729707, 2 2034.164016132342, :lastclk 9999.947575520197}}
+
+;;;================================
+;;; "2017-09-25T16:12:38.214-00:00"
+;;;================================
+

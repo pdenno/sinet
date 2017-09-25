@@ -5,8 +5,8 @@
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :global-vars {*assert* true}
   :dependencies [[org.clojure/clojure        "1.8.0"]
-                 [org.clojure/tools.reader   "1.0.2"] ; this one can probably go. 
-                 [org.clojure/clojurescript  "1.9.854"]
+                 [org.clojure/tools.reader   "1.1.0"] ; this one can probably go. 
+                 [org.clojure/clojurescript  "1.9.908"]
                  [org.clojure/tools.trace    "0.7.9"]
                  [medley                     "1.0.0"]
                  [org.clojure/core.async     "0.3.443"]
@@ -16,24 +16,24 @@
                  [ch.qos.logback/logback-classic "1.2.3"] 
                  [org.clojure/tools.logging      "0.4.0"]
                  
-                 [ring                       "1.6.1" :exclusions [org.clojure/tools.namespace]]
-                 [ring/ring-defaults         "0.3.0"]
+                 [ring                       "1.6.2" :exclusions [org.clojure/tools.namespace]]
+                 [ring/ring-defaults         "0.3.1"]
                  [compojure                  "1.6.0"]
                  [http-kit                   "2.2.0"]
 
                  [com.taoensso/sente         "1.11.0-POD"] ; POD
 
                  [reagent                    "0.7.0"]
-                 [reagent-forms              "0.5.29"]
-                 [re-frame                   "0.9.4"] 
-                 [re-frisk                   "0.4.5"] 
+                 [reagent-forms              "0.5.31"]
+                 [re-frame                   "0.10.1"] 
+                 [re-frisk                   "0.5.0"] 
                  [org.webjars/bootstrap      "3.3.7"] ; "4.0.0-alpha" had problems with menu
                  [quil                       "2.6.0"]
 
 ;                [gov.nist/MJPdes            "0.1.0-SNAPSHOT"]
                  [gov.nist/spntools          "0.1.0-SNAPSHOT" :exclusions [org.clojure/clojure]]]
 
-  :plugins [[lein-figwheel "0.5.11"]
+  :plugins [[lein-figwheel "0.5.13"]
             [lein-cljsbuild "1.1.4"]]
   :hooks [leiningen.cljsbuild]
   
@@ -56,10 +56,10 @@
              :dev [:dev-config ; This pattern of use from rente. 
                    {:dependencies [[org.clojure/tools.namespace "0.2.10"]
                                    [com.cemerick/piggieback "0.2.2"] 
-                                   [figwheel "0.5.11"]
-                                   [figwheel-sidecar "0.5.11"]]
+                                   [figwheel "0.5.13"]
+                                   [figwheel-sidecar "0.5.13"]]
                     :repl-options {:nrepl-middleware [cemerick.piggieback/wrap-cljs-repl]}
-                    :plugins [[lein-figwheel "0.5.11"]
+                    :plugins [[lein-figwheel "0.5.13"]
                               [lein-environ "1.0.1"]]
                               
                     :source-paths ["dev"] ;...now it is on the path. 

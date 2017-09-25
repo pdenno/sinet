@@ -479,24 +479,24 @@
   [pn]
   (let [places (->> pn :places (map :name))
         trans  (->> pn :transitions (map :name))
-        elems  (-> (interleave places trans)
+        elems  (-> (vec (interleave places trans))
                    (into places)
                    (into trans)
                    (distinct))
         angle-inc (/ (* 2 Math/PI) (count elems))
         angle (atom (- angle-inc))]
     (-> pn 
-      (assoc :geom 
-             (reduce (fn [geom ename]
-                       (swap! angle #(+ % angle-inc))
-                       (assoc geom ename
-                              {:x (Math/round (* 100 (Math/cos @angle)))
-                               :y (Math/round (* 100 (Math/sin @angle)))
-                               :label-x-off 10
-                               :label-y-off 15}))
-                     {}
-                     elems))
-      (rescale))))
+        (assoc :geom 
+               (reduce (fn [geom ename]
+                         (swap! angle #(+ % angle-inc))
+                         (assoc geom ename
+                                {:x (Math/round (* 100 (Math/cos @angle)))
+                                 :y (Math/round (* 100 (Math/sin @angle)))
+                                 :label-x-off 10
+                                 :label-y-off 15}))
+                       {}
+                       elems))
+        (rescale))))
 
 
 

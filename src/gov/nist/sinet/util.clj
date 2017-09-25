@@ -9,18 +9,22 @@
   []
   ((resolve 'gov.nist.sinet.run/app-info)))
 
+; (set-param! [:app :foobar] :baz)
 (defn set-param!
   "The way into the app for writing."
+  [path value]
   (alter-var-root
-   #'gov.nist.sinet.run/system
+   (resolve 'gov.nist.sinet.run/system)
+   (fn [sys]
+     (assoc-in sys path value))))
 
 (defn gp-param
-  "Convenience way into gp parameters"
+  "Convenient way into gp parameters for reading"
   [name]
   (-> (app-info) :gp-params name))
 
 (defn pr-param [name]
-  "Convenience way into problem parameters"
+  "Convenient way into problem parameters for reading"
   (-> (app-info) :problem name))
 
 (defn reset
