@@ -3410,3 +3410,51 @@ BTW, MJPdes is exiting before calculating useful final stuff.
 ;;; "2017-09-25T16:12:38.214-00:00"
 ;;;================================
 
+Out of the blue:
+java.lang.IllegalArgumentException: No implementation of method: :sch-send! of protocol:
+#'taoensso.sente.interfaces/IServerChan found for class: org.httpkit.server.AsyncChannel
+
+I'm really starting to hate this stuff!
+I'm starting over, working on the mystery of why the simplest PN isn't first. 
+
+In my current run it scores 0 but is behind one that has more structure.
+DUH! REMEMBER THIS: It doesn't start new jobs!
+
+;;;================================
+;;; "2017-09-26T21:41:52.724-00:00"
+;;;================================
+
+;;; I'm in SPNtools, but what does it matter?
+
+Note that the code MUST filter out timed transitions in next-link when there is a untimed transition.
+To not do so adds illegal transitions (e.g. completing a job while a starvation condition could be eliminated).
+If fact, in general CONDITIONS that need to be cleared by logic take precedence over EVENTS, which are timed. 
+
+ {:M [0 1 0 0 1], :fire :m1-start-job, :Mp [1 0 1 0 1], :rate 1.0}
+ {:M [0 1 0 1 0], :fire :m1-start-job, :Mp [1 0 1 1 0], :rate 1.0}
+ {:M [0 0 1 0 1], :fire :m1-complete-job, :Mp [0 1 0 0 1], :rate 0.9}
+ {:M [0 0 1 1 0], :fire :m1-complete-job, :Mp [0 1 0 1 0], :rate 0.9}
+ {:M [1 0 1 1 0], :fire :m1-complete-job, :Mp [1 1 0 1 0], :rate 0.9}
+ {:M [1 1 0 0 1], :fire :m2-start-job, :Mp [0 1 0 1 0], :rate 1.0}
+ {:M [1 0 1 0 1], :fire :m2-start-job, :Mp [0 0 1 1 0], :rate 1.0}
+ {:M [1 0 1 1 0], :fire :m2-complete-job, :Mp [1 0 1 0 1], :rate 1.0}
+ {:M [1 1 0 1 0], :fire :m2-complete-job, :Mp [1 1 0 0 1], :rate 1.0}
+ {:M [0 0 1 1 0], :fire :m2-complete-job, :Mp [0 0 1 0 1], :rate 1.0})
+
+This looks correct. 
+
+;;;================================
+;;; "2017-09-27
+;;;================================
+
+I don't have time for this. Essentially a bad idea. 
+(def scada-chan (async/chan))
+
+(defn reload-scada-chan []
+  (doseq [msg (-> (app-info) :problem :scada-log)]
+    (go (>! scada-chan (scada/mjpdes2pn msg))))) ; >! means parking (doesn't hold on to process). 
+
+
+
+
+

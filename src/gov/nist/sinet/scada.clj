@@ -1,6 +1,7 @@
 (ns gov.nist.sinet.scada
   "Read and process SCADA data."
   (:require [clojure.set :refer (union difference intersection)]
+            [clojure.pprint :refer (cl-format pprint)]
             [clojure.edn :as edn]
             [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp)]
             [gov.nist.sinet.util :as util :refer (app-info)]))
@@ -35,6 +36,11 @@
     (or (look-fn inc #(>= % look-to))
         (look-fn dec #(<= % 0)))))
 
+(defn scada-log
+  "Return the entire SCADA log vector."
+  []
+  (-> (util/app-info) :problem :scada-log))
+
 (declare scada-gather-job)
 
 (defn random-job-trace
@@ -42,7 +48,7 @@
    with where it is first mentioned to where it is last mentioned MINUS
    the messages that are about a different job."
   []
-  (let [data (-> (util/app-info) :problem :scada-log)
+  (let [data (scada-log)
         line-num (-> data count rand-int)
         job-id (job-id-near data line-num)
         job-trace (scada-gather-job data job-id)
@@ -202,3 +208,35 @@
              (reduce (fn [m s] (conj m (ordering-fn (:act (first events)) (:act s))))
                      []
                      (rest events)))))))
+
+;;; POD Someday you might want to call this with multiple job traces.
+;;; POD This interprets/translates the SCADA log. We'll need to generalize it someday.
+(defn scada2pn-name
+  "Return a transition name for a given SCADA msg (bl/ub/st/us probably wont' be used.)"
+  [msg]
+  (let [m (implies-machine msg)]
+    (cond (= :aj (:act msg)) (read-string (cl-format nil "~A-start-job"    m)),
+          (= :ej (:act msg)) (read-string (cl-format nil "~A-complete-job" m)),
+          (= :sm (:act msg)) (read-string (cl-format nil "~A-start-job"    m)),
+          (= :bj (:act msg)) (read-string (cl-format nil "~A-complete-job" m)),
+          (= :bl (:act msg)) (read-string (cl-format nil "~A-blocked"      m)),
+          (= :ub (:act msg)) (read-string (cl-format nil "~A-unblocked"    m)),
+          (= :st (:act msg)) (read-string (cl-format nil "~A-starved"      m)),
+          (= :us (:act msg)) (read-string (cl-format nil "~A-unstarved"    m)))))
+
+;;; POD Will need to generalize this idea of 'what a message means' I'm giving nice "pn names" to MJPdes output. 
+;;; (mjpdes2pn (first (scada/random-job-trace))) ==>  {:name :m1-start-job, :act :aj, :m :m1}
+(defn mjpdes2pn
+  "Interpret/translate the SCADA log. (Give pn names to MJPdes output.)" 
+  [msg]
+  (let [m (implies-machine msg)]
+    (cond (= :aj (:act msg)) {:name (scada2pn-name msg) :act :aj :m m :j (:j msg)} 
+          (= :ej (:act msg)) {:name (scada2pn-name msg) :act :ej :m m :j (:j msg)} 
+          (= :sm (:act msg)) {:name (scada2pn-name msg) :act :sm :m m :bf (:bf msg) :j (:j msg)}
+          (= :bj (:act msg)) {:name (scada2pn-name msg) :act :bj :m m :bf (:bf msg) :j (:j msg)}
+          (= :bl (:act msg)) {:name (scada2pn-name msg) :act :bl :m m :j (:j msg)}
+          (= :ub (:act msg)) {:name (scada2pn-name msg) :act :ub :m m :j (:j msg)}
+          (= :st (:act msg)) {:name (scada2pn-name msg) :act :st :m m :j (:j msg)}
+          (= :us (:act msg)) {:name (scada2pn-name msg) :act :us :m m :j (:j msg)})))
+
+

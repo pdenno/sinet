@@ -10,7 +10,7 @@
             [gov.nist.spntools.util.pnml :as pnml :refer (read-pnml)] ;  POD clean this up
             [gov.nist.sinet.util :as util :refer (app-info map->Inv gp-param pr-param *debugging*)]
             [gov.nist.sinet.simulate :as sim :refer (simulate)]
-            [gov.nist.sinet.fitness :as fit :refer (workflow-fitness)]
+            [gov.nist.sinet.fitness :as fit :refer (workflow-fitness exceptional-fitness)]
             [gov.nist.sinet.scada :as scada]
             [gov.nist.sinet.ws :as ws]
             [gov.nist.sinet.report :as rep]))
@@ -44,10 +44,10 @@
 ;;;================================================================
 ;;; Generate initial population
 ;;;================================================================
-(declare mjpdes2nice eden-pn)
+(declare mjpdes2pn eden-pn)
 
 ;;; {:tkns [{:jtype :blue, :id 1}], :rep {:name :m2-complete-job, :rep {:act :ej, :m :m2}}}
-;;; (-> (scada/random-job-trace) mjpdes2nice make-plan)
+;;; (-> (scada/random-job-trace) mjpdes2pn make-plan)
 ;;; {:cnt 6,
 ;;;  :t
 ;;;  [{:name :m1-start-job, :act :aj, :m :m1}
@@ -68,44 +68,10 @@
           {:cnt 0 :t [] :p []}
           e-assocs))
 
-;;; POD Someday you might want to call this with multiple job traces.
-;;; POD This interprets/translates the SCADA log. We'll need to generalize it someday.
-(defn scada2pn-name
-  "Return a transition name for a given SCADA msg (bl/ub/st/us probably wont' be used.)"
-  [msg]
-  (let [m (scada/implies-machine msg)]
-    (cond (= :aj (:act msg)) (read-string (cl-format nil "~A-start-job"    m)),
-          (= :ej (:act msg)) (read-string (cl-format nil "~A-complete-job" m)),
-          (= :sm (:act msg)) (read-string (cl-format nil "~A-start-job"    m)),
-          (= :bj (:act msg)) (read-string (cl-format nil "~A-complete-job" m)),
-          (= :bl (:act msg)) (read-string (cl-format nil "~A-blocked"      m)),
-          (= :ub (:act msg)) (read-string (cl-format nil "~A-unblocked"    m)),
-          (= :st (:act msg)) (read-string (cl-format nil "~A-starved"      m)),
-          (= :us (:act msg)) (read-string (cl-format nil "~A-unstarved"    m)))))
-
-;;; POD Will need to generalize this idea of 'what a message means' I'm giving nice names to MJPdes output. 
-;;; (mjpdes2nice (scada/random-job-trace)) ==>
-;;; ({:name :m1-start-job, :act :aj, :m :m1}
-;;;  {:name :m2-unstarved, :act :us, :m :m2}
-;;;  {:name :m2-starved, :act :st, :m :m2}
-;;;  {:name :m1-complete-job, :act :bj, :m :m1, :bf :b1}
-;;;  {:name :m2-start-job, :act :sm, :m :m2, :bf :b1}
-;;;  {:name :m2-complete-job, :act :ej, :m :m2})
-(defn mjpdes2nice
-  "Interpret/translate the SCADA log. (Give nice names to MJPdes output.)" 
+(defn mjpdes2pn-trace
+  "Translate all the SCADA message maps with maps with 'nice pn names."
   [job-trace]
-  (distinct
-   (map (fn [msg]
-          (let [m (scada/implies-machine msg)]
-            (cond (= :aj (:act msg)) {:name (scada2pn-name msg) :act :aj :m m} 
-                  (= :ej (:act msg)) {:name (scada2pn-name msg) :act :ej :m m} 
-                  (= :sm (:act msg)) {:name (scada2pn-name msg) :act :sm :m m :bf (:bf msg)}
-                  (= :bj (:act msg)) {:name (scada2pn-name msg) :act :bj :m m :bf (:bf msg)}
-                  (= :bl (:act msg)) {:name (scada2pn-name msg) :act :bl :m m}
-                  (= :ub (:act msg)) {:name (scada2pn-name msg) :act :ub :m m}
-                  (= :st (:act msg)) {:name (scada2pn-name msg) :act :st :m m}
-                  (= :us (:act msg)) {:name (scada2pn-name msg) :act :us :m m})))
-        job-trace)))
+  (distinct (map scada/mjpdes2pn job-trace)))
 
 ;;; POD This still needs work. There needs to be higher level operations
 ;;; These include (1) recognizing subsystems and preserving them from further mucking.
@@ -175,7 +141,7 @@
 ;;;
 ;;; (1) Negative balance: The oldest N tokens are removed to satisfy an imbalance of N tokens.
 ;;;     The remaining tokens are distributed so that the token requirements (multiplicity) of
-;;;     the highest priority arc (lowest priority number) are satisfied first using the oldest 
+;;;     the highest priority arc (lowest priority number) are satisfied first using the NEWEST
 ;;;     remaining tokens, then the second highest priority arc, and so on.
 ;;; (2) Positive balance: New tokens are created to satisfy the imbalance. Tokens are
 ;;;     distributed to the arcs as in (1).
@@ -218,7 +184,7 @@
   "Translate a SCADA job trace into a PN."
   [job-trace]
   (->> job-trace
-       mjpdes2nice           ; returns maps to translate terse mjpdes log info to nice names.
+       mjpdes2pn-trace      ; returns maps to translate terse mjpdes log info to 'pn names'.
        make-vertices         ; returns map of skeletons for place and transition definitions
        eden-pn               ; complete skeletons and add :arcs, making a bipartite graph. 
        add-color-binding     ; add e.g. :bind {:jtype :blue} to :arcs for multi-job paths.
@@ -287,10 +253,10 @@
                  (= n 0) (do (util/log {:in "mutate" :inv-id (:id ?inv)}) save-inv)
                  :else (recur (dec n)))))
        (add-color-binding ?inv)
-       (update ?inv :pn
-               #(reduce (fn [pn trans] (add-flow-priority-trans pn trans))
-                        %
-                        (->> % :transitions (map :name))))))))
+       (update ?inv :pn add-flow-priorities)))))
+;;;             (reduce (fn [pn trans] (add-flow-priority-trans pn trans))
+;;;                     %
+;;;                     (->> % :transitions (map :name)))
 
 (defn- mutate-m-dispatch [inv & {:keys [pick-fn force]
                                  :or {pick-fn rand-mute-key}}]
@@ -525,7 +491,12 @@
 (defn i-error 
   "Compute the individual's score."
   [inv]
-  (fit/workflow-fitness inv))
+  (let [disorder (fit/workflow-fitness    inv)
+        except   (fit/exceptional-fitness inv)]
+    (-> inv
+        (assoc :disorder disorder)
+        (assoc :except   except)
+        (assoc :err (+ disorder except)))))
 
 (defn sort-by-error
   "Add value for :err to each PN and used it to sort the population by disorder.
@@ -620,8 +591,12 @@
             :else
             (recur (make-next-gen ?w))))))
 
+(def evolve-agent (agent nil))
+
+;;; Both of the following get pushed when the client sends  :sinet/evolve-run (see report.clj)
 ;;; (>!! (rep/evolve-chan) "init")
 ;;; (>!! (rep/evolve-chan) "continue")
+;;; In order to see changes in this function, you need to do a reset.
 (defn start-evolve-loop!
   []
   (reset! util/+log+ [])
@@ -634,6 +609,7 @@
               (if (not= (:state ?w) :init) (evolve-init) ?w),
               (= msg "continue")
               (let [p (promise)]
+                ;;(send-off evolve-agent evolve-continue ?w p)
                 (evolve-continue ?w p)
                 (deref p (* 1000 (gp-param :timeout-secs)) {:state :timeout})),
               (= msg "pause")
@@ -759,3 +735,20 @@
                       (update-in tvec [(pnu/trans-index pn (:name cmd)) :rep]
                                  #(merge % (dissoc cmd :name))))
                     t rep-vec))))
+
+;;; (diag-inject-pn "data/PNs/m2-inhib-bas.xml" 10 [{:source :m1-start-job, :target :buffer :priority 2}])
+;;; Highest priority (lowest priority number) gets the newest tokens.
+;;; Thus here we want:
+;;;    - m1-start-job to buffer be a low priority, sending the old part to the buffer.
+;;;    - m2-start-job doesn't matter; it is a "fan in", will take the newest. 
+(defn diag-inject-pn
+  "Read the PN and insert it in the population, replacing the individual specified."
+  [fname ix priorities]
+  (let [pn (-> (pnml/read-pnml fname)
+               add-color-binding
+               (diag-force-priority priorities))]
+    (update-pop! 
+     (assoc (-> (app-info) :pop) ix
+            (map->Inv {:pn pn})))))
+  
+  

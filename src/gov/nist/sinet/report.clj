@@ -26,7 +26,7 @@
           (println "get-individual:" pn-index)
           (when ?reply-fn
             (when (and (>= pn-index 0) (< pn-index (count pop)))
-              (?reply-fn (-> (nth pop pn-index) #_inv-geom clean-inv-for-transmit)))))))))
+              (?reply-fn (-> (nth pop pn-index) clean-inv-for-transmit)))))))))
 
 (defn evolve-chan   [] (-> (util/app-info) :gp-system :evolve-chan))
 (defn pause-evolve? [] (-> (util/app-info) :gp-system :pause-evolve?))
@@ -47,7 +47,6 @@
   (fn [ev-msg]
     (>!! (evolve-chan) "pause")))
 
-;;; For best debugging experience, don't use pmap in sort-by-error!
 (defn report-map [world]
   (let [pop (:pop world)
         best (first pop)]
