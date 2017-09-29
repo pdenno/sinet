@@ -2,10 +2,9 @@
   "Compute the fitness of an individual"
   (:require [clojure.pprint :refer (cl-format pprint)]
             [clojure.set :as set]
-            [clojure.core.async :as async :refer [>! <! >!! <!! go go-loop chan sliding-buffer]]
             [gov.nist.spntools.core :as pn :refer :all]
-            [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp renumber-pids)]
-            [gov.nist.spntools.util.reach :as pnr :refer (reachability)]
+            [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp)]
+            [gov.nist.spntools.util.reach :as pnr :refer (reachability renumber-pids)]
             [gov.nist.spntools.util.pnml :as pnml :refer (read-pnml)] ; POD temporary
             [gov.nist.sinet.simulate :as sim :refer-only (simulate)]
             [gov.nist.sinet.util :as util :refer (app-info reset)]
@@ -257,8 +256,8 @@
     msg))
 
 ;;; Belongs in app-info :problem
-(def scada-msgs (vec (map scada/mjpdes2pn (-> (app-info) :problem :scada-log))))
-(def scada-msg-types (set (map :name scada-msgs)))
+(def scada-msgs nil ) ;now(vec (map scada/mjpdes2pn (-> (app-info) :problem :scada-log))))
+(def scada-msg-types nil) ;now  (set (map :name scada-msgs)))
 
 (declare navigate-qpn)
 

@@ -3455,6 +3455,53 @@ I don't have time for this. Essentially a bad idea.
     (go (>! scada-chan (scada/mjpdes2pn msg))))) ; >! means parking (doesn't hold on to process). 
 
 
+;;;================================
+;;; "2017-09-28T15:44:49.138-00:00"
+;;;================================
 
+(def iii (gov.nist.sinet.gp/diag-inject-pn "data/PNs/m2-inhib-bas.xml" 10 [{:source :m1-start-job, :target :buffer :priority 2}]))
+
+(best-nav iii)
+({:start 0, :ix 2998, :mark [1 0 1 1 0], :path [], :excepts {:m2-starved ([1 0 1 0 1]), :m2-unstarved ([1 0 1 0 1])}} {:start 0, :ix 2, :mark [0 1 0 1 0], :path [], :excepts {}} {:start 0, :ix 1, :mark [0 0 1 0 1], :path [], :excepts {}})
+gov.nist.sinet.fitness> (ppp)
+({:start 0, :ix 2998, :mark [1 0 1 1 0], :path [], :excepts {:m2-starved ([1 0 1 0 1]), :m2-unstarved ([1 0 1 0 1])}}
+ {:start 0, :ix 2, :mark [0 1 0 1 0], :path [], :excepts {}}
+ {:start 0, :ix 1, :mark [0 0 1 0 1], :path [], :excepts {}})
+
+
+Now start the ANN analysis! For the time being, it only need associate
+:excepts {:m2-starved ([1 0 1 0 1]), :m2-unstarved ([1 0 1 0 1])}}
+
+How hard can that be?
+
+;;;================================
+;;; "2017-09-29T21:23:41.492-00:00"
+;;;================================
+
+Continuing with ANN investigation. Here's my first pass (before I simplify):
+;;; Layers
+(defrecord Input [value])
+(defrecord HNeuron [weights])
+(defrecord ONeuron [weights value])
+
+;;; note that :weights are on arcs INTO the neuron. 
+(defn make-hneuron
+  [n-inputs] ; create one extra for bias.
+  (map->HNeuron {:weights (vec (into '(1.0) (repeatedly n-inputs rand)))}))
+
+(defn make-oneuron
+  [n-inputs] ; create one extra for bias.
+  (map->ONeuron {:weights (vec (into '(1.0) (repeatedly n-inputs rand)))
+                 :value nil}))
+
+(defrecord NeuralNet [input hidden output])
+
+;;; For the time being, I assume 1 hidden layer
+(defn make-nn
+  [n-inputs n-outputs n-neurons-per-hl]
+  "Create a neural net structure"
+  (map->NeuralNet {:input  (vec (repeatedly n-inputs #(Input. nil)))
+                   :hidden (vec (repeatedly 1 #(vec (repeatedly n-inputs (fn [](make-hneuron n-inputs))))))
+                   :output (vec (repeatedly n-outputs #(make-oneuron n-neurons-per-hl)))}))
 
 

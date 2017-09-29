@@ -496,9 +496,4 @@
                                  :label-y-off 15}))
                        {}
                        elems))
-        (rescale))))
-
-
-
-
-
+          (rescale))))
