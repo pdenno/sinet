@@ -3504,4 +3504,83 @@ Continuing with ANN investigation. Here's my first pass (before I simplify):
                    :hidden (vec (repeatedly 1 #(vec (repeatedly n-inputs (fn [](make-hneuron n-inputs))))))
                    :output (vec (repeatedly n-outputs #(make-oneuron n-neurons-per-hl)))}))
 
+;;;================================
+;;; "2017-09-30T21:40:38.006-00:00"
+;;;================================
+
+;;; http://www.ai-junkie.com/ann/evolved/nnt6.html
+
+I'm still working on the Mazur example.
+
+{:input [0.05 0.1],
+ :hlayers
+ [[{:name [:h 1], :weights [0.15 0.2 0.35], :net-output nil, :output 0.5932699921071872}
+   {:name [:h 2], :weights [0.25 0.3 0.35], :net-output nil, :output 0.596884378259767}]],
+ :olayer
+ [{:name [:o 1], :weights [0.4 0.45 0.6], :net-output nil, :output 0.7513650695523157}
+  {:name [:o 2], :weights [0.5 0.55 0.6], :net-output nil, :output 0.7729284653214625}],
+ :total-error 0.2983711087600027}
+
+
+(defn mazur-forward-pass-hidden-layer
+  [net]
+  (-> net
+      (assoc-in [:hlayers 0 0 :output]
+                (sigmoid
+                 ;; net_{h1} = w_1 * i_1 + w_2 * i_2 + b_1 * 1  = 0.3775
+                 (+ (* (weight (node net [:h 1]) 1)
+                       (input net 1))
+                    (* (weight (node net [:h 1]) 2)
+                       (input net 2))
+                    (* (weight (node net [:h 1]) 3)
+                       1.0))))
+      (assoc-in [:hlayers 0 1 :output]
+                (sigmoid
+                 (+ (* (weight (node net [:h 2]) 1)
+                       (input net 1))
+                    (* (weight (node net [:h 2]) 2)
+                       (input net 2))
+                    (* (weight (node net [:h 2]) 3)
+                       1.0))))))
+		       
+(defn mazur-forward-pass-output-layer
+  [net]
+  (-> net
+      (assoc-in [:olayer 0 :output]
+                (sigmoid
+                 ;; net_{o1} = w_5 * out_{h1} + w_6 * out_{h2} + b_2 * 1
+                 (+ (* (weight (node net [:o 1]) 1) ; w5
+                       (:output (node net [:h 1])))
+                    (* (weight (node net [:o 1]) 2) ; w6
+                       (:output (node net [:h 2])))
+                    (* (weight (node net [:o 1]) 3) ; b1
+                       1.0))))
+      (assoc-in [:olayer 1 :output]
+                (sigmoid
+                 (+ (* (weight (node net [:o 2]) 1) ; w7
+                       (:output (node net [:h 1])))
+                    (* (weight (node net [:o 2]) 2) ; w8
+                       (:output (node net [:h 2])))
+                    (* (weight (node net [:o 2]) 3) ; b2
+                       1.0))))))
+
+
+;;; POD Probably temporary.
+(defn node-index
+  "Return the index (starts at 0) of the named node (e.g. for use in assoc-in)."
+  [net name]
+  (when-let [node (node net name)]
+    (or (index-of (map :name (:olayer net)) name)
+        (loop [layers (:hlayers net)]
+          (if (empty? layers)
+            nil
+            (if-let [found (index-of (map :name (first layers)) name)]
+              found
+              (recur (rest layers))))))))
+
+;;; POD Probably temporary.
+#_(defn index-of
+  [^clojure.lang.Sequential s obj] 
+  (let [result (.indexOf s obj)]
+    (if (< result 0) nil result)))
 
