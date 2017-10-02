@@ -1,5 +1,5 @@
 (ns gov.nist.sinet.nn-test
-  "Simple backpropagation neural nets"
+  "Unit test for simple backpropagation neural nets"
   (:require [clojure.test :refer :all]
             [clojure.set :as set]
             [gov.nist.sinet.nn :as nn :refer :all]))

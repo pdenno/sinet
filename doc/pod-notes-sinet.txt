@@ -3584,3 +3584,15 @@ I'm still working on the Mazur example.
   (let [result (.indexOf s obj)]
     (if (< result 0) nil result)))
 
+
+;;;=================================
+;;; "2017-10-01T22:16:50.140-00:00"
+;;;=================================
+
+The things to play around with in tuning this is the number of neurons in the hidden layer and the "learning rate" eta. 
+
+;;;=================================
+;;; "2017-10-02T21:49:16.476-00:00"  (Las Vegas shooting)
+;;;=================================
+
+I spent a bit of time proving that df(x)/dx = f(x)(1 - f(x)) for logistic function. 
