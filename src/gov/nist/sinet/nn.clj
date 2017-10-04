@@ -97,6 +97,11 @@
       (set-weight :olayer 1 1 0.55)
       (set-weight :olayer 1 2 0.60)))
 
+;;; Mazur notation - It is weird because there is this distinction:
+;;; "net" means raw value (e.g. net_{h1} = w_1*i_1 + w_2*i2 + b_1*1.0 in Mazur.)
+;;; "out" mean measured through the activation function. (e.g. out_{h1} = 1 \ (1+ e^{-net_h1})).
+;;; yet must also talk about output nodes. Those are referenced with just "o" (e.g. o1, o2...)
+
 (defn forward-pass-hidden-layer
   "Calculate hidden layer neuron values."
   [net]
@@ -157,48 +162,66 @@
   "Calculate error gradient on output layer."
   [net targets]
   (let [eta (:eta net)]
-    (reduce (fn [net io]
-              (let [nth-io #(nth % io)]
+    (reduce (fn [net neur]
+              (let [nth-neur #(nth % neur)]
                 (reduce (fn [net iw]
                           (let [nth-iw #(nth % iw)
-                                out (-> net :olayer nth-io :output)
-                                dtotaldout (- out (nth targets io))
+                                out (-> net :olayer nth-neur :output)
+                                dtotaldout (- out (nth targets neur))
                                 doutdnet ((:doutdnet net) out)
                                 dnetdweight (-> net :hlayers first nth-iw :output) ; dNet_out / dW_k = Out_{hidden_k}
                                 dtotaldweight (* dtotaldout doutdnet dnetdweight)
-                                oldweight (-> net :olayer nth-io :weights nth-iw)]
-                            (update-in net [:olayer io :new-weights]
+                                oldweight (-> net :olayer nth-neur :weights nth-iw)]
+                            (update-in net [:olayer neur :new-weights]
                                        #(conj % (- oldweight (* eta dtotaldweight))))))
-                        (assoc-in net [:olayer io :new-weights] [])
+                        (assoc-in net [:olayer neur :new-weights] [])
                         (range (-> net :olayer first :weights count dec)))))
             net
             (range (-> net :olayer count)))))
 
+;;; \frac{\partial{E_total}}{\partial out_h1} = sum \frac{\partial E_outi}{\partial out_h1}
+;;; The meaning of the above is that we sum over (multiple) output error values for the
+;;; the effect with respect to a given (single) hidden neuron.
+(defn dEtotaldouth
+  "Return the value of the derivative frac{partial{E_total}}{partial out_h1} 
+   for argument hidden neuron (its index, i-neuron)."
+  [net targets i-neuron]
+  (let [nth-neur #(nth % i-neuron)]
+    (reduce (fn [sum out-node] ; Sum over \frac{\partial E_outi}{\partial out_h_{i-neuron}}
+              (let [nth-out  #(nth % out-node)
+                    out       (-> net :olayer nth-out :output)
+                    dedouto   (- out (nth targets out-node))
+                    doutdnet  ((:doutdnet net) out)
+                    dedneto   (* dedouto doutdnet)                       ; Eqn 3
+                    dnetdouth (-> net :olayer nth-out :weights nth-neur) ; Eqn 4
+                    dedouth   (* dedneto dnetdouth)]                     ; Eqn 2
+                (+ sum dedouth)))                                        ; Eqn 1
+            0.0
+            (range (count (-> net :olayer))))))
+
+(defn dEtotaldw
+  "Calculate the derivative of Etotal with respect to a weight on a hidden neuron.
+   Uses the chain rule producing a product of 3 factors."
+  [net targets ineuron iweight]
+  (let [nth-neuron #(nth % ineuron)
+        nth-weight #(nth % iweight)
+        dtotaldout (dEtotaldouth net targets ineuron)
+        douthdneth ((:doutdnet net) (-> net :hlayers first nth-neuron :output)) ; 0.241300709?
+        dnethdw    (-> net :input nth-weight)]
+    (* dtotaldout douthdneth dnethdw))) ; Eqn 5                                 
 
 (defn backprop-hidden-layer
   [net targets]
   (let [eta (:eta net)]
-    (reduce (fn [net io]
-              (let [nth-io #(nth % io)] ; "o" is really "neuron"
-                (reduce (fn [net iw]
-                          (let [nth-iw #(nth % iw)
-                                dtotaldout (reduce (fn [sum io]
-                                                     (let [out       (-> net :olayer nth-io :output)
-                                                           dedouto   (- out (nth targets io))
-                                                           doutdnet  ((:doutdnet net) out)
-                                                           dedneto   (* dedouto doutdnet)                    ; Eqn 3
-                                                           dnetdouth (-> net :olayer nth-io :weights nth-iw) ; Eqn 4
-                                                           dedouth   (* dedneto dnetdouth)]                  ; Eqn 2
-                                                       (+ sum dedouth)))                                     ; Eqn 1
-                                                   0.0
-                                                   (range (count (-> net :olayer))))
-                                douthdneth ((:doutdnet net) (-> net :hlayers first first :output)) ; suspect
-                                dnethdw (-> net :input first)
-                                detotaldw (* dtotaldout douthdneth dnethdw)                                  ; Eqn 5
-                                oldweight (-> net :hlayers first nth-io :weights nth-iw)]
-                            (update-in net [:hlayers 0 io :new-weights]
-                                       #(conj % (- oldweight (* eta detotaldw))))))
-                        (assoc-in net [:hlayers 0 io :new-weights] [])
+    (reduce (fn [net ihneur]
+              (let [nth-hneur #(nth % ihneur)] 
+                (reduce (fn [net iweight]
+                          (let [nth-weight #(nth % iweight)
+                                detotaldw  (dEtotaldw net targets ihneur iweight)
+                                oldweight  (-> net :hlayers first nth-hneur :weights nth-weight)] ; OK
+                            (update-in net [:hlayers 0 ihneur :new-weights]
+                                       #(conj % (- oldweight (* eta detotaldw)))))) ; oldweight or detotaldw is wrong.
+                        (assoc-in net [:hlayers 0 ihneur :new-weights] [])
                         (range (-> net :hlayers first first :weights count dec)))))
             net
             (range (-> net :hlayers first count)))))
