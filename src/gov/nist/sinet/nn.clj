@@ -10,6 +10,8 @@
 
 (defrecord Neuron [name weights])
 
+(def ^:private diag (atom nil))
+
 (defn make-neuron
   "Create an neuron with n-inputs+1 (+1 for bias) weights. 
    Name can be anything; make it useful for indexing. See make-net."
@@ -33,8 +35,10 @@
   ([n-inputs n-outputs n-neurons-per-hl] (make-net n-inputs n-outputs n-neurons-per-hl 1.0))
   ([n-inputs n-outputs n-neurons-per-hl eta]
   (map->NeuralNet {:input   (vec (repeat n-inputs nil))
-                   :hlayers (vec (repeatedly 1 (fn [] (vec (map #(make-neuron [:h %] n-inputs) (range n-inputs))))))
-                   :olayer  (vec (map #(make-neuron [:o %] n-outputs) (range n-neurons-per-hl)))
+                   :hlayers (vec (repeatedly 1 (fn [] (vec (map #(make-neuron [:h %] n-inputs)
+                                                                (range n-neurons-per-hl))))))
+                   :olayer  (vec (map #(make-neuron [:o %] n-neurons-per-hl)
+                                      (range n-outputs)))
                    :eta  eta ; "learning rate" (multiplier on gradient). 
                    :total-error nil
                    :activation sigmoid
@@ -70,21 +74,6 @@
   "Get the input indexed from the argument net. Indexing starts at 1."
   [net ix]
   (nth (:input net) ix))
-
-(defn mazur-set-weights [net]
-  (-> net
-      (set-weight :hlayers 0 0 0.15)
-      (set-weight :hlayers 0 1 0.20)
-      (set-weight :hlayers 0 2 0.35)
-      (set-weight :hlayers 1 0 0.25)
-      (set-weight :hlayers 1 1 0.30)
-      (set-weight :hlayers 1 2 0.35)
-      (set-weight :olayer 0 0 0.40)
-      (set-weight :olayer 0 1 0.45)
-      (set-weight :olayer 0 2 0.60)
-      (set-weight :olayer 1 0 0.50)
-      (set-weight :olayer 1 1 0.55)
-      (set-weight :olayer 1 2 0.60)))
 
 ;;; Mazur notation - It is weird because there is this distinction:
 ;;; "net" means raw value (e.g. net_{h1} = w_1*i_1 + w_2*i2 + b_1*1.0 in Mazur.)
@@ -178,12 +167,13 @@
 (defn dEtotaldw
   "Calculate the derivative of Etotal with respect to a weight on a hidden neuron.
    Uses the chain rule producing a product of 3 factors."
-  [net targets ineuron iweight]
+  [net targets ineuron iinput]
+  (reset! diag {:net net :targets targets :ineuron ineuron :iinput iinput})
   (let [nth-neuron #(nth % ineuron)
-        nth-weight #(nth % iweight)
+        nth-input #(nth % iinput)
         dtotaldout (dEtotaldouth net targets ineuron)
         douthdneth ((:doutdnet net) (-> net :hlayers first nth-neuron :output)) ; 0.241300709?
-        dnethdw    (-> net :input nth-weight)]
+        dnethdw    (-> net :input nth-input)]
     (* dtotaldout douthdneth dnethdw))) ; Eqn 5                                 
 
 (defn backprop-hidden-layer
@@ -191,14 +181,14 @@
   (let [eta (:eta net)]
     (reduce (fn [net ihneur]
               (let [nth-hneur #(nth % ihneur)] 
-                (reduce (fn [net iweight]
-                          (let [nth-weight #(nth % iweight)
-                                detotaldw  (dEtotaldw net targets ihneur iweight)
-                                oldweight  (-> net :hlayers first nth-hneur :weights nth-weight)] ; OK
+                (reduce (fn [net iinput]
+                          (let [nth-input #(nth % iinput)
+                                detotaldw  (dEtotaldw net targets ihneur iinput)
+                                oldweight  (-> net :hlayers first nth-hneur :weights nth-input)] ; OK
                             (update-in net [:hlayers 0 ihneur :new-weights]
                                        #(conj % (- oldweight (* eta detotaldw)))))) ; oldweight or detotaldw is wrong.
                         (assoc-in net [:hlayers 0 ihneur :new-weights] [])
-                        (range (-> net :hlayers first first :weights count dec)))))
+                        (range (-> net :input count)))))
             net
             (range (-> net :hlayers first count)))))
 
@@ -223,23 +213,3 @@
                     (update-in [:hlayers 0 ineuron] #(dissoc % :new-weights)))))
             ?n
             (range (-> ?n :hlayers first count)))))
-
-(defn tryme [iterations]
-  (let [targets [0.01 0.99]]
-    (loop [net (-> (make-net 2 2 2)
-                   (assoc :input [0.05 0.10]) 
-                   (mazur-set-weights))
-           cnt iterations]
-      (if (< cnt 0)
-        net
-        (recur
-         (-> net
-             (forward-pass-hidden-layer)
-             (forward-pass-output-layer)
-             (total-error targets)
-             (backprop-output-layer targets)
-             (backprop-hidden-layer targets)
-             (update-weights))
-         (dec cnt))))))
-
-
