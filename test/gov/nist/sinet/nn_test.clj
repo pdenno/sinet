@@ -29,7 +29,9 @@
         (nn/forward-pass-output-layer)
         (nn/total-error targets)
         (nn/backprop-output-layer targets)
-        (nn/backprop-hidden-layer targets))))
+        (nn/backprop-hidden-layer targets)
+        (forward-pass-hidden-layer)
+        (forward-pass-output-layer))))
 
 (deftest total-error-tests
   (testing "whether total-error calculation is correct"

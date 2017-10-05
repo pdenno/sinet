@@ -30,7 +30,7 @@
 ;;; POD inc for Mazur numbering (starts at 1). 
 (defn make-net
   "Create a neural net structure. Assume 1 hidden layer, and thus names like this: [:h 3]."
-  ([n-inputs n-outputs n-neurons-per-hl] (make-net n-inputs n-outputs n-neurons-per-hl 0.5))
+  ([n-inputs n-outputs n-neurons-per-hl] (make-net n-inputs n-outputs n-neurons-per-hl 1.0))
   ([n-inputs n-outputs n-neurons-per-hl eta]
   (map->NeuralNet {:input   (vec (repeat n-inputs nil))
                    :hlayers (vec (repeatedly 1 (fn [] (vec (map #(make-neuron [:h %] n-inputs) (range n-inputs))))))
@@ -49,17 +49,6 @@
     (if (= layer :hlayers)
       (assoc-in net [:hlayers 0 n-index :weights w-index] val)
       (assoc-in net [:olayer    n-index :weights w-index] val))))
-
-#_(defn diag-node
-  "Get the hidden neuron with the given name."
-  [net name]
-  (or (some #(when (= name (:name %)) %) (:olayer net))
-      (loop [layers (:hlayers net)]
-        (if (empty? layers)
-          nil
-          (if-let [found (some #(when (= name (:name %)) %) (first layers))]
-            found
-            (recur (rest layers)))))))
 
 (defn hnode
   "Get the hidden-layer neuron at the index."
@@ -102,43 +91,30 @@
 ;;; "out" mean measured through the activation function. (e.g. out_{h1} = 1 \ (1+ e^{-net_h1})).
 ;;; yet must also talk about output nodes. Those are referenced with just "o" (e.g. o1, o2...)
 
+(defn forward-eqn
+  "Update the argument neuron's net-output output given argument inputs."
+  [net neuron inputs]
+  (let [weights (:weights neuron)]
+    (as-> neuron ?n
+      (assoc ?n :net-output (apply + (map * inputs weights)))
+      (assoc ?n :output ((:activation net) (:net-output ?n))))))
+
 (defn forward-pass-hidden-layer
-  "Calculate hidden layer neuron values."
+  "Feed the inputs forward to calculate outputs of hidden neurons."
   [net]
-  (let [ninputs (count (:input net))
-        nhidden (-> net :hlayers first count)]
-    (reduce (fn [net ix]
-              (let [net-out
-                    (reduce (fn [sum [input weight]]
-                              (+ sum (* input weight)))
-                            0.0
-                            (map #(vector %1 %2)
-                                 (conj (vec (map #(input net %) (range nhidden))) 1.0) ; last is for bias
-                                 (map #(weight (hnode net ix) %) (range (inc nhidden)))))]
-                (-> net
-                    (assoc-in [:hlayers 0 ix :net-output] net-out)
-                    (assoc-in [:hlayers 0 ix :output] ((:activation net) net-out)))))
-            net
-            (range ninputs))))
+  (let [inputs (conj (:input net) 1.0)] ; 1.0 is multiplier of bias. 
+    (assoc net
+           :hlayers
+           (vector (vec (map #(forward-eqn net % inputs)
+                             (-> net :hlayers first)))))))
 
 (defn forward-pass-output-layer
   "Calculate output layer neuron values."
   [net]
-  (let [noutput (count (:olayer net))
-        nhidden (-> net :hlayers first count)]
-    (reduce (fn [net ix]
-              (let [net-out
-                    (reduce (fn [sum [output weight]]
-                              (+ sum (* output weight)))
-                            0.0
-                            (map #(vector %1 %2)
-                                 (conj (vec (map :output (-> net :hlayers first))) 1.0) ; last is for bias
-                                 (map #(weight (onode net ix) %) (range (inc nhidden)))))]
-                (-> net
-                    (assoc-in [:olayer ix :net-output] net-out)
-                    (assoc-in [:olayer ix :output] ((:activation net) net-out)))))
-            net
-            (range noutput))))
+  (let [inputs (conj (vec (map :output (-> net :hlayers first))) 1.0)] ; 1.0 is multiplier of bias. 
+    (assoc net
+           :olayer
+           (vec (map #(forward-eqn net % inputs) (:olayer net))))))
 
 (defn total-error
   "Calculate (and set) the total error in the net."
@@ -226,13 +202,44 @@
             net
             (range (-> net :hlayers first count)))))
 
-(defn tryme []
+(defn update-weights
+  [net]
+  "Book-keeping operations to update weights after backpropagation."
+  (as-> net ?n
+    (reduce (fn [net ineuron]
+              (let [nth-neur #(nth % ineuron)]
+                (let [bias (-> net :olayer nth-neur :weights last)]
+                  (-> net
+                      (assoc-in [:olayer ineuron :weights]
+                                (conj (-> net :olayer nth-neur :new-weights) bias))
+                      (update-in [:olayer ineuron] #(dissoc % :new-weights))))))
+            ?n
+            (range (-> ?n :olayer count)))
+    (reduce (fn [net ineuron]
+              (let [nth-neur #(nth % ineuron)]
+                (-> net
+                    (assoc-in [:hlayers 0 ineuron :weights]
+                              (-> net :hlayers first nth-neur :new-weights))
+                    (update-in [:hlayers 0 ineuron] #(dissoc % :new-weights)))))
+            ?n
+            (range (-> ?n :hlayers first count)))))
+
+(defn tryme [iterations]
   (let [targets [0.01 0.99]]
-    (-> (make-net 2 2 2)
-        (assoc :input [0.05 0.10]) 
-        (mazur-set-weights)
-        (forward-pass-hidden-layer)
-        (forward-pass-output-layer)
-        (total-error targets)
-        (backprop-output-layer targets)
-        (backprop-hidden-layer targets))))
+    (loop [net (-> (make-net 2 2 2)
+                   (assoc :input [0.05 0.10]) 
+                   (mazur-set-weights))
+           cnt iterations]
+      (if (< cnt 0)
+        net
+        (recur
+         (-> net
+             (forward-pass-hidden-layer)
+             (forward-pass-output-layer)
+             (total-error targets)
+             (backprop-output-layer targets)
+             (backprop-hidden-layer targets)
+             (update-weights))
+         (dec cnt))))))
+
+
