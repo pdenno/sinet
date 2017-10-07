@@ -598,11 +598,11 @@
 ;;; (>!! (rep/evolve-chan) "continue")
 ;;; In order to see changes in this function, you need to do a reset.
 (defn start-evolve-loop!
-  []
+  "Called from app.clj when starting the app."
+  [evolve-channel]
   (reset! util/+log+ [])
-  (println "evolve-chan=" (rep/evolve-chan))
   (async/go-loop [world {}]
-    (let [msg (<! (rep/evolve-chan))]
+    (let [msg (<! evolve-channel)]
       ;(util/log (str "msg =" msg))
       (as-> world ?w
         (cond (= msg "init")

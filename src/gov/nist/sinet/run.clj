@@ -23,7 +23,6 @@
 (defn run []
   (init)
   (start)
-  (gp/start-evolve-loop!)
   system)
 
 (defn reset []

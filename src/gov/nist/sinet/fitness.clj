@@ -314,25 +314,105 @@
                        (update-in [:excepts event] #(distinct (conj %1 %2)) mark)))))))))
 
 
-;;; {:M [0 1 0 0 1], :fire :m1-start-job, :Mp [1 0 1 0 1], :rate 1.0}
-;;; {:M [0 1 0 1 0], :fire :m1-start-job, :Mp [1 0 1 1 0], :rate 1.0}
-;;; {:M [0 0 1 0 1], :fire :m1-complete-job, :Mp [0 1 0 0 1], :rate 0.9}
-;;; {:M [0 0 1 1 0], :fire :m1-complete-job, :Mp [0 1 0 1 0], :rate 0.9}
-;;; {:M [1 0 1 1 0], :fire :m1-complete-job, :Mp [1 1 0 1 0], :rate 0.9}
-;;; {:M [1 1 0 0 1], :fire :m2-start-job, :Mp [0 1 0 1 0], :rate 1.0}
-;;; {:M [1 0 1 0 1], :fire :m2-start-job, :Mp [0 0 1 1 0], :rate 1.0}
-;;; {:M [1 0 1 1 0], :fire :m2-complete-job, :Mp [1 0 1 0 1], :rate 1.0}
-;;; {:M [1 1 0 1 0], :fire :m2-complete-job, :Mp [1 1 0 0 1], :rate 1.0}
-;;; {:M [0 0 1 1 0], :fire :m2-complete-job, :Mp [0 0 1 0 1], :rate 1.0})
+(def sdata1
+  [{:name :m2-complete-job, :act :ej, :m :m2, :j 1755}
+   {:name :m2-start-job, :act :sm, :m :m2, :bf :b1, :j 1756}
+   {:name :m2-complete-job, :act :ej, :m :m2, :j 1756}
+   {:name :m2-starved, :act :st, :m :m2, :j nil}
+   {:name :m1-complete-job, :act :bj, :m :m1, :bf :b1, :j 1757}
+   {:name :m1-start-job, :act :aj, :m :m1, :j 1758}
+   {:name :m2-start-job, :act :sm, :m :m2, :bf :b1, :j 1757}
+   {:name :m2-unstarved, :act :us, :m :m2, :j nil}
+   {:name :m2-complete-job, :act :ej, :m :m2, :j 1757}
+   {:name :m2-starved, :act :st, :m :m2, :j nil}
+   {:name :m1-complete-job, :act :bj, :m :m1, :bf :b1, :j 1758}
+   {:name :m1-start-job, :act :aj, :m :m1, :j 1759}
+   {:name :m2-start-job, :act :sm, :m :m2, :bf :b1, :j 1758}
+   {:name :m2-unstarved, :act :us, :m :m2, :j nil}])
+
+;;; This is the reachability graph for m2-inhib-bas:
+(def reach1
+  [{:M [0 0 1 1 0], :fire :m1-complete-job, :Mp [0 1 0 1 0], :rate 0.9}
+   {:M [1 1 0 0 1], :fire :m2-start-job, :Mp [0 1 0 1 0], :rate 1.0}
+   {:M [0 1 0 1 0], :fire :m1-start-job, :Mp [1 0 1 1 0], :rate 1.0}
+   {:M [0 0 1 0 1], :fire :m1-complete-job, :Mp [0 1 0 0 1], :rate 0.9}
+   {:M [1 0 1 1 0], :fire :m1-complete-job, :Mp [1 1 0 1 0], :rate 0.9}
+   {:M [1 0 1 0 1], :fire :m2-start-job, :Mp [0 0 1 1 0], :rate 1.0}
+   {:M [1 0 1 1 0], :fire :m2-complete-job, :Mp [1 0 1 0 1], :rate 1.0}
+   {:M [0 1 0 0 1], :fire :m1-start-job, :Mp [1 0 1 0 1], :rate 1.0}
+   {:M [1 1 0 1 0], :fire :m2-complete-job, :Mp [1 1 0 0 1], :rate 1.0}
+   {:M [0 0 1 1 0], :fire :m2-complete-job, :Mp [0 0 1 0 1], :rate 1.0}])
+
+;;; Idea: This (excep-starting-mark) could force an initial-marking on the PN.
+;;;       That might be a good thing!
+;;;       But what gets hard here is choosing a marking that will guess correctly
+;;;       what is flowing through the PN/system. Maybe this isn't that hard, since we CAN
+;;;       know the number of jobs in the queue.
+
+;;; POD this is a candidate enhancement to us an ARG (Abbreviated Reachability Graph).
+(defn next-paths
+  "Extend or eliminate paths depending on reachability graph."
+  [paths rgraph]
+  (let [from (-> paths first last :Mp) ; current state along first path
+        steps (filter #(= (:M %) from) rgraph)]
+    (if (empty? steps) ; This path is a dead end. 
+      (rest paths)
+      (into (vec (map #(conj (first paths) %) steps)) (rest paths))))) ; depth-first
+
+(defn ordinary
+  [msg]
+)
+
+(defn next-ordinary
+  "Return the next ordinary message, at index n or later."
+  [n])
+
+
+;;; POD Choose a starting point in the SCADA that names a message used as a transition.
+;;; (excep-starting-mark reach1)
+(defn excep-starting-mark
+  "By searching for an interpretation that runs a few steps, return a starting mark."
+  [rgraph]
+  (let [msgs (-> (app-info) :problem :scada-log)]
+    (loop [msg-index 0
+           paths (map vector (vec (filter #(= (-> sdata1 first :name) (:fire %)) rgraph)))]
+      (let [good (some #(when (>= (count %) 3) %) paths)]
+        (cond good (-> good first :M), 
+              (empty? paths) nil, 
+              :otherwise
+              (recur (inc msg-index)
+                     (next-paths paths rgraph)))))))
+
+(defn interpret-scada
+  "Describe how the message stream could be accounted for by this PN. 
+   Return a sequence of <marking, response> where response is either a
+   keyword naming a transition or a keyword naming an exceptional message."
+  [pn]
+  (let [rgraph (pnr/simple-reach pn)
+        data   (-> (app-info) :problem :scada-log)]
+    (when-let [start (excep-starting-mark rgraph sdata1)]
+      (loop []))))
+
+
+  
+  
+   
+
+
+
+;;; For the time being, we'll assume that we are trying to match a starvation message.
+;;; We generate the reachability graph (including non-tangible states) and test the
+;;; complete SCADA log against it. We aren't running the QPN, rather we are testing
+;;; whether or not the SCADA log can be interpreted by it. For every message we successfully
+;;; process, we associate the marking to response nil. For every message we fail to process,
+;;; we associate the marking with the message. So how does this work? I guess there is an
+;;; input node for every marking place. We run every input against every output in training. 
 (defn exceptional-fitness
   "Return a value assessing how well the individual addresses 
    exceptional circumstances (blocking and starvation)."
   [inv]
-  ;; For the time being, we'll assume that we are trying to match a starvation message.
-  ;; We generate the reachability graph (including non-tangible states) and test the
-  ;; complete SCADA log against it. We aren't running the QPN, rather we are testing
-  ;; whether or not the SCADA log can be interpreted by it. 
-  0.0)
+  0)
+  
 
 ;;; These are useful to understanding how things work. 
 ;;; This one for an Eden INV:

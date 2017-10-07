@@ -2,11 +2,12 @@
   "Simple backpropagation neural nets"
   (:require [clojure.pprint :refer (cl-format pprint)]
             [clojure.set :as set]
+            [clojure.spec.alpha :as s]
             [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp)]
             [gov.nist.sinet.util :as util :refer (app-info reset)]
             [gov.nist.sinet.scada :as scada]))
 
-;;; note that :weights are on arcs INTO the neuron.
+;;; Note that :weights are on arcs INTO the neuron.
 
 (defrecord Neuron [name weights])
 
@@ -19,7 +20,10 @@
   (map->Neuron {:name name
                 :weights (vec (into '(1.0) (repeatedly n-inputs rand)))
                 :net-output nil ; value before application of activation function
-                :output nil}))  ; value after application of activation function   
+                :output nil}))  ; value after application of activation function
+
+(s/def ::weights (s/and vector? #(every? number? %)))
+(s/def ::neuron (s/keys :req-un [::net-output ::output ::weights] :opt-un [::name]))
 
 (defn sigmoid 
   "Return the value of sigmoid (simplified logistic) function at the argument."
@@ -43,6 +47,14 @@
                    :total-error nil
                    :activation sigmoid
                    :doutdnet (fn [out] (* out (- 1.0 out)))})))
+
+;;; POD the count requirements are just for testing. 
+(s/def ::activation fn?)
+(s/def ::doutdnet fn?)
+(s/def ::olayer (s/and (s/coll-of ::neuron) vector? #(>= (count %) 2)))
+(s/def ::hlayers (s/and (s/coll-of vector?) vector? #(>= (-> % first count) 2)))
+(s/def ::net (s/keys :req-un [::total-error ::input ::hlayers ::olayer ::activation ::doutdnet]
+                     :opt-un [::name]))
 
 (defn set-weight [net layer n-index w-index val]
   "Set a weight. layer=1 is first hidden layer. Layer=2 is (typically) output. 
@@ -75,10 +87,10 @@
   [net ix]
   (nth (:input net) ix))
 
-;;; Mazur notation - It is weird because there is this distinction:
+;;; Mazur notation - It is weird because there is this overloading of "output":
 ;;; "net" means raw value (e.g. net_{h1} = w_1*i_1 + w_2*i2 + b_1*1.0 in Mazur.)
-;;; "out" mean measured through the activation function. (e.g. out_{h1} = 1 \ (1+ e^{-net_h1})).
-;;; yet must also talk about output nodes. Those are referenced with just "o" (e.g. o1, o2...)
+;;; "out" mean output measured through the activation function. (e.g. out_{h1} = 1 \ (1+ e^{-net_h1})).
+;;; yet in any NN there are "output" nodes. These are indexed with just "o" (e.g. o1, o2...)
 
 (defn forward-eqn
   "Update the argument neuron's net-output output given argument inputs."
@@ -194,7 +206,7 @@
 
 (defn update-weights
   [net]
-  "Book-keeping operations to update weights after backpropagation."
+  "Bookkeeping operations to update weights after backpropagation."
   (as-> net ?n
     (reduce (fn [net ineuron]
               (let [nth-neur #(nth % ineuron)]

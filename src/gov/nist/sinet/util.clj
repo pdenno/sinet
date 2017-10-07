@@ -33,15 +33,29 @@
   ;; Disable-reload! is here so that the atoms app/problem and app/gp-params don't get redefined.
   ;; I can then update them (e.g. in testing) to run various scenarios. 
   (nsp/disable-reload! (find-ns 'gov.nist.sinet.app)) 
+  ;(nsp/disable-reload! (find-ns 'taoensso.sente))
+  ;(nsp/disable-reload! (find-ns 'org.httpkit.server))
+  ;(nsp/disable-reload! (find-ns 'org.httpkit.client))
+  ;(nsp/disable-reload! (find-ns 'org.httpkit.timer))
   ((resolve 'gov.nist.sinet.run/reset)))
+
+(def save-server
+  "Save HTTPServer stop fn so can do (.stop @save-server 100)"
+  (atom :original-value))
 
 ;;; POD This isn't helping, but I'll leave it here and work on it next time I get stuck. 
 (defn big-reset
   "Reset the system, getting out of a jam if possible."
   []
   (nsp/clear)
-  #_(nsp/set-refresh-dirs)
+  ;(nsp/set-refresh-dirs)
+  ;(nsp/disable-reload! (find-ns 'taoensso.sente))
+  ;(nsp/disable-reload! (find-ns 'org.httpkit.server))
+  ;(nsp/disable-reload! (find-ns 'org.httpkit.client))
+  ;(nsp/disable-reload! (find-ns 'org.httpkit.timer))
   (nsp/refresh)
+  (when-not (= :original-value @save-server)
+    (org.httpkit.server.HttpServer/.stop @save-server 100))
   ((resolve 'gov.nist.sinet.run/reset)))
 
 (def +log+ (atom []))
@@ -91,13 +105,3 @@
                       (let [dif (- x avg)]
                         (* dif dif)))
                     v)))))
-
-
-
-
- 
-
-
-
-
-

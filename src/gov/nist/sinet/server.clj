@@ -7,6 +7,7 @@
             [ring.middleware.defaults :refer [site-defaults wrap-defaults]]
             [ring.middleware.resource :refer (wrap-resource)]
             [org.httpkit.server :refer (run-server)]
+            [gov.nist.sinet.util :as util]
             [gov.nist.sinet.ws :as ws]))
 
 (def ^:private diag (atom nil))
@@ -39,6 +40,7 @@
             (ws/ring-handlers ws-connection)
             handler (handler ajax-post-fn ajax-get-or-ws-handshake-fn)
             server-stop (run-server (app handler) {:port port})]
+        (reset! util/save-server (:server (meta server-stop)))
         (log/debug "HTTP server started")
         (assoc component :server-stop server-stop))))
   (stop [component]
@@ -56,6 +58,7 @@
           (ws/ring-handlers ws-connection)
           handler (handler ajax-post-fn ajax-get-or-ws-handshake-fn)
           server-stop (run-server (app handler) {:port port})]
+      (reset! util/save-server (:server (meta server-stop)))
       (log/debug "HTTP server started")
       (map->HttpServer {:port port
                         :server-stop server-stop}))

@@ -6,8 +6,6 @@
             [gov.nist.sinet.scada :as scada]
             [gov.nist.sinet.gp :as gp]))
 
-
-
 (def mutation-dist "The pdf for ordinary mutations (not eden mutations)"
   [[:add-place        1/10]    ; Add place (mine can't be absorbing, thus Nobile 1&2).
    [:add-token           0]    ; Add token to some place (visible or hidden).
@@ -59,11 +57,16 @@
 (defrecord App [ws-connection]
   component/Lifecycle
   (start [component]
-    (as-> component ?c
-      (assoc ?c :gp-params @gp-params :problem @problem :gp-system (gp-system))
-      (assoc-in ?c [:problem :scada-log] (-> ?c :problem :scada-data-file scada/load-scada))
-      (assoc-in ?c [:problem :scada-patterns] ; Needs :pattern-reserves defined.
-                (-> ?c :problem :scada-log scada/scada-patterns))))
+    (let [component
+          (as-> component ?c
+            (assoc ?c :gp-params @gp-params :problem @problem :gp-system (gp-system))
+            (assoc-in ?c [:problem :scada-log] (-> ?c :problem :scada-data-file scada/load-scada))
+            (assoc-in ?c [:problem :scada-patterns] ; Needs :pattern-reserves defined.
+                      (-> ?c :problem :scada-log scada/scada-patterns))
+            (assoc-in ?c [:problem :exceptional-msgs] (scada/exceptional-msgs)))]
+      ;; Pass the evolve-chan in to the go loop. You can't pull it from app-info yet.
+      (gp/start-evolve-loop! (-> component :gp-system :evolve-chan))
+      component))
   (stop [component]
     (async/close! (-> component :gp-system :evolve-chan))
     component))

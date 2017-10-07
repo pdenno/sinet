@@ -239,4 +239,20 @@
           (= :st (:act msg)) {:name (scada2pn-name msg) :act :st :m m :j (:j msg)}
           (= :us (:act msg)) {:name (scada2pn-name msg) :act :us :m m :j (:j msg)})))
 
+(defn exceptional-msgs
+  "Return a list of the exceptional messages found in the scada log."
+  []
+  (let [ordinary (set (mapcat (fn [pat]
+                                (map :act (:form pat)))
+                              (-> (app-info) :problem :scada-patterns)))]
+    (->> (reduce (fn [excepts msg]
+                   (if (contains? ordinary (:act msg))
+                     excepts
+                     (conj excepts (-> msg (dissoc :j) (dissoc :clk) (dissoc :line)))))
+                 []
+                 (-> (app-info) :problem :scada-log))
+         distinct
+         (map scada2pn-name))))
+        
+              
 

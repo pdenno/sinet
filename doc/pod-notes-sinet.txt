@@ -3479,30 +3479,6 @@ How hard can that be?
 ;;;================================
 
 Continuing with ANN investigation. Here's my first pass (before I simplify):
-;;; Layers
-(defrecord Input [value])
-(defrecord HNeuron [weights])
-(defrecord ONeuron [weights value])
-
-;;; note that :weights are on arcs INTO the neuron. 
-(defn make-hneuron
-  [n-inputs] ; create one extra for bias.
-  (map->HNeuron {:weights (vec (into '(1.0) (repeatedly n-inputs rand)))}))
-
-(defn make-oneuron
-  [n-inputs] ; create one extra for bias.
-  (map->ONeuron {:weights (vec (into '(1.0) (repeatedly n-inputs rand)))
-                 :value nil}))
-
-(defrecord NeuralNet [input hidden output])
-
-;;; For the time being, I assume 1 hidden layer
-(defn make-nn
-  [n-inputs n-outputs n-neurons-per-hl]
-  "Create a neural net structure"
-  (map->NeuralNet {:input  (vec (repeatedly n-inputs #(Input. nil)))
-                   :hidden (vec (repeatedly 1 #(vec (repeatedly n-inputs (fn [](make-hneuron n-inputs))))))
-                   :output (vec (repeatedly n-outputs #(make-oneuron n-neurons-per-hl)))}))
 
 ;;;================================
 ;;; "2017-09-30T21:40:38.006-00:00"
@@ -3511,79 +3487,6 @@ Continuing with ANN investigation. Here's my first pass (before I simplify):
 ;;; http://www.ai-junkie.com/ann/evolved/nnt6.html
 
 I'm still working on the Mazur example.
-
-{:input [0.05 0.1],
- :hlayers
- [[{:name [:h 1], :weights [0.15 0.2 0.35], :net-output nil, :output 0.5932699921071872}
-   {:name [:h 2], :weights [0.25 0.3 0.35], :net-output nil, :output 0.596884378259767}]],
- :olayer
- [{:name [:o 1], :weights [0.4 0.45 0.6], :net-output nil, :output 0.7513650695523157}
-  {:name [:o 2], :weights [0.5 0.55 0.6], :net-output nil, :output 0.7729284653214625}],
- :total-error 0.2983711087600027}
-
-
-(defn mazur-forward-pass-hidden-layer
-  [net]
-  (-> net
-      (assoc-in [:hlayers 0 0 :output]
-                (sigmoid
-                 ;; net_{h1} = w_1 * i_1 + w_2 * i_2 + b_1 * 1  = 0.3775
-                 (+ (* (weight (node net [:h 1]) 1)
-                       (input net 1))
-                    (* (weight (node net [:h 1]) 2)
-                       (input net 2))
-                    (* (weight (node net [:h 1]) 3)
-                       1.0))))
-      (assoc-in [:hlayers 0 1 :output]
-                (sigmoid
-                 (+ (* (weight (node net [:h 2]) 1)
-                       (input net 1))
-                    (* (weight (node net [:h 2]) 2)
-                       (input net 2))
-                    (* (weight (node net [:h 2]) 3)
-                       1.0))))))
-		       
-(defn mazur-forward-pass-output-layer
-  [net]
-  (-> net
-      (assoc-in [:olayer 0 :output]
-                (sigmoid
-                 ;; net_{o1} = w_5 * out_{h1} + w_6 * out_{h2} + b_2 * 1
-                 (+ (* (weight (node net [:o 1]) 1) ; w5
-                       (:output (node net [:h 1])))
-                    (* (weight (node net [:o 1]) 2) ; w6
-                       (:output (node net [:h 2])))
-                    (* (weight (node net [:o 1]) 3) ; b1
-                       1.0))))
-      (assoc-in [:olayer 1 :output]
-                (sigmoid
-                 (+ (* (weight (node net [:o 2]) 1) ; w7
-                       (:output (node net [:h 1])))
-                    (* (weight (node net [:o 2]) 2) ; w8
-                       (:output (node net [:h 2])))
-                    (* (weight (node net [:o 2]) 3) ; b2
-                       1.0))))))
-
-
-;;; POD Probably temporary.
-(defn node-index
-  "Return the index (starts at 0) of the named node (e.g. for use in assoc-in)."
-  [net name]
-  (when-let [node (node net name)]
-    (or (index-of (map :name (:olayer net)) name)
-        (loop [layers (:hlayers net)]
-          (if (empty? layers)
-            nil
-            (if-let [found (index-of (map :name (first layers)) name)]
-              found
-              (recur (rest layers))))))))
-
-;;; POD Probably temporary.
-#_(defn index-of
-  [^clojure.lang.Sequential s obj] 
-  (let [result (.indexOf s obj)]
-    (if (< result 0) nil result)))
-
 
 ;;;=================================
 ;;; "2017-10-01T22:16:50.140-00:00"
@@ -3600,51 +3503,6 @@ I spent a bit of time proving that df(x)/dx = f(x)(1 - f(x)) for logistic functi
 There are small errors in the results for the hidden layer, except for the first value,
 suggesting that I've got the indexing wrong. (Actually I think the last value (1,1) should
 also be correct, but it is not. So maybe the problem is something else. 
-
-(defn backprop-hidden-layer
-  [net targets]
-  (let [eta (:eta net)]
-    (reduce (fn [net io]
-              (let [nth-io #(nth % io)]
-                (reduce (fn [net iw]
-                          (let [nth-iw #(nth % iw)
-                                dtotaldout (reduce (fn [sum io]
-                                                     (let [nth-io   #(nth % io)
-                                                           out       (-> net :olayer nth-io :output)
-                                                           dedouto   (- out (nth targets io))
-                                                           doutdnet  ((:doutdnet net) out)
-                                                           dedneto   (* dedouto doutdnet)                    ; Eqn 3
-                                                           dnetdouth (-> net :olayer nth-io :weights nth-iw) ; Eqn 4
-                                                           dedouth   (* dedneto dnetdouth)]                  ; Eqn 2
-                                                       (+ sum dedouth)))                                     ; Eqn 1
-                                                   0.0
-                                                   (range (count (-> net :olayer))))
-                                douthdneth ((:doutdnet net) (-> net :hlayers first first :output))
-                                dnethdw (-> net :input first)
-                                detotaldw (* dtotaldout douthdneth dnethdw)
-                                oldweight (-> net :hlayers first nth-io :weights nth-iw)]
-                            (update-in net [:hlayers 0 io :new-weights]
-                                       #(conj % (- oldweight (* eta detotaldw))))))
-                        (assoc-in net [:hlayers 0 io :new-weights] [])
-                        (range (-> net :hlayers first first :weights count dec)))))
-            net
-            (range (-> net :hlayers first count)))))
-
-
-#_(defn backprop-hidden-layer
-  [net]
-  (let [io 1
-        iw 0
-        nth-io #(nth % io)
-        nth-iw #(nth % iw)
-        out (-> net :olayer nth-io :output)
-        dtotaldout (- out (nth targets io))
-        doutdnet   ((:doutdnet net) out)
-        dednet0    (* dtotaldout doutdnet)
-        dnetdout   (-> net :olayer nth-io :weights nth-iw)]
-    (* dednet0 dnetdout)))
-        
-  
 
 ;;;==================================
 ;;;  "2017-10-03T22:36:34.635-00:00"
@@ -3735,3 +3593,44 @@ I improved the forward calculation. Second pass total error is not as he suggest
 Maybe a typo on his part? (Mine is better.) I am continuing on to see how this thing converges.
 
 I can do 10,000 interations, bring error WAY down in 833 msec. 
+
+Works for additional nodes in the hidden layer. Now I am returning to use
+it in measure "exceptional-fitness"
+
+
+(def iii (gov.nist.sinet.gp/diag-inject-pn "data/PNs/m2-inhib-bas.xml" 10 [{:source :m1-start-job, :target :buffer :priority 2}]))
+
+;;;================================
+;;; "2017-10-06T14:05:43.998-00:00"
+;;;================================
+
+Idea from early this morning: There needs to be logical constraints defined to interpret the
+messages (e.g. a machine can't be starving and busy at the same time, unblocking undoes blocking etc.).
+These can be pushed through to the formulation of optimizations (as constraints).
+
+There are a lot of loose ends to address. One is the difficulty of infinite and nearly-infinite buffers.
+On the one hand, large buffers expand the size of the reachability graph enormously, on the other hand,
+they are needed to completely describe state and to do calculations. I think I need an "abbreviated
+reachability graph" that has states, 0, 1, more than one. (maybe represented as -1?). 
+
+;;;================================
+;;; "2017-10-07T15:21:47.529-00:00"
+;;;================================
+
+I'm wasting time trying to fix the reset/big-reset problems. 
+
+I get messages on big-reset:
+No implementation of method: :sch-send! of protocol: #'taoensso.sente.interfaces/IServerChan found
+for class: org.httpkit.server.AsyncChannel
+
+Yet, of course, it is implemented (see the sente/server_adapters/http_kit.clj:
+(extend-type org.httpkit.server.AsyncChannel
+  i/IServerChan
+  (sch-open?  [sch] (hk/open? sch))
+  (sch-close! [sch] (hk/close sch))
+  (sch-send!  [sch websocket? msg]
+    (let [close-after-send? (if websocket? false true)]
+      (hk/send! sch msg close-after-send?))))
+
+So I'm wondering whether it might be better to never reload sente and http-kit on reset.
+...That created more problems. Now I'm just trying to get back to where I was. 
