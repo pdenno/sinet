@@ -46,16 +46,16 @@
 ;;;================================================================
 (declare mjpdes2pn eden-pn)
 
-;;; {:tkns [{:jtype :blue, :id 1}], :rep {:name :m2-complete-job, :rep {:act :ej, :m :m2}}}
+;;; {:tkns [{:jtype :blue, :id 1}], :rep {:act :m2-complete-job, :mjpact :ej, :m :m2}}}
 ;;; (-> (scada/random-job-trace) mjpdes2pn make-plan)
 ;;; {:cnt 6,
 ;;;  :t
-;;;  [{:name :m1-start-job, :act :aj, :m :m1}
-;;;   {:name :m2-unstarved, :act :us, :m :m2}
-;;;   {:name :m2-starved, :act :st, :m :m2}
-;;;   {:name :m1-complete-job, :act :bj, :m :m1, :bf :b1}
-;;;   {:name :m2-start-job, :act :sm, :m :m2, :bf :b1}
-;;;   {:name :m2-complete-job, :act :ej, :m :m2}],
+;;;  [{:act :m1-start-job, :mjpact :aj, :m :m1}
+;;;   {:act :m2-unstarved, :mjpact :us, :m :m2}
+;;;   {:act :m2-starved, :mjpact :st, :m :m2}
+;;;   {:act :m1-complete-job, :mjpact :bj, :m :m1, :bf :b1}
+;;;   {:act :m2-start-job, :mjpact :sm, :m :m2, :bf :b1}
+;;;   {:act :m2-complete-job, :mjpact :ej, :m :m2}],
 ;;;  :p [{:name :place-1} {:name :place-2} {:name :place-3} {:name :place-4} {:name :place-5} {:name :place-6}]}
 (defn make-vertices
   "Return map with vectors containing skeleton transition and place definition maps."
@@ -98,7 +98,7 @@
     (assoc ?pn :places
            (vec (map (fn [plan]
                        (as-> (pnu/make-place pn :name (:name plan)) ?pl
-                         (assoc ?pl :visible? (if (= :silent (:act plan)) false true))))
+                         (assoc ?pl :visible? (if (= :silent (:mjpact plan)) false true))))
                       plans)))
     (update-in ?pn [:places 0 :initial-tokens] inc))) ; Add a token to make it alive
 
@@ -110,7 +110,7 @@
                      (as-> (pnu/make-transition pn :name (:name plan)) ?tr
                        (assoc ?tr :type :exponential) ; (if (= 0 (rand-int 2)) :exponential :immediate))
                        (assoc ?tr :rep (dissoc plan :name))
-                       (assoc ?tr :visible? (if (= :silent (:act plan)) false true))))
+                       (assoc ?tr :visible? (if (= :silent (:mjpact plan)) false true))))
                    plans))))
 
 (defn eden-arcs
@@ -722,10 +722,10 @@
                                    arcs))
                                arcs priority-maps)))))
 
-;;; [{:name :m1-start-job, :act :aj, :m :m1}
-;;;  {:name :m1-complete-job, :act :bj, :m :m1, :bf :b1}
-;;;  {:name :m2-start-job, :act :sm, :m :m2, :bf :b1}
-;;;  {:name :m2-complete-job, :act :ej, :m :m2}]
+;;; [{:name :m1-start-job, :mjpact :aj, :m :m1}
+;;;  {:name :m1-complete-job, :mjpact :bj, :m :m1, :bf :b1}
+;;;  {:name :m2-start-job, :mjpact :sm, :m :m2, :bf :b1}
+;;;  {:name :m2-complete-job, :mjpact :ej, :m :m2}]
 (defn diag-force-rep
   "Set the :rep of each transition according to the argument map."
   [pn rep-vec]

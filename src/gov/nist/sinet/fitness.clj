@@ -196,7 +196,7 @@
 ;;; would encourage the introduction of inhibitor arcs (and their multiplicity) as means of
 ;;; specifying buffer capacity. Should I just explicitly edit the PN according to the results
 ;;; of the ANN classification? (And how exactly do you I get the ANN to tell me that it is
-;;; focusing on the quantity of tokens in place x?)
+;;; focusing on the quantity of tokens in place x?) [2017-10-07 That should not be hard.]
 
 ;;; The steady-state and dynamic analyses are looking more and more like validation activities.
 ;;; Maybe I translate to DES to do these. (Do I feed back the results? How? What?)
@@ -359,9 +359,14 @@
       (rest paths)
       (into (vec (map #(conj (first paths) %) steps)) (rest paths))))) ; depth-first
 
-(defn ordinary
+#_(defn ordinary?
+  "Returns msg  if the message isn't exceptional"
   [msg]
-)
+  (if (contains? (-> (app-info) :problem :exceptional-msgs)
+                 (-> msg scada/mjpdes2pn :name))
+    false
+    msg))
+                 
 
 (defn next-ordinary
   "Return the next ordinary message, at index n or later."

@@ -48,11 +48,12 @@
                    :activation sigmoid
                    :doutdnet (fn [out] (* out (- 1.0 out)))})))
 
-;;; POD the count requirements are just for testing. 
+;;; POD the count requirements are just for testing.
 (s/def ::activation fn?)
 (s/def ::doutdnet fn?)
-(s/def ::olayer (s/and (s/coll-of ::neuron) vector? #(>= (count %) 2)))
-(s/def ::hlayers (s/and (s/coll-of vector?) vector? #(>= (-> % first count) 2)))
+(s/def ::olayer (s/and (s/coll-of ::neuron :kind vector?) #(>= (count %) 2)))
+(s/def ::layer (s/coll-of ::neuron :kind vector?))
+(s/def ::hlayers (s/and vector? (s/coll-of ::layer) #(>= (-> % first count) 2)))
 (s/def ::net (s/keys :req-un [::total-error ::input ::hlayers ::olayer ::activation ::doutdnet]
                      :opt-un [::name]))
 
@@ -93,12 +94,18 @@
 ;;; yet in any NN there are "output" nodes. These are indexed with just "o" (e.g. o1, o2...)
 
 (defn forward-eqn
-  "Update the argument neuron's net-output output given argument inputs."
+  "Update the argument neuron's :net-output and :output given argument inputs."
   [net neuron inputs]
   (let [weights (:weights neuron)]
     (as-> neuron ?n
       (assoc ?n :net-output (apply + (map * inputs weights)))
       (assoc ?n :output ((:activation net) (:net-output ?n))))))
+
+(s/fdef forward-eqn
+        :args (s/cat :net ::net
+                     :neuron ::neuron
+                     :inputs (s/and vector? #(every? number? %)))
+        :ret ::neuron)
 
 (defn forward-pass-hidden-layer
   "Feed the inputs forward to calculate outputs of hidden neurons."
@@ -109,6 +116,8 @@
            (vector (vec (map #(forward-eqn net % inputs)
                              (-> net :hlayers first)))))))
 
+(s/fdef forward-pass-hidden-layer :args (s/cat :net ::net) :ret ::net)
+
 (defn forward-pass-output-layer
   "Calculate output layer neuron values."
   [net]
@@ -116,6 +125,8 @@
     (assoc net
            :olayer
            (vec (map #(forward-eqn net % inputs) (:olayer net))))))
+
+(s/fdef forward-pass-output-layer :args (s/cat :net ::net) :ret ::net)
 
 (defn total-error
   "Calculate (and set) the total error in the net."
@@ -132,6 +143,11 @@
                             2)))
                       0.0
                       (range (count outputs)))))))
+
+(s/fdef total-error
+        :args (s/cat :net ::net
+                     :targets (s/and vector? #(every? number? %)))
+        :ret ::net)
 
 ;;; Could do this easier with the "delta rule" assuming that the activation is sigmoid.
 ;;; Delta rule: -(target - out) * out*(1-out) *out_{hidden}
@@ -155,6 +171,11 @@
                         (range (-> net :olayer first :weights count dec)))))
             net
             (range (-> net :olayer count)))))
+
+(s/fdef backprop-output-layer
+        :args (s/cat :net ::net
+                     :targets (s/and vector? #(every? number? %)))
+        :ret ::net)
 
 ;;; \frac{\partial{E_total}}{\partial out_h1} = sum \frac{\partial E_outi}{\partial out_h1}
 ;;; The meaning of the above is that we sum over (multiple) output error values for the
@@ -203,6 +224,11 @@
                         (range (-> net :input count)))))
             net
             (range (-> net :hlayers first count)))))
+
+(s/fdef backprop-hidden-layer
+        :args (s/cat :net ::net
+                     :targets (s/and vector? #(every? number? %)))
+        :ret ::net)
 
 (defn update-weights
   [net]

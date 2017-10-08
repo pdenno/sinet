@@ -3634,3 +3634,6 @@ Yet, of course, it is implemented (see the sente/server_adapters/http_kit.clj:
 
 So I'm wondering whether it might be better to never reload sente and http-kit on reset.
 ...That created more problems. Now I'm just trying to get back to where I was. 
+
+
+==> Probably a design mistake not to translate all the mjpdes :aj etc to pn pretty names on scada-load. 

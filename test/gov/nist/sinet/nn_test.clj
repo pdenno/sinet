@@ -1,8 +1,14 @@
 (ns gov.nist.sinet.nn-test
   "Unit test for simple backpropagation neural nets"
   (:require [clojure.test :refer :all]
+            [clojure.spec.test.alpha :as stest]
             [clojure.set :as set]
             [gov.nist.sinet.nn :as nn :refer :all]))
+
+;;; POD If you recompile nn.clj after evaluating this, it won't happen. 
+(stest/instrument) ; Instrument everything
+
+;;;(require '[clojure.spec.test.alpha :as stest])
 
 ;;; https://mattmazur.com/2015/03/17/a-step-by-step-backpropagation-example/
 (defn mazur-set-weights-test [net]

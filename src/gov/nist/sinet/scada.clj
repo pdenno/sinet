@@ -3,24 +3,35 @@
   (:require [clojure.set :refer (union difference intersection)]
             [clojure.pprint :refer (cl-format pprint)]
             [clojure.edn :as edn]
+            [clojure.spec.alpha :as s]
             [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp)]
             [gov.nist.sinet.util :as util :refer (app-info)]))
 
 (def ^:private diag (atom nil))
 
-(defn preprocess-log
-  "Add line numbers. This is used by hand on the datafile."
-  [data]
-  (reduce (fn [data n] (assoc-in data [n :line] n))
-          data
-          (range (count data))))
-
-;;; POD Better than this would be transit. 
 (defn load-scada [filename]
-  (let [in (java.io.PushbackReader. (clojure.java.io/reader filename))
-        edn-seq (repeatedly (partial edn/read {:eof :eof :readers {'function (fn [x])}} in))
-        data (first (take-while #(not= :eof %) edn-seq))]
-    (preprocess-log data)))
+  "Read a SCADA log, a vector of messages."
+  (let [in (java.io.PushbackReader. (clojure.java.io/reader filename))]
+    (edn/read in)))
+
+(s/def ::act keyword?)
+(s/def ::mjpact keyword?)
+(s/def ::clk number?)
+(s/def ::line number?)
+
+(s/def ::bf keyword?)
+(s/def ::m keyword?)
+(s/def ::n number?)
+(s/def ::ent number?)
+(s/def ::scada-msg
+  (s/keys :req-un [::act ::mjpact ::clk ::line]
+          :opt-un [::m ::bf ::n ::ent ::ends]))
+(s/def ::scada-log (s/coll-of ::scada-msg :kind vector?))
+
+;;; POD I expected this to check the return value; it doesn't.  
+(s/fdef load-scada
+        :args (s/cat :filename string?)
+        :ret  ::scada-log)
 
 ;;;====== These are used to generate Eden individuals  ======
 (defn job-id-near
@@ -226,33 +237,31 @@
 
 ;;; POD Will need to generalize this idea of 'what a message means' I'm giving nice "pn names" to MJPdes output. 
 ;;; (mjpdes2pn (first (scada/random-job-trace))) ==>  {:name :m1-start-job, :act :aj, :m :m1}
+
 (defn mjpdes2pn
   "Interpret/translate the SCADA log. (Give pn names to MJPdes output.)" 
   [msg]
   (let [m (implies-machine msg)]
-    (cond (= :aj (:act msg)) {:name (scada2pn-name msg) :act :aj :m m :j (:j msg)} 
-          (= :ej (:act msg)) {:name (scada2pn-name msg) :act :ej :m m :j (:j msg)} 
-          (= :sm (:act msg)) {:name (scada2pn-name msg) :act :sm :m m :bf (:bf msg) :j (:j msg)}
-          (= :bj (:act msg)) {:name (scada2pn-name msg) :act :bj :m m :bf (:bf msg) :j (:j msg)}
-          (= :bl (:act msg)) {:name (scada2pn-name msg) :act :bl :m m :j (:j msg)}
-          (= :ub (:act msg)) {:name (scada2pn-name msg) :act :ub :m m :j (:j msg)}
-          (= :st (:act msg)) {:name (scada2pn-name msg) :act :st :m m :j (:j msg)}
-          (= :us (:act msg)) {:name (scada2pn-name msg) :act :us :m m :j (:j msg)})))
+    (-> msg
+        (assoc :mjpact (:act msg))
+        (assoc :m m)
+        (assoc :act (scada2pn-name msg)))))
 
 (defn exceptional-msgs
   "Return a list of the exceptional messages found in the scada log."
-  []
+  [scada-patterns scada-log]
   (let [ordinary (set (mapcat (fn [pat]
                                 (map :act (:form pat)))
-                              (-> (app-info) :problem :scada-patterns)))]
+                              scada-patterns))]
     (->> (reduce (fn [excepts msg]
                    (if (contains? ordinary (:act msg))
                      excepts
-                     (conj excepts (-> msg (dissoc :j) (dissoc :clk) (dissoc :line)))))
+                     (conj excepts (-> msg
+                                       (dissoc :j)
+                                       (dissoc :clk)
+                                       (dissoc :ent)
+                                       (dissoc :line)))))
                  []
-                 (-> (app-info) :problem :scada-log))
-         distinct
-         (map scada2pn-name))))
-        
-              
-
+                 scada-log)
+         (map :act)
+         distinct)))

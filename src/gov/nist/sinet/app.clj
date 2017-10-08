@@ -57,16 +57,18 @@
 (defrecord App [ws-connection]
   component/Lifecycle
   (start [component]
+    ;; Things here should not reference app-info; it won't be set. Instead, pass args in.
     (let [component
           (as-> component ?c
             (assoc ?c :gp-params @gp-params :problem @problem :gp-system (gp-system))
             (assoc-in ?c [:problem :scada-log] (-> ?c :problem :scada-data-file scada/load-scada))
             (assoc-in ?c [:problem :scada-patterns] ; Needs :pattern-reserves defined.
                       (-> ?c :problem :scada-log scada/scada-patterns))
-            (assoc-in ?c [:problem :exceptional-msgs] (scada/exceptional-msgs)))]
-      ;; Pass the evolve-chan in to the go loop. You can't pull it from app-info yet.
-      (gp/start-evolve-loop! (-> component :gp-system :evolve-chan))
-      component))
+            #_(assoc-in ?c [:problem :exceptional-msgs]
+                      (scada/exceptional-msgs (-> ?c :problem :scada-patterns)
+                                              (-> ?c :problem :scada-log))))]
+          (gp/start-evolve-loop! (-> component :gp-system :evolve-chan))
+          component))
   (stop [component]
     (async/close! (-> component :gp-system :evolve-chan))
     component))
