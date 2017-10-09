@@ -9,8 +9,10 @@
 
 (def ^:private diag (atom nil))
 
+;;; The function for pretty-fying is in scada_test.clj
 (defn load-scada [filename]
-  "Read a SCADA log, a vector of messages."
+  "Read a SCADA log, a vector of messages pretty-fied from 
+   their original MJPdes form."
   (let [in (java.io.PushbackReader. (clojure.java.io/reader filename))]
     (edn/read in)))
 
@@ -82,11 +84,6 @@
        (apply max)
        inc))
 
-
-;;;{:act :aj, :j 1079, :jt :jobType1, :ends 2367.448119327561, :clk 2365.448119327561, :line 989}
-;;;{:act :bj, :bf :b1, :j 1079, :n 0, :clk 2367.448119327561, :line 994}
-;;;{:act :sm, :bf :b1, :j 1079, :n 1, :clk 2367.448119327561, :line 996}
-;;;{:act :ej, :m :m2, :j 1079, :ent 2365.448119327561, :clk 2368.248119327561, :line 998})
 (defn implies-machine
   "Returns machine referenced/implied in message. 
    If a buffer n is references, machine n+1 is pulling from it.
@@ -110,7 +107,7 @@
   (sort (distinct (map :j (filter #(contains? % :j) data)))))
  
 (defn make-pattern
-  "Create a SCADA pattern; they look like this: {:act :sm, :bf :b1, :n :*}, 
+  "Create a SCADA pattern; they look like this: {:act :m2-start-job, :bf :b1, :n :*}, 
    {:act :ej, :m m1}..."
   [msgs pattern-id]
   {:id pattern-id
@@ -119,8 +116,7 @@
      (map #(reduce (fn [msg key] (dissoc msg key)) ; remove unnecessary keys
                    %
                    (difference (set (keys %))
-                               #{:act :jt :bf :m :n} ; POD Ugh! 
-                               #_(-> (util/app-info) :problem :pattern-reserves)))
+                               #{:act :jt :bf :m :n}))  ; POD Long-term okay?
           ?msgs)
      (map #(reduce (fn [msg key] (if (contains? msg key) (assoc msg key :*) msg))
                    % ; wildcard certain msg vals
@@ -239,7 +235,7 @@
 ;;; (mjpdes2pn (first (scada/random-job-trace))) ==>  {:name :m1-start-job, :act :aj, :m :m1}
 
 (defn mjpdes2pn
-  "Interpret/translate the SCADA log. (Give pn names to MJPdes output.)" 
+  "Interpret/translate the SCADA log. (Give pretty-fied pn names to MJPdes output.)" 
   [msg]
   (let [m (implies-machine msg)]
     (-> msg
@@ -256,7 +252,7 @@
     (->> (reduce (fn [excepts msg]
                    (if (contains? ordinary (:act msg))
                      excepts
-                     (conj excepts (-> msg
+                     (conj excepts (-> msg ; so can use distinct below
                                        (dissoc :j)
                                        (dissoc :clk)
                                        (dissoc :ent)
@@ -264,4 +260,5 @@
                  []
                  scada-log)
          (map :act)
-         distinct)))
+         distinct
+         set)))

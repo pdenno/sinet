@@ -11,16 +11,11 @@
 
 (defn m2-inhib-bas-sim
   "Setup the m2-inhib-bas PN for a simulation."
- [steps]       ;     Change...
-  (-> "/Users/peterdenno/Documents/git/spntools/data/m2-inhib-bas.xml" 
+  [steps]
+  (-> "data/PNs/m2-inhib-bas.xml" 
       spn/run-ready
       gp/add-color-binding
       (gp/diag-force-priority [{:source :m1-start-job, :target :buffer :priority 2}])
-      (gp/diag-force-rep
-       [{:name :m1-start-job, :act :aj, :m :m1}
-        {:name :m1-complete-job, :act :bj, :m :m1, :bf :b1}
-        {:name :m2-start-job, :act :sm, :m :m2, :bf :b1}
-        {:name :m2-complete-job, :act :ej, :m :m2}])
       (sim/simulate :max-steps steps)))
 
 (defn sequence? [seq]
@@ -44,7 +39,6 @@
                (map :tkn)
                (map :id)
                sequence?)))))
-
       
     
 

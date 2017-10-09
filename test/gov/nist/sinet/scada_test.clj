@@ -17,7 +17,7 @@
   "A stand-alone utility: Translate messages from MJPdes format to pretty (PN) format and 
    write to a file. The result can then be used by load-scada."
   [log out-file]
-  (let [line-cnt (atom 0)]
+  (let [line-cnt (atom -1)]
     (with-open [out-stream (if out-file (clojure.java.io/writer out-file :encoding "UTF-8") *out*)]
       (binding [*out* out-stream]
         (println "[")

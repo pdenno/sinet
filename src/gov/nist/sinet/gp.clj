@@ -722,18 +722,19 @@
                                    arcs))
                                arcs priority-maps)))))
 
-;;; [{:name :m1-start-job, :mjpact :aj, :m :m1}
-;;;  {:name :m1-complete-job, :mjpact :bj, :m :m1, :bf :b1}
-;;;  {:name :m2-start-job, :mjpact :sm, :m :m2, :bf :b1}
-;;;  {:name :m2-complete-job, :mjpact :ej, :m :m2}]
-(defn diag-force-rep
+;;; [{:act :m1-start-job, :mjpact :aj, :m :m1}
+;;;  {:act :m1-complete-job, :mjpact :bj, :m :m1, :bf :b1}
+;;;  {:act :m2-start-job, :mjpact :sm, :m :m2, :bf :b1}
+;;;  {:act :m2-complete-job, :mjpact :ej, :m :m2}]
+;;; 2017-10-07 I don't think this is needed. Worked on :rep, and I switched to using pretty-fied.
+#_(defn diag-force-rep
   "Set the :rep of each transition according to the argument map."
   [pn rep-vec]
   (update pn :transitions
           (fn [t]
             (reduce (fn [tvec cmd]
-                      (update-in tvec [(pnu/trans-index pn (:name cmd)) :rep]
-                                 #(merge % (dissoc cmd :name))))
+                      (update-in tvec [(pnu/trans-index pn (:act cmd)) :rep]
+                                 #(merge % (dissoc cmd :act))))
                     t rep-vec))))
 
 ;;; (diag-inject-pn "data/PNs/m2-inhib-bas.xml" 10 [{:source :m1-start-job, :target :buffer :priority 2}])

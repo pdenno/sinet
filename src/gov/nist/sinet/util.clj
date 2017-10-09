@@ -39,8 +39,8 @@
   ;(nsp/disable-reload! (find-ns 'org.httpkit.timer))
   ((resolve 'gov.nist.sinet.run/reset)))
 
-(def save-server
-  "Save HTTPServer stop fn so can do (.stop @save-server 100)"
+(def save-http-server
+  "Save HTTPServer stop fn so can do (.stop @save-http-server 100)"
   (atom :original-value))
 
 ;;; POD This isn't helping, but I'll leave it here and work on it next time I get stuck. 
@@ -54,8 +54,9 @@
   ;(nsp/disable-reload! (find-ns 'org.httpkit.client))
   ;(nsp/disable-reload! (find-ns 'org.httpkit.timer))
   (nsp/refresh)
-  (when-not (= :original-value @save-server)
-    (org.httpkit.server.HttpServer/.stop @save-server 100))
+  ;; The server sometime does not stop through the normal process.
+  (when-not (= :original-value @save-http-server)
+    (org.httpkit.server.HttpServer/.stop @save-http-server 100))
   ((resolve 'gov.nist.sinet.run/reset)))
 
 (def +log+ (atom []))

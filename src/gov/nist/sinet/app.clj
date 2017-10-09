@@ -51,6 +51,18 @@
   {:evolve-chan (async/chan)
    :pause-evolve? (atom false)})
 
+(defn app-start-body [component ws-connection]
+  (let [comp (as-> component ?c
+               (assoc ?c :gp-params @gp-params :problem @problem :gp-system (gp-system))
+               (assoc-in ?c [:problem :scada-log] (-> ?c :problem :scada-data-file scada/load-scada))
+               (assoc-in ?c [:problem :scada-patterns] ; Needs :pattern-reserves defined.
+                         (-> ?c :problem :scada-log scada/scada-patterns))
+               (assoc-in ?c [:problem :exceptional-msgs]
+                         (scada/exceptional-msgs (-> ?c :problem :scada-patterns)
+                                                 (-> ?c :problem :scada-log))))]
+    (gp/start-evolve-loop! (-> comp :gp-system :evolve-chan))
+    comp))
+
 ;;; Start and stop will reset the component to what is returned here. Thus I use atoms
 ;;; for things that I want to change and I do not reload this file on reset.
 ;;; See use of (nsp/disable-reload! (find-ns 'gov.nist.sinet.app)) in util.clj.
@@ -58,17 +70,7 @@
   component/Lifecycle
   (start [component]
     ;; Things here should not reference app-info; it won't be set. Instead, pass args in.
-    (let [component
-          (as-> component ?c
-            (assoc ?c :gp-params @gp-params :problem @problem :gp-system (gp-system))
-            (assoc-in ?c [:problem :scada-log] (-> ?c :problem :scada-data-file scada/load-scada))
-            (assoc-in ?c [:problem :scada-patterns] ; Needs :pattern-reserves defined.
-                      (-> ?c :problem :scada-log scada/scada-patterns))
-            #_(assoc-in ?c [:problem :exceptional-msgs]
-                      (scada/exceptional-msgs (-> ?c :problem :scada-patterns)
-                                              (-> ?c :problem :scada-log))))]
-          (gp/start-evolve-loop! (-> component :gp-system :evolve-chan))
-          component))
+    (app-start-body component ws-connection))
   (stop [component]
     (async/close! (-> component :gp-system :evolve-chan))
     component))

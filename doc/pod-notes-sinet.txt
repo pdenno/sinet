@@ -3635,5 +3635,17 @@ Yet, of course, it is implemented (see the sente/server_adapters/http_kit.clj:
 So I'm wondering whether it might be better to never reload sente and http-kit on reset.
 ...That created more problems. Now I'm just trying to get back to where I was. 
 
+==> Probably a design mistake not to translate all the mjpdes :aj etc to pn pretty names on scada-load.
+Fixed.
 
-==> Probably a design mistake not to translate all the mjpdes :aj etc to pn pretty names on scada-load. 
+HEY, this looks wrong!
+(meta (app-info))
+  #:com.stuartsierra.component{:dependencies {:ws-connection :ws-connection}}
+
+;;;=================================
+;;; "2017-10-09T14:34:59.066-00:00"
+;;;=================================
+
+I'm still working on getting messages synced to rgraphs. The immediate aim is to
+produce a sequence of steps noting markings and messages, some of which are non-ordinary. 
+

@@ -40,7 +40,7 @@
             (ws/ring-handlers ws-connection)
             handler (handler ajax-post-fn ajax-get-or-ws-handshake-fn)
             server-stop (run-server (app handler) {:port port})]
-        (reset! util/save-server (:server (meta server-stop)))
+        (reset! util/save-http-server (:server (meta server-stop)))
         (log/debug "HTTP server started")
         (assoc component :server-stop server-stop))))
   (stop [component]
@@ -58,7 +58,7 @@
           (ws/ring-handlers ws-connection)
           handler (handler ajax-post-fn ajax-get-or-ws-handshake-fn)
           server-stop (run-server (app handler) {:port port})]
-      (reset! util/save-server (:server (meta server-stop)))
+      (reset! util/save-http-server (:server (meta server-stop)))
       (log/debug "HTTP server started")
       (map->HttpServer {:port port
                         :server-stop server-stop}))

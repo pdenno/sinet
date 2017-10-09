@@ -3,7 +3,7 @@
             [gov.nist.spntools.core :as spn]
             [gov.nist.spntools.util.reach :as pnr]
             [gov.nist.spntools.core :as pn]
-            [gov.nist.sinet.util :refer (map->Inv app-info reset)]
+            [gov.nist.sinet.util :as util :refer (map->Inv app-info reset big-reset)]
             [gov.nist.sinet.app :as app]
             [gov.nist.sinet.run :as run]
             [gov.nist.sinet.gp :as gp]
@@ -58,33 +58,28 @@
                {:act :aj, :tkns [{:type :a, :id 23} {:type :a, :id 22}]}
                {:act :sm, :tkns [{:type :a, :id 22}]}]))))))
 
-(defn m2-inhib-bas-fit
+(defn m2-inhib-bas-workflow-fit
   "Setup the m2-inhib-bas PN for a fitness test"
-  [steps]       ;     Change...
-  (let [pn (-> "/Users/peterdenno/Documents/git/spntools/data/m2-inhib-bas.xml" 
+  [steps]    
+  (let [pn (-> "/data/PNs/m2-inhib-bas.xml" 
                spn/run-ready
                gp/add-color-binding
                (gp/diag-force-priority [{:source :m1-start-job, :target :buffer :priority 2}])
-               (gp/diag-force-rep
-                [{:name :m1-start-job, :act :aj, :m :m1}
-                 {:name :m1-complete-job, :act :bj, :m :m1, :bf :b1}
-                 {:name :m2-start-job, :act :sm, :m :m2, :bf :b1}
-                 {:name :m2-complete-job, :act :ej, :m :m2}])
                (sim/simulate :max-steps steps))]
     (fit/workflow-fitness (map->Inv {:pn pn}))))
 
 (deftest perfect-fitness-scores-zero
   (testing "That a PN matching the log scores zero."
-    (is (=* 0.0 (m2-inhib-bas-fit 200) 0.01))))
+    (is (=* 0.0 (m2-inhib-bas-workflow-fit 200) 0.01))))
 
 (defn problem-setting-fixture
   "Set the 'problem' (the log we look at) to the m2-inhib-bas problem."
   [f]
   (let [orig-scada (-> (app-info) :problem :scada-data-file)]
     (swap! app/problem #(assoc % :scada-data-file "data/SCADA-logs/scada-m2-inhib-bas.clj"))
-    (reset)
+    (util/big-reset) ;; POD need something less extreme than this! stop and start app!
     (f) ; The canonical fixture function, in this case called using the 'once' procedure
     (swap! app/problem #(assoc % :scada-data-file orig-scada))
-    (reset)))
+    (util/big-reset)))
 
 (use-fixtures :once problem-setting-fixture)

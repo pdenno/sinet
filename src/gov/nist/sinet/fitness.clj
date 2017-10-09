@@ -243,25 +243,16 @@
 ;;;====================================================================================
 ;;; Exceptional Fitness
 ;;;====================================================================================
-
-
-#_(def scada-msgs (atom nil))
-
-#_(defn reload-scada-msgs! []
-  (reset! scada-msgs (vec (map scada/mjpdes2pn (-> (app-info) :problem :scada-log)))))
-
-#_(defn pull-scada! []
-  (let [msg (first @scada-msgs)]
-    (swap! scada-msgs next)
-    msg))
-
-;;; Belongs in app-info :problem
-(def scada-msgs nil ) ;now(vec (map scada/mjpdes2pn (-> (app-info) :problem :scada-log))))
-(def scada-msg-types nil) ;now  (set (map :name scada-msgs)))
-
 (declare navigate-qpn)
 
 ;;; POD reachability graph is apt to be too sensitive to initial marking???
+;;; There is a loose end in this design concerning the PN's marking determining its rgraph. 
+;;; Some markings may not necessarily enable the best interpretation of the sdata.
+;;; I am probably going to have write some code to select a good initial marking
+;;; before I generate the rgraph. Thus messing with tokens would no longer part of GP!
+;;; Also, I would perhaps do the workflow analysis after I do the SCADA analysis
+;;; (and maybe reconceive its implementation to exploit the SCADA analysis work).
+
 (defn best-nav
   "Picking various starting points in the SCADA log, return the 
    longest path of it that can be walked using the QPN." 
@@ -274,18 +265,6 @@
 
 ;;; The set of exceptional message types is decided on a per-QPN basis.
 ;;; Whatever is in the SCADA log but not a QPN event is exceptional for that QPN. 
-
-;;; scada-msgs looks like this
-#_[{:name :m2-complete-job, :act :ej, :m :m2, :j 1746}
-   {:name :m2-start-job, :act :sm, :m :m2, :bf :b1, :j 1747}
-   {:name :m1-complete-job, :act :bj, :m :m1, :bf :b1, :j 1748}
-   {:name :m1-start-job, :act :aj, :m :m1, :j 1749}
-   {:name :m2-complete-job, :act :ej, :m :m2, :j 1747}
-   {:name :m2-start-job, :act :sm, :m :m2, :bf :b1, :j 1748}
-   {:name :m1-complete-job, :act :bj, :m :m1, :bf :b1, :j 1749}
-   {:name :m1-start-job, :act :aj, :m :m1, :j 1750}
-   {:name :m2-complete-job, :act :ej, :m :m2, :j 1748}
-   {:name :m2-start-job, :act :sm, :m :m2, :bf :b1, :j 1749} ,,,]
 
 ;;; POD I think it is enough to always start at position 0 in the SCADA log because
 ;;;     exceptional situations are the only thing in the way. 
@@ -313,23 +292,6 @@
                        (update :ix inc)
                        (update-in [:excepts event] #(distinct (conj %1 %2)) mark)))))))))
 
-
-(def sdata1
-  [{:name :m2-complete-job, :act :ej, :m :m2, :j 1755}
-   {:name :m2-start-job, :act :sm, :m :m2, :bf :b1, :j 1756}
-   {:name :m2-complete-job, :act :ej, :m :m2, :j 1756}
-   {:name :m2-starved, :act :st, :m :m2, :j nil}
-   {:name :m1-complete-job, :act :bj, :m :m1, :bf :b1, :j 1757}
-   {:name :m1-start-job, :act :aj, :m :m1, :j 1758}
-   {:name :m2-start-job, :act :sm, :m :m2, :bf :b1, :j 1757}
-   {:name :m2-unstarved, :act :us, :m :m2, :j nil}
-   {:name :m2-complete-job, :act :ej, :m :m2, :j 1757}
-   {:name :m2-starved, :act :st, :m :m2, :j nil}
-   {:name :m1-complete-job, :act :bj, :m :m1, :bf :b1, :j 1758}
-   {:name :m1-start-job, :act :aj, :m :m1, :j 1759}
-   {:name :m2-start-job, :act :sm, :m :m2, :bf :b1, :j 1758}
-   {:name :m2-unstarved, :act :us, :m :m2, :j nil}])
-
 ;;; This is the reachability graph for m2-inhib-bas:
 (def reach1
   [{:M [0 0 1 1 0], :fire :m1-complete-job, :Mp [0 1 0 1 0], :rate 0.9}
@@ -348,62 +310,86 @@
 ;;;       But what gets hard here is choosing a marking that will guess correctly
 ;;;       what is flowing through the PN/system. Maybe this isn't that hard, since we CAN
 ;;;       know the number of jobs in the queue.
-
-;;; POD this is a candidate enhancement to us an ARG (Abbreviated Reachability Graph).
-(defn next-paths
-  "Extend or eliminate paths depending on reachability graph."
-  [paths rgraph]
-  (let [from (-> paths first last :Mp) ; current state along first path
-        steps (filter #(= (:M %) from) rgraph)]
-    (if (empty? steps) ; This path is a dead end. 
-      (rest paths)
-      (into (vec (map #(conj (first paths) %) steps)) (rest paths))))) ; depth-first
-
-#_(defn ordinary?
-  "Returns msg  if the message isn't exceptional"
+(defn ordinary?
+  "Returns msg if the message isn't exceptional otherwise false."
   [msg]
-  (if (contains? (-> (app-info) :problem :exceptional-msgs)
-                 (-> msg scada/mjpdes2pn :name))
+  (if (contains? (-> (app-info) :problem :exceptional-msgs) (:act  msg))
     false
     msg))
-                 
 
 (defn next-ordinary
   "Return the next ordinary message, at index n or later."
-  [n])
+  [data n]
+  (loop [indx n]
+    (if-let [msg (ordinary? (nth data indx))]
+      msg
+      (recur (inc indx)))))
 
+;;; POD this is a candidate enhancement to use an ARG (Abbreviated Reachability Graph).
+(defn next-paths
+  "Extend or eliminate paths depending on the PN's reachability graph."
+  [paths rgraph data msg-indx]
+  (let [next-msg (next-ordinary data msg-indx)
+        from (-> paths first last :Mp) ; current state along first path
+        all-steps (filter #(= (:M %) from) rgraph)
+        good-steps (filter #(= (:fire %) (:act next-msg)) all-steps)   ; matches a msg
+        good-steps (map #(assoc % :indx (:line next-msg)) good-steps)] ; track where you found it. 
+    (if (empty? good-steps) ; This path is a dead end. 
+      (rest paths)
+      (into (vec (map #(conj (first paths) %) good-steps)) (rest paths))))) ; depth-first
 
-;;; POD Choose a starting point in the SCADA that names a message used as a transition.
-;;; (excep-starting-mark reach1)
-(defn excep-starting-mark
-  "By searching for an interpretation that runs a few steps, return a starting mark."
-  [rgraph]
-  (let [msgs (-> (app-info) :problem :scada-log)]
-    (loop [msg-index 0
-           paths (map vector (vec (filter #(= (-> sdata1 first :name) (:fire %)) rgraph)))]
-      (let [good (some #(when (>= (count %) 3) %) paths)]
-        (cond good (-> good first :M), 
-              (empty? paths) nil, 
-              :otherwise
-              (recur (inc msg-index)
-                     (next-paths paths rgraph)))))))
+;;; Many-to-many relationship between scada log states and rgraph states. 
 
+;;; POD The weakness in this approach is that it needs a start-indx from the SCADA log.
+;;;     Maybe I should take the best result after trying a few different starting points.
+;;; (starting-link reach1 (subvec (-> (util/app-info) :problem :scada-log) 0 100) 0)
+(defn starting-link
+  "By searching for an interpretation that runs a few steps, return a starting link."
+  [rgraph data start-indx]
+  (loop [paths (map
+                vector
+                (vec
+                 (map #(assoc % :indx start-indx)
+                      (filter #(= (:act (next-ordinary data start-indx))
+                                  (:fire %))
+                              rgraph))))]
+    (let [good (some #(when (>= (count %) 10) %) paths)]
+      (cond good (first good),
+            (empty? paths) nil, 
+            :otherwise
+            (let [next-msg-indx (-> paths first last :indx inc)]
+              (recur (next-paths paths rgraph data next-msg-indx)))))))
+
+(defn next-match
+  "If the argument msg is not ordinary, return its act. 
+   If the argument msg can advance the rgraph, return the corresponding link.
+   otherwise return nil."
+  [msg link rgraph]
+  (if (not (ordinary? msg))
+    {:act (:act msg) :indx (:line msg) :Mp (:Mp link)}
+    (when-let [link (some #(when (and (= (:Mp link) (:M %))
+                                      (= (:fire %) (:act msg)))
+                             %) rgraph)]
+      (assoc link :indx (:line msg)))))
+
+;;; (interpret-scada reach1 (subvec (-> (util/app-info) :problem :scada-log) 0 100) 0)
 (defn interpret-scada
   "Describe how the message stream could be accounted for by this PN. 
-   Return a sequence of <marking, response> where response is either a
-   keyword naming a transition or a keyword naming an exceptional message."
-  [pn]
-  (let [rgraph (pnr/simple-reach pn)
-        data   (-> (app-info) :problem :scada-log)]
-    (when-let [start (excep-starting-mark rgraph sdata1)]
-      (loop []))))
-
-
-  
-  
-   
-
-
+   Return a sequence where an element is:
+    - a link (if an ordinary message is processed), or
+    - a map naming an exceptional message (if an such a message is processed)."
+  [rgraph data start-indx]
+  (let [last-indx (-> data last :line)]
+       ;rgraph (pnr/simple-reach pn)
+       ;data   (-> (app-info) :problem :scada-log)
+    (when-let [start (starting-link rgraph data start-indx)]
+      (loop [interp (vector start)]
+        (let [indx (-> interp last :indx)
+              next-msg (if (== last-indx indx) nil (nth data (inc indx)))
+              matched  (when next-msg (next-match next-msg (last interp) rgraph))]
+          (cond (not next-msg)   interp
+                (not matched)    interp
+                :otherwise (recur (conj interp matched))))))))
 
 ;;; For the time being, we'll assume that we are trying to match a starvation message.
 ;;; We generate the reachability graph (including non-tangible states) and test the
@@ -417,7 +403,6 @@
    exceptional circumstances (blocking and starvation)."
   [inv]
   0)
-  
 
 ;;; These are useful to understanding how things work. 
 ;;; This one for an Eden INV:
