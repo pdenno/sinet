@@ -8,7 +8,8 @@
             [gov.nist.spntools.util.pnml :as pnml :refer (read-pnml)] ; POD temporary
             [gov.nist.sinet.simulate :as sim :refer-only (simulate)]
             [gov.nist.sinet.util :as util :refer (app-info reset)]
-            [gov.nist.sinet.scada :as scada]))
+            [gov.nist.sinet.scada :as scada]
+            [gov.nist.sinet.nn :as nn]))
 
 ;;; ToDo: Currently fitness only concerns violation of partial orders it should
 ;;;       additionally include:
@@ -317,6 +318,7 @@
     false
     msg))
 
+;;; POD no test on index okay? 
 (defn next-ordinary
   "Return the next ordinary message, at index n or later."
   [data n]
@@ -324,6 +326,14 @@
     (if-let [msg (ordinary? (nth data indx))]
       msg
       (recur (inc indx)))))
+
+#_(defn prev-ordinary
+  "Return an ordinary message, at index n or earlier."
+  [data n]
+  (loop [indx n]
+    (cond (ordinary? (nth data indx)) (nth data indx), 
+          (== indx 0) nil
+          :otherwise (recur (dec indx)))))
 
 ;;; POD this is a candidate enhancement to use an ARG (Abbreviated Reachability Graph).
 (defn next-paths
@@ -390,6 +400,42 @@
           (cond (not next-msg)   interp
                 (not matched)    interp
                 :otherwise (recur (conj interp matched))))))))
+
+;;; {:M [1 0 1 0 1], :fire :m2-start-job, :Mp [0 0 1 1 0], :rate 1.0, :indx 37}
+;;; {:M [0 0 1 1 0], :fire :m2-complete-job, :Mp [0 0 1 0 1], :rate 1.0, :indx 38}
+;;; {:act :m2-starved, :indx 39, :Mp [0 0 1 0 1]}
+(defn train-starving
+  "Return a neural net that identifies starvation situations"
+  [net]
+  (let [data (interpret-scada reach1 (-> (util/app-info) :problem :scada-log) 0)
+        last-indx (-> data last :indx)]
+    (loop [net net
+           indx 0]
+      (if (>= indx last-indx)
+        net
+        (let [msg (nth data indx)
+              target (if (= (:act msg) :m2-starved) 1 -1) 
+              inputs (cond (== target 1)            [0 0 1 0 1] ; (:Mp msg),  POD just to be sure....
+                           (contains? msg :fire)    (:M  msg), 
+                           :otherwise :skip)]
+          (recur
+           (if (= inputs :skip)
+             net
+             (nn/train-step net
+                            (vec (map double inputs))
+                            (vector (double target))))
+           (inc indx)))))))
+
+(defn big-train []
+  (reduce (fn [net _] (train-starving net))
+          (nn/make-net 5 1 5)
+          (range 100)))
+
+
+
+(nn/eval-net nnn (map double [1 0 1 0 1]))
+(nn/eval-net nnn (map double [0 0 1 1 0]))
+(nn/eval-net nnn (map double [0 0 1 0 1]))
 
 ;;; For the time being, we'll assume that we are trying to match a starvation message.
 ;;; We generate the reachability graph (including non-tangible states) and test the

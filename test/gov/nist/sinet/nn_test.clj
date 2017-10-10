@@ -108,5 +108,8 @@
 
 (deftest convergence-more-hidden-nodes
   (testing "whether calculation of updated hidden layer weights is correct"
-    (let [net (mazur-3-hidden 10000)]
-      (is (=* (:total-error net) 6.249163999127777E-6 0.00001)))))
+    (let [net (mazur-3-hidden 10000)
+          ev  (nn/eval-net net [0.05 0.1])]
+      (is (=* (:total-error net) 6.249163999127777E-6 0.00001))
+      (is (=* (nth ev 0) 0.015912196 0.01))     ; his value (mine is better!)
+      (is (=* (nth ev 1) 0.984065734 0.01)))))  ; his value (mine is better!)

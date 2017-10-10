@@ -3649,3 +3649,6 @@ HEY, this looks wrong!
 I'm still working on getting messages synced to rgraphs. The immediate aim is to
 produce a sequence of steps noting markings and messages, some of which are non-ordinary. 
 
+CLOJURE.SPEC PROVES ITSELF USEFUL FOR DEBUGGING!
+I required that a neuron has at least one weight. I instrumented everything
+and it caught a call with a non-conforming net!

@@ -22,7 +22,7 @@
                 :net-output nil ; value before application of activation function
                 :output nil}))  ; value after application of activation function
 
-(s/def ::weights (s/and vector? #(every? number? %)))
+(s/def ::weights (s/and vector? #(every? number? %) #(>= (count %) 1)))
 (s/def ::neuron (s/keys :req-un [::net-output ::output ::weights] :opt-un [::name]))
 
 (defn sigmoid 
@@ -38,24 +38,27 @@
   "Create a neural net structure. Assume 1 hidden layer, and thus names like this: [:h 3]."
   ([n-inputs n-outputs n-neurons-per-hl] (make-net n-inputs n-outputs n-neurons-per-hl 1.0))
   ([n-inputs n-outputs n-neurons-per-hl eta]
-  (map->NeuralNet {:input   (vec (repeat n-inputs nil))
+  (map->NeuralNet {:input   (vec (repeat n-inputs :init-val))
                    :hlayers (vec (repeatedly 1 (fn [] (vec (map #(make-neuron [:h %] n-inputs)
                                                                 (range n-neurons-per-hl))))))
                    :olayer  (vec (map #(make-neuron [:o %] n-neurons-per-hl)
                                       (range n-outputs)))
                    :eta  eta ; "learning rate" (multiplier on gradient). 
-                   :total-error nil
+                   :total-error :init-val
                    :activation sigmoid
                    :doutdnet (fn [out] (* out (- 1.0 out)))})))
 
 ;;; POD the count requirements are just for testing.
 (s/def ::activation fn?)
 (s/def ::doutdnet fn?)
-(s/def ::olayer (s/and (s/coll-of ::neuron :kind vector?) #(>= (count %) 2)))
-(s/def ::layer (s/coll-of ::neuron :kind vector?))
-(s/def ::hlayers (s/and vector? (s/coll-of ::layer) #(>= (-> % first count) 2)))
-(s/def ::net (s/keys :req-un [::total-error ::input ::hlayers ::olayer ::activation ::doutdnet]
-                     :opt-un [::name]))
+(s/def ::optional-double (s/or :double double? :init #(= % :init-val)))
+(s/def ::input   (s/and (s/coll-of ::optional-double :kind vector?) #(>= (count %) 1)))
+(s/def ::total-error ::optional-double)
+(s/def ::olayer  (s/and (s/coll-of ::neuron :kind vector?) #(>= (-> % first count) 1)))
+(s/def ::layer   (s/and (s/coll-of ::neuron :kind vector?) #(>= (-> % first count) 1)))
+(s/def ::hlayers (s/and (s/coll-of ::layer  :kind vector?) #(>= (-> % first count) 1)))
+(s/def ::net (s/keys :req-un [::total-error ::hlayers ::olayer ::activation ::doutdnet]
+                     :opt-un [::name ::input])) ; At this point, input might not be set.
 
 (defn set-weight [net layer n-index w-index val]
   "Set a weight. layer=1 is first hidden layer. Layer=2 is (typically) output. 
@@ -104,7 +107,7 @@
 (s/fdef forward-eqn
         :args (s/cat :net ::net
                      :neuron ::neuron
-                     :inputs (s/and vector? #(every? number? %)))
+                     :inputs (s/and vector? #(every? number? %) #(>= (count %) 1)))
         :ret ::neuron)
 
 (defn forward-pass-hidden-layer
@@ -146,7 +149,7 @@
 
 (s/fdef total-error
         :args (s/cat :net ::net
-                     :targets (s/and vector? #(every? number? %)))
+                     :targets (s/and vector? #(every? number? %) #(>= (count %) 1)))
         :ret ::net)
 
 ;;; Could do this easier with the "delta rule" assuming that the activation is sigmoid.
@@ -174,7 +177,7 @@
 
 (s/fdef backprop-output-layer
         :args (s/cat :net ::net
-                     :targets (s/and vector? #(every? number? %)))
+                     :targets (s/and vector? #(every? number? %) #(>= (count %) 1)))
         :ret ::net)
 
 ;;; \frac{\partial{E_total}}{\partial out_h1} = sum \frac{\partial E_outi}{\partial out_h1}
@@ -201,7 +204,6 @@
   "Calculate the derivative of Etotal with respect to a weight on a hidden neuron.
    Uses the chain rule producing a product of 3 factors."
   [net targets ineuron iinput]
-  (reset! diag {:net net :targets targets :ineuron ineuron :iinput iinput})
   (let [nth-neuron #(nth % ineuron)
         nth-input #(nth % iinput)
         dtotaldout (dEtotaldouth net targets ineuron)
@@ -211,9 +213,10 @@
 
 (defn backprop-hidden-layer
   [net targets]
+  (reset! diag {:in :bp-hidden :net net :targets targets})
   (let [eta (:eta net)]
     (reduce (fn [net ihneur]
-              (let [nth-hneur #(nth % ihneur)] 
+              (let [nth-hneur #(nth % ihneur)]
                 (reduce (fn [net iinput]
                           (let [nth-input #(nth % iinput)
                                 detotaldw  (dEtotaldw net targets ihneur iinput)
@@ -227,12 +230,13 @@
 
 (s/fdef backprop-hidden-layer
         :args (s/cat :net ::net
-                     :targets (s/and vector? #(every? number? %)))
+                     :targets (s/and vector? #(every? number? %) #(>= (count %) 1)))
         :ret ::net)
 
 (defn update-weights
   [net]
   "Bookkeeping operations to update weights after backpropagation."
+  (reset! diag net)
   (as-> net ?n
     (reduce (fn [net ineuron]
               (let [nth-neur #(nth % ineuron)]
@@ -251,3 +255,44 @@
                     (update-in [:hlayers 0 ineuron] #(dissoc % :new-weights)))))
             ?n
             (range (-> ?n :hlayers first count)))))
+
+(s/fdef update-weights
+        :args (s/cat :net ::net)
+        :ret ::net)
+
+(defn train-step 
+  "Run one training step on the argument net"
+  [net input targets]
+  (-> net
+      (assoc :input input)
+      (forward-pass-hidden-layer)
+      (forward-pass-output-layer)
+      (total-error targets)
+      (backprop-output-layer targets)
+      (backprop-hidden-layer targets)
+      (as-> ?net (reset! diag ?net))
+      (update-weights)))
+
+(s/def ::targets (s/and (s/coll-of double? :kind vector?) #(>= (count %) 1)))
+(s/fdef train-step
+        :args (s/cat :net ::net :input ::input :targets ::targets)
+        :ret ::net)
+
+(defn eval-net
+  [net input]
+  "Evaluate the net at the argument inputs, returning outputs."
+  (let [net (-> net
+                (assoc :input input)
+                (forward-pass-hidden-layer)
+                (forward-pass-output-layer))]
+    (map :output (-> net :olayer))))
+
+
+
+  
+
+
+
+
+
+
