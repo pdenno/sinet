@@ -16,9 +16,9 @@
 (defn make-neuron
   "Create an neuron with n-inputs+1 (+1 for bias) weights. 
    Name can be anything; make it useful for indexing. See make-net."
-  [name n-inputs] 
+  [name n-inputs bias] 
   (map->Neuron {:name name
-                :weights (vec (into '(1.0) (repeatedly n-inputs rand)))
+                :weights (vec (into (list bias) (repeatedly n-inputs #(- (rand 2.0) 1.0)))) ; POD doesn't matter?
                 :net-output nil ; value before application of activation function
                 :output nil}))  ; value after application of activation function
 
@@ -30,18 +30,25 @@
   [x]
   (/ 1.0 (+ 1.0 (Math/exp (- (double x))))))
 
-(defrecord NeuralNet [input hlayers olayer total-error activation])
+(defrecord NeuralNet [input
+                      hlayers
+                      olayer
+                      eta
+                      total-error
+                      activation
+                      doutdnet
+                      bias])
 
 ;;; POD For the time being, and probably a long time to come, I assume 1 hidden layer.
 ;;; POD inc for Mazur numbering (starts at 1). 
 (defn make-net
   "Create a neural net structure. Assume 1 hidden layer, and thus names like this: [:h 3]."
-  ([n-inputs n-outputs n-neurons-per-hl] (make-net n-inputs n-outputs n-neurons-per-hl 1.0))
-  ([n-inputs n-outputs n-neurons-per-hl eta]
+  ([n-inputs n-outputs n-neurons-per-hl] (make-net n-inputs n-outputs n-neurons-per-hl 1.0 1.0))
+  ([n-inputs n-outputs n-neurons-per-hl eta bias]
   (map->NeuralNet {:input   (vec (repeat n-inputs :init-val))
-                   :hlayers (vec (repeatedly 1 (fn [] (vec (map #(make-neuron [:h %] n-inputs)
+                   :hlayers (vec (repeatedly 1 (fn [] (vec (map #(make-neuron [:h %] n-inputs bias)
                                                                 (range n-neurons-per-hl))))))
-                   :olayer  (vec (map #(make-neuron [:o %] n-neurons-per-hl)
+                   :olayer  (vec (map #(make-neuron [:o %] n-neurons-per-hl bias)
                                       (range n-outputs)))
                    :eta  eta ; "learning rate" (multiplier on gradient). 
                    :total-error :init-val
@@ -263,6 +270,8 @@
 (defn train-step 
   "Run one training step on the argument net"
   [net input targets]
+  (assert (== (count input)   (count (:input net)))  "Wrong number of inputs.")
+  (assert (== (count targets) (count (:olayer net))) "Wrong number of outputs.")
   (-> net
       (assoc :input input)
       (forward-pass-hidden-layer)
@@ -282,17 +291,7 @@
   [net input]
   "Evaluate the net at the argument inputs, returning outputs."
   (let [net (-> net
-                (assoc :input input)
+                (assoc :input (vec (map double input)))
                 (forward-pass-hidden-layer)
                 (forward-pass-output-layer))]
     (map :output (-> net :olayer))))
-
-
-
-  
-
-
-
-
-
-

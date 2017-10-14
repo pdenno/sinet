@@ -254,7 +254,7 @@
 ;;; Also, I would perhaps do the workflow analysis after I do the SCADA analysis
 ;;; (and maybe reconceive its implementation to exploit the SCADA analysis work).
 
-(defn best-nav
+#_(defn best-nav
   "Picking various starting points in the SCADA log, return the 
    longest path of it that can be walked using the QPN." 
   [inv]
@@ -270,6 +270,7 @@
 ;;; POD I think it is enough to always start at position 0 in the SCADA log because
 ;;;     exceptional situations are the only thing in the way. 
 ;;;     But is this still sensitive to to the initial marking???
+(def scada-msgs nil) ; <================================================== POD
 (defn navigate-qpn
   "Using the QPN, try to walk the SCADA log from the argument marking and associated 
    starting position in the log to the argument stop position.
@@ -294,7 +295,7 @@
                        (update-in [:excepts event] #(distinct (conj %1 %2)) mark)))))))))
 
 ;;; This is the reachability graph for m2-inhib-bas:
-(def reach1
+#_(def reach1
   [{:M [0 0 1 1 0], :fire :m1-complete-job, :Mp [0 1 0 1 0], :rate 0.9}
    {:M [1 1 0 0 1], :fire :m2-start-job, :Mp [0 1 0 1 0], :rate 1.0}
    {:M [0 1 0 1 0], :fire :m1-start-job, :Mp [1 0 1 1 0], :rate 1.0}
@@ -305,6 +306,28 @@
    {:M [0 1 0 0 1], :fire :m1-start-job, :Mp [1 0 1 0 1], :rate 1.0}
    {:M [1 1 0 1 0], :fire :m2-complete-job, :Mp [1 1 0 0 1], :rate 1.0}
    {:M [0 0 1 1 0], :fire :m2-complete-job, :Mp [0 0 1 0 1], :rate 1.0}])
+
+;;; :marking-key [:buffer :m1-blocked :m1-busy :m2-busy :m2-starved],
+;;; It blocks after [2 0 1 1 0]
+(def reach1
+  [{:M [0 0 1 1 0], :fire :m1-complete-job, :Mp [0 1 0 1 0], :rate 0.9}
+   {:M [2 0 1 1 0], :fire :m1-complete-job, :Mp [2 1 0 1 0], :rate 0.9}
+   {:M [2 0 1 1 0], :fire :m2-complete-job, :Mp [2 0 1 0 1], :rate 1.0}
+   {:M [0 1 0 1 0], :fire :m1-start-job, :Mp [1 0 1 1 0], :rate 1.0}
+   {:M [3 1 0 0 1], :fire :m2-start-job, :Mp [2 1 0 1 0], :rate 1.0}
+   {:M [3 0 1 0 1], :fire :m2-start-job, :Mp [2 0 1 1 0], :rate 1.0}
+   {:M [2 1 0 1 0], :fire :m1-start-job, :Mp [3 0 1 1 0], :rate 1.0}
+   {:M [3 0 1 1 0], :fire :m2-complete-job, :Mp [3 0 1 0 1], :rate 1.0}
+   {:M [3 1 0 1 0], :fire :m2-complete-job, :Mp [3 1 0 0 1], :rate 1.0}
+   {:M [0 0 1 0 1], :fire :m1-complete-job, :Mp [0 1 0 0 1], :rate 0.9}
+   {:M [1 0 1 1 0], :fire :m1-complete-job, :Mp [1 1 0 1 0], :rate 0.9}
+   {:M [1 0 1 0 1], :fire :m2-start-job, :Mp [0 0 1 1 0], :rate 1.0}
+   {:M [1 1 0 1 0], :fire :m1-start-job, :Mp [2 0 1 1 0], :rate 1.0}
+   {:M [1 0 1 1 0], :fire :m2-complete-job, :Mp [1 0 1 0 1], :rate 1.0}
+   {:M [0 1 0 0 1], :fire :m1-start-job, :Mp [1 0 1 0 1], :rate 1.0}
+   {:M [3 0 1 1 0], :fire :m1-complete-job, :Mp [3 1 0 1 0], :rate 0.9}
+   {:M [0 0 1 1 0], :fire :m2-complete-job, :Mp [0 0 1 0 1], :rate 1.0}
+   {:M [2 0 1 0 1], :fire :m2-start-job, :Mp [1 0 1 1 0], :rate 1.0}])
 
 ;;; Idea: This (excep-starting-mark) could force an initial-marking on the PN.
 ;;;       That might be a good thing!
@@ -322,10 +345,13 @@
 (defn next-ordinary
   "Return the next ordinary message, at index n or later."
   [data n]
-  (loop [indx n]
-    (if-let [msg (ordinary? (nth data indx))]
-      msg
-      (recur (inc indx)))))
+  (let [last-ix (-> data last :line)]
+    (loop [indx n]
+      (if (> indx last-ix)
+        nil
+        (if-let [msg (ordinary? (nth data indx))]
+          msg
+          (recur (inc indx)))))))
 
 #_(defn prev-ordinary
   "Return an ordinary message, at index n or earlier."
@@ -348,94 +374,141 @@
       (rest paths)
       (into (vec (map #(conj (first paths) %) good-steps)) (rest paths))))) ; depth-first
 
-;;; Many-to-many relationship between scada log states and rgraph states. 
+;;; Many-to-many relationship between SCADA log states and rgraph states. 
 
-;;; POD The weakness in this approach is that it needs a start-indx from the SCADA log.
-;;;     Maybe I should take the best result after trying a few different starting points.
+;;; POD This should return EVERY starting index that allows stepping far enough.
+;;;     Use each to build a NN and select one as best. (THAT SOUNDS TERRIBLE!)
+;;;
 ;;; (starting-link reach1 (subvec (-> (util/app-info) :problem :scada-log) 0 100) 0)
-(defn starting-link
-  "By searching for an interpretation that runs a few steps, return a starting link."
+(defn starting-links
+  "Return all links that interpret the SCADA log well from start-indx"
   [rgraph data start-indx]
-  (loop [paths (map
-                vector
-                (vec
-                 (map #(assoc % :indx start-indx)
-                      (filter #(= (:act (next-ordinary data start-indx))
-                                  (:fire %))
-                              rgraph))))]
-    (let [good (some #(when (>= (count %) 10) %) paths)]
-      (cond good (first good),
-            (empty? paths) nil, 
-            :otherwise
+  (let [winners (atom [])]
+    (loop [paths (map
+                  vector
+                  (vec
+                   (map #(assoc % :indx start-indx)
+                        (filter #(= (:act (next-ordinary data start-indx))
+                                    (:fire %))
+                                rgraph))))]
+      (let [goods (filter #(>= (count %) 50) paths)]
+        (swap! winners #(into % (vec (map first goods))))
+        (if (empty? paths) (distinct @winners)
             (let [next-msg-indx (-> paths first last :indx inc)]
-              (recur (next-paths paths rgraph data next-msg-indx)))))))
+              (recur (next-paths paths rgraph data next-msg-indx))))))))
 
+;;; POD PN transitions will need :rate 
 (defn next-match
   "If the argument msg is not ordinary, return its act. 
-   If the argument msg can advance the rgraph, return the corresponding link.
+   If the argument msg can advance the rgraph, return *the* corresponding link.
    otherwise return nil."
   [msg link rgraph]
   (if (not (ordinary? msg))
     {:act (:act msg) :indx (:line msg) :Mp (:Mp link)}
     (when-let [link (some #(when (and (= (:Mp link) (:M %))
-                                      (= (:fire %) (:act msg)))
-                             %) rgraph)]
+                                       (= (:fire %) (:act msg)))
+                              %)
+                             rgraph)]
       (assoc link :indx (:line msg)))))
 
-;;; (interpret-scada reach1 (subvec (-> (util/app-info) :problem :scada-log) 0 100) 0)
+;;; (interpret-scada reach1 (subvec (-> (util/app-info) :problem :scada-log) 0 100))
+;;; (interpret-scada reach1 (subvec (-> (util/app-info) :problem :scada-log) 0 100)
+;;;                  {:M [3 0 1 1 0], :fire :m2-complete-job, :Mp [3 0 1 0 1], :rate 1.0, :indx 0})
+;;; POD In production, the arg list will be [pn data start-link] -- data will be abbreviated. 
 (defn interpret-scada
   "Describe how the message stream could be accounted for by this PN. 
    Return a sequence where an element is:
     - a link (if an ordinary message is processed), or
     - a map naming an exceptional message (if an such a message is processed)."
-  [rgraph data start-indx]
+  [rgraph data start-link] 
   (let [last-indx (-> data last :line)]
-       ;rgraph (pnr/simple-reach pn)
-       ;data   (-> (app-info) :problem :scada-log)
-    (when-let [start (starting-link rgraph data start-indx)]
-      (loop [interp (vector start)]
-        (let [indx (-> interp last :indx)
-              next-msg (if (== last-indx indx) nil (nth data (inc indx)))
-              matched  (when next-msg (next-match next-msg (last interp) rgraph))]
-          (cond (not next-msg)   interp
-                (not matched)    interp
-                :otherwise (recur (conj interp matched))))))))
+    ;;rgraph (pnr/simple-reach pn)
+    ;;data   (-> (app-info) :problem :scada-log)
+    (loop [interp (vector start-link)]
+      (let [indx (-> interp last :indx)
+            next-msg (if (== last-indx indx) nil (nth data (inc indx)))
+            matched  (when next-msg (next-match next-msg (last interp) rgraph))]
+        (cond (not next-msg)   interp
+              (not matched)    interp
+              :otherwise (recur (conj interp matched)))))))
 
 ;;; {:M [1 0 1 0 1], :fire :m2-start-job, :Mp [0 0 1 1 0], :rate 1.0, :indx 37}
 ;;; {:M [0 0 1 1 0], :fire :m2-complete-job, :Mp [0 0 1 0 1], :rate 1.0, :indx 38}
 ;;; {:act :m2-starved, :indx 39, :Mp [0 0 1 0 1]}
-(defn train-starving
-  "Return a neural net that identifies starvation situations"
-  [net]
-  (let [data (interpret-scada reach1 (-> (util/app-info) :problem :scada-log) 0)
-        last-indx (-> data last :indx)]
+;;; :marking-key [:buffer :m1-blocked :m1-busy :m2-busy :m2-starved],
+;;; (train-msg (nn/make-net 5 1 5) (-> (util/app-info) :problem :scada-log) :m1-blocked)
+(defn train-msg
+  "Create a map of neural nets identifying msg-type exceptional messages for each starting marking."
+  [net train-data msg-type]
+  (let [start-links (starting-link reach1 train-data 0)]
+    (zipmap
+     (map :M start-links)
+     (map #(train-msg-aux net train-data msg-type %) start-links))))
+
+(defn train-msg-aux
+  [net scada-data msg-type start-link]
+  (let [train-data (interpret-scada reach1 scada-data start-link)
+        last-indx (-> train-data last :indx)
+        fires-on (atom {})]
     (loop [net net
            indx 0]
-      (if (>= indx last-indx)
-        net
-        (let [msg (nth data indx)
-              target (if (= (:act msg) :m2-starved) 1 -1) 
-              inputs (cond (== target 1)            [0 0 1 0 1] ; (:Mp msg),  POD just to be sure....
-                           (contains? msg :fire)    (:M  msg), 
+      (if (>= indx last-indx) ; terminate
+        (assoc net :fires-on @fires-on)
+        (let [msg (nth train-data indx)
+              label (if (= (:act msg) msg-type) 1 0)           ; (rand-int 2)
+              inputs (cond (== label 1)             (:Mp msg), ; (noise) ;  ; [0 0 1 0 1] ; (:Mp msg),  POD just to be sure....
+                           (contains? msg :fire)    (:M  msg), ; (noise) ;  
                            :otherwise :skip)]
+          (when (== label 1) ; track markings it is firing on
+            (if (contains? @fires-on (:Mp msg))
+              (swap! fires-on #(update % (:Mp msg) inc))
+              (swap! fires-on #(assoc % (:Mp msg) 1))))
           (recur
            (if (= inputs :skip)
              net
              (nn/train-step net
                             (vec (map double inputs))
-                            (vector (double target))))
+                            (vector (double label))))
            (inc indx)))))))
 
-(defn big-train []
-  (reduce (fn [net _] (train-starving net))
-          (nn/make-net 5 1 5)
-          (range 100)))
+#_(def markings
+  [[0 0 0 0 0] [0 0 0 0 1] [0 0 0 1 0] [0 0 0 1 1] [0 0 1 0 0] [0 0 1 0 1] [0 0 1 1 0] [0 0 1 1 1] 
+   [0 1 0 0 0] [0 1 0 0 1] [0 1 0 1 0] [0 1 0 1 1] [0 1 1 0 0] [0 1 1 0 1] [0 1 1 1 0] [0 1 1 1 1]
+   [1 0 0 0 0] [1 0 0 0 1] [1 0 0 1 0] [1 0 0 1 1] [1 0 1 0 0] [1 0 1 0 1] [1 0 1 1 0] [1 0 1 1 1]
+   [1 1 0 0 0] [1 1 0 0 1] [1 1 0 1 0] [1 1 0 1 1] [1 1 1 0 0] [1 1 1 0 1] [1 1 1 1 0] [1 1 1 1 1]])
 
 
+(def markings
+  [[0 0 1 1 0] [2 0 1 1 0] [2 0 1 1 0] [0 1 0 1 0] [3 1 0 0 1] [3 0 1 0 1]
+   [2 1 0 1 0] [3 0 1 1 0] [3 1 0 1 0] [0 0 1 0 1] [1 0 1 1 0] [1 0 1 0 1]
+   [1 1 0 1 0] [1 0 1 1 0] [0 1 0 0 1] [3 0 1 1 0] [0 0 1 1 0] [2 0 1 0 1]])
 
-(nn/eval-net nnn (map double [1 0 1 0 1]))
-(nn/eval-net nnn (map double [0 0 1 1 0]))
-(nn/eval-net nnn (map double [0 0 1 0 1]))
+
+(defn test-markings [net]
+  (zipmap markings
+          (map #(nn/eval-net net %) markings)))
+
+(defn noise []
+  (vec (repeatedly 5 #(rand-int 2))))
+
+(defn big-train
+  ([net] (big-train net :m1-blocked 1))
+  ([net msg-type cnt]
+   (reduce (fn [n _] (train-msg n msg-type))
+           net
+           (range cnt))))
+
+;;; POD This is for :m2-starved. 
+(defn more-exceptional-training
+  [net cnt]
+  (reduce (fn [n _]
+            (nn/train-step net [0.0 0.0 1.0 0.0 1.0] [1.0]))
+          net
+          (range cnt)))
+
+;(nn/eval-net nnn (map double [1 0 1 0 1]))
+;(nn/eval-net nnn (map double [0 0 1 1 0]))
+;(nn/eval-net nnn (map double [0 0 1 0 1]))
 
 ;;; For the time being, we'll assume that we are trying to match a starvation message.
 ;;; We generate the reachability graph (including non-tangible states) and test the
@@ -499,15 +572,11 @@
 ;;; This needs to be commented out. (load order)
 #_(defn m2-inhib-bas
   "Setup the m2-inhib-bas PN for a fitness test"
-  [steps]       ;     Change...
-  (let [pn (-> "/Users/peterdenno/Documents/git/spntools/data/m2-inhib-bas.xml" 
+  [steps]
+  (let [pn (-> "data/PNs/m2-inhib-bas.xml" 
                gov.nist.spntools.core/run-ready
                gov.nist.sinet.gp/add-color-binding
                (gov.nist.sinet.gp/diag-force-priority [{:source :m1-start-job, :target :buffer :priority 2}])
-               (gov.nist.sinet.gp/diag-force-rep
-                [{:name :m1-start-job, :act :aj, :m :m1}
-                 {:name :m1-complete-job, :act :bj, :m :m1, :bf :b1}
-                 {:name :m2-start-job, :act :sm, :m :m2, :bf :b1}
-                 {:name :m2-complete-job, :act :ej, :m :m2}])
-               (sim/simulate :max-steps steps))]
-    (workflow-fitness (util/map->Inv {:pn pn}))))
+               #_(sim/simulate :max-steps steps))]
+    #_(workflow-fitness (util/map->Inv {:pn pn}))
+    pn))

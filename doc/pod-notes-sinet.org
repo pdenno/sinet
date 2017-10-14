@@ -1,0 +1,108 @@
+* Tasks
+** DONE Start using org for programming notes.
+   CLOSED: [2017-10-14 Sat 18:06]
+** TODO Learn how to 'open' and edit a link. Right now the org manual link is just the URL. 
+
+* Notes on org mode
+** Useful Links
+*** The tutorial 
+ [[http://orgmode.org/worg/org-tutorials/orgtutorial_dto.html][The tutorial]]
+ http://orgmode.org/manual/index.html
+    
+** Key bindings 
+*** Opening and closing
+**** Shift-tab open/close whole document (circular)
+**** Shift-cntl open/close current
+*** Linking
+**** C-c l (store link)
+**** C-c C-l bring the link here
+**** Links look like this: [[link][description] ...] 
+  Here I inserted elipsis to stop that from turning into a link. An actual 
+  link to a web page would appear like this: [[http://orgmode.org/worg/org-tutorials/orgtutorial_dto.html][the tutorial]]. 
+**** C-c C-o (open) open a link without the mouse.   
+    This is especially sweet for local links. It splits showing two buffers. 
+
+*** TODO
+**** C-c C-t (terminate?) marks a TODO as done.
+**** M-Shift-Ret open a TODO.
+
+
+* Sinet TODOs
+** TODO Try a more mild blocking situation.
+** TODO Investigate possible bugs with MJPdes and create more 'deterministic' test cases.
+** TODO Deal with vanishing transitions. 
+ I need to generate blocking/starving messages ONLY when the net sojourns at blocking/starving. 
+ So simulation has to be better and I need to distinguish these immediate transitions some how. 
+* Sinet Log 
+** 2017-10-14
+*** I started with this log file: [[file:~/Documents/git/sinet/data/SCADA-logs/m2-j1-n3-block-out.clj::%5B][m2-j1-n3-block-out.clj]] which blocks like crazy. 
+*** I switched from returning 'the first' good starting marking to all markings.
+*** I then compared the results from all three:
+
+I am indexing the nets by the starting state. Each will associate a different marking with the
+exceptional msg (defined as :fires-on). They all map [3 0 1 1 0] to the highest value of the NN.
+Yet only the second one was trained for that outcome! The problem is that higher values are
+going to drive the NN higher. (For example [10 0 1 1 0] give values even closer to 1 in each case.)
+I can at least conclude that the one with the correct starting marking has the most prominent max
+value (0.398 versus 0.213) is almost double, whereas the others are only  (0.57 versus 0.53) and
+(0.71 vs 0.67) In all three cases, second best is [3 1 0 1 0].
+
+**** (test-markings (get nnns [2 0 1 1 0]))   :fires-on {[2 0 1 1 0] 491}},
+{[0 1 0 1 0] (0.0019047821808839684),
+ [3 1 0 1 0] (0.5329793128418048),
+ [2 0 1 1 0] (0.4557148825447303),
+ [1 1 0 1 0] (0.028426845459858803),
+ [3 0 1 0 1] (0.2520620080684257),
+ [1 0 1 1 0] (0.0824105061449745),
+ [0 1 0 0 1] (4.4899449786599065E-4),
+ [2 1 0 1 0] (0.3112057574008602),
+ [3 0 1 1 0] (0.5690740829317157),   ----- (next best is 0.53, which is :fires-on)
+ [1 0 1 0 1] (0.007984861441426688),
+ [3 1 0 0 1] (0.33543893173498296),
+ [0 0 1 1 0] (0.0017534551604061264),
+ [0 0 1 0 1] (0.0010127514448150464),
+ [2 0 1 0 1] (0.04765593309469408)}
+
+**** (test-markings (get nnns [3 0 1 1 0]))   :fires-on {[3 0 1 1 0] 491}},
+{[0 1 0 1 0] (0.0014487996373689941),
+ [3 1 0 1 0] (0.21293141920670883),
+ [2 0 1 1 0] (0.15438051750729484),
+ [1 1 0 1 0] (0.005105555396279919),
+ [3 0 1 0 1] (0.05425027679413153),
+ [1 0 1 1 0] (0.017136382643884614),
+ [0 1 0 0 1] (4.6382801763844935E-4),
+ [2 1 0 1 0] (0.03850346112492955),
+ [3 0 1 1 0] (0.39880145491033164), ----- This IS fires-on. (next best is 0.213) 
+ [1 0 1 0 1] (0.006230800133017719),
+ [3 1 0 0 1] (0.03105553855253639),
+ [0 0 1 1 0] (0.002015237400342786),
+ [0 0 1 0 1] (0.001066242446042215),
+ [2 0 1 0 1] (0.022575588402398115)}
+
+**** (test-markings (get nnns [1 0 1 1 0]))   :fires-on {[1 0 1 1 0] 388}}}
+{[0 1 0 1 0] (0.014569799679218615),
+ [3 1 0 1 0] (0.6721408448530173),
+ [2 0 1 1 0] (0.6688434016370715),
+ [1 1 0 1 0] (0.21941460772717947),
+ [3 0 1 0 1] (0.6601096030824811),
+ [1 0 1 1 0] (0.46608997395936497),
+ [0 1 0 0 1] (0.001252201438882003),
+ [2 1 0 1 0] (0.5432656472113356),
+ [3 0 1 1 0] (0.7113587186344846),  --- (next best is 0.672, which is [3 1 0 1 0]
+ [1 0 1 0 1] (0.033295385315624364),
+ [3 1 0 0 1] (0.5286157002824883),
+ [0 0 1 1 0] (0.04039619976094015),
+ [0 0 1 0 1] (0.00328347348876465),
+ [2 0 1 0 1] (0.41021721559535307)}
+
+
+
+
+**** Advantage: 
+     The correct starting state has fewer false positives. It will do best. 
+
+**** Problem: 
+     The algorithm is just going to focus on the buffer being high/low. This is fine for 
+     blocking/starving events but not good for state-but-not-transition situations.
+
+

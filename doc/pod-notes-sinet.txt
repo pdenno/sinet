@@ -3652,3 +3652,390 @@ produce a sequence of steps noting markings and messages, some of which are non-
 CLOJURE.SPEC PROVES ITSELF USEFUL FOR DEBUGGING!
 I required that a neuron has at least one weight. I instrumented everything
 and it caught a call with a non-conforming net!
+
+Things didn't work :(
+I think I should allow a bias term and use 0. I think I want the ordinary messages to target = -1
+and the exceptionals to target to +1.
+
+More things to try:
+ --> Get a response from Cortex team. 
+ --> Find out what the marking key is and whether just maybe things are working :
+      :marking-key [:buffer :m1-blocked :m1-busy :m2-busy :m2-starved]
+ --> Try nets with only two inputs, three inputs etc.       
+ --> Learn about bias and eta. Consider whether or not this is a linear separation problem. 
+ --> Try more layers.
+
+---> Reading information on bias. It might be that I need to add a different one to each input. 
+
+;; This is the test PN m2-inhib-bas
+{:places
+ [{:name :buffer, :pid 0, :initial-tokens 0}
+  {:name :m1-blocked, :pid 1, :initial-tokens 0}
+  {:name :m1-busy, :pid 2, :initial-tokens 1}
+  {:name :m2-busy, :pid 3, :initial-tokens 1}
+  {:name :m2-starved, :pid 4, :initial-tokens 0}],
+ :transitions
+ [{:name :m1-complete-job, :tid 6, :type :exponential, :rate 0.9}
+  {:name :m1-start-job, :tid 7, :type :immediate, :rate 1.0}
+  {:name :m2-complete-job, :tid 8, :type :exponential, :rate 1.0}
+  {:name :m2-start-job, :tid 9, :type :immediate, :rate 1.0}],
+ :arcs
+ [{:aid 10, :source :buffer, :target :m1-start-job, :name :aa-10, :type :inhibitor, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 11, :source :buffer, :target :m2-start-job, :name :aa-11, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 12, :source :m1-blocked, :target :m1-start-job, :name :aa-12, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 13, :source :m1-busy, :target :m1-complete-job, :name :aa-13, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 14, :source :m1-complete-job, :target :m1-blocked, :name :aa-14, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 15, :source :m1-start-job, :target :buffer, :name :aa-15, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 2}
+  {:aid 16, :source :m1-start-job, :target :m1-busy, :name :aa-16, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 17, :source :m2-busy, :target :m2-complete-job, :name :aa-17, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 18, :source :m2-complete-job, :target :m2-starved, :name :aa-18, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 19, :source :m2-start-job, :target :m2-busy, :name :aa-19, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 20, :source :m2-starved, :target :m2-start-job, :name :aa-20, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}],
+ :marking-key [:buffer :m1-blocked :m1-busy :m2-busy :m2-starved],
+ :initial-marking [0 0 1 1 0],
+ :initial-tangible [0 0 1 1 0]}
+
+;;;=================================
+;;; "2017-10-10T11:58:17.808-00:00"
+;;;=================================
+
+Total error is 0.5! Is this really what I was doing yesterday?
+Takes 4 seconds with instrumentation. 
+929 milliseconds without instrumentation. 
+
+Total error in Mazur is 6.249163999127777E-6
+
+I get total error 0.500 for any setting of bias, number hidden, eta.
+I get 0.500 regardless of how much training I do.
+
+Something is wrong! Even when I change it to a simple two variable problem
+I get 0.500. 
+
+Eww! Changing the inputs to [0,1] drops the
+5-step error to 6.786194867634532E-5
+1-step          3.6580046634235883E-4  0.00036 would be plenty good! But this is still just two vars.
+
+But 5 1 5 1.0 1.0 on 1-step of the 5 problem yields an astonising
+1.3062574945102307E-6
+
+So is the problem just that I don't have the bias right?
+
+But even with noise, the error is between 8 and 16 percent, not 50. Why is that?
+
+More things to try:
+ --> Get a response from Cortex team. 
+ --> Find out what the marking key is and whether just maybe things are working :
+      :marking-key [:buffer :m1-blocked :m1-busy :m2-busy :m2-starved]
+ ===> Answer: No they are not working. 
+ --> Try nets with only two inputs, three inputs etc.       
+ --> Learn about bias and eta. Consider whether or not this is a linear separation problem.
+ --> Try more instances of the exceptional type. 
+ --> Try more layers.
+
+
+ANSWER: IT IS WORKING (it is just that the numbers are lower than expected). 
+{[0 0 1 1 1] (0.16215295848820388),  <=== Not great, but not the end of the world either. 
+ [0 1 0 1 0] (0.004574303731777977),
+ [0 0 1 0 0] (0.18509902110510817),  <=== Not great, but not the end of the world either. 
+ [1 1 1 0 0] (0.0024616222289285546),
+ [1 1 1 0 1] (0.0060965042049865685),
+ [1 1 1 1 0] (0.0023380728123830225),
+ [1 1 1 1 1] (0.005173347792968436),
+ [1 1 0 1 0] (0.0020127577358674442),
+ [1 0 1 1 1] (0.009002956668981425),
+ [1 0 1 1 0] (0.003268196313544894),
+ [0 1 0 0 1] (0.030439398959522034),
+ [1 0 0 0 1] (0.010378103054755585),
+ [0 0 0 1 0] (0.009954484643320447),
+ [0 1 1 0 0] (0.014362395796466957),
+ [0 1 0 1 1] (0.011174605255351237),
+ [1 0 0 0 0] (0.0030170553001946493),
+ [0 1 1 1 1] (0.018809865472639874),
+ [1 1 0 1 1] (0.0038226867718089987),
+ [1 1 0 0 0] (0.002100381548316961),
+ [1 0 1 0 1] (0.03213104513795988),
+ [0 0 0 0 0] (0.05674992314659997),
+ [0 0 1 1 0] (0.024552835891534827),
+ [0 0 0 0 1] (0.32175497066027225),  <==== Pretty good
+ [0 1 1 0 1] (0.1054383341127742),   <=== Not great, but not the end of the world either. 
+ [1 1 0 0 1] (0.004066073397077107),
+ [0 1 1 1 0] (0.006331846971352388),
+ [0 0 1 0 1] (0.47572830602950594),  <==== Great that is "m2-starving"
+ [0 0 0 1 1] (0.05134717750212006),
+ [1 0 0 1 1] (0.005737268925422405),
+ [1 0 0 1 0] (0.002500838365675423),
+ [0 1 0 0 0] (0.00655592002057519),
+ [1 0 1 0 0] (0.005150997374462395)}
+
+
+ [0 0 1 0 1] (0.46799681071594973), Bias 2.0
+
+ [0 0 1 0 1] (0.474332701049309), Bias 1.0   (0.1 looks not so good, nor does 5.0)
+ [0 0 1 0 1] (0.4673131706870928),
+ [0 0 1 0 1] (0.47377495973809863),
+ [0 0 1 0 1] (0.4728381001994168),
+
+These (four) are all 1-step (700 msec runs). That's fine!
+
+Now what do we get with training on more exceptionals? 
+[0 0 1 0 1] (0.5021631554681197),  1000 extra
+[0 0 1 0 1] (0.5215901559178787),  5000 extra
+[0 0 1 0 1] (0.5385504682432432), 20000 extra, and it did 
+[0 0 1 0 0] (0.2492002225687727) versus  [0 0 1 0 0] (0.3194599592338061) for just 1 run of log
+                                  and    [0 0 1 0 0] (0.14638015851036398) <--- The difference here suggests that more training would help.
+
+Here is results from 5 iterations through the training data:
+
+{[0 0 1 1 1] (0.13340168590937093),
+ [0 1 0 1 0] (2.3812610813308787E-4),
+ [0 0 1 0 0] (0.14600387292639755), <----- 
+ [1 1 1 0 0] (2.76901365744527E-4),
+ [1 1 1 0 1] (0.0012410893950472518),
+ [1 1 1 1 0] (1.23088640083883E-4),
+ [1 1 1 1 1] (3.46462825074924E-4),
+ [1 1 0 1 0] (8.260608102557232E-5),
+ [1 0 1 1 1] (8.03565984561102E-4),
+ [1 0 1 1 0] (1.577413204125785E-4),
+ [0 1 0 0 1] (0.01070527484962806),
+ [1 0 0 0 1] (9.574346115291648E-4),
+ [0 0 0 1 0] (6.324988606685093E-4),
+ [0 1 1 0 0] (0.008175089436503455),
+ [0 1 0 1 1] (9.653509145913914E-4),
+ [1 0 0 0 0] (1.7279642901644118E-4),
+ [0 1 1 1 1] (0.006974724326290414),
+ [1 1 0 1 1] (1.7401350644217632E-4),
+ [1 1 0 0 0] (1.258609129503362E-4),
+ [1 0 1 0 1] (0.01184691099839477),
+ [0 0 0 0 0] (0.011157798611221372),
+ [0 0 1 1 0] (0.00730161167538335),
+ [0 0 0 0 1] (0.18856633360038555),
+ [0 1 1 0 1] (0.13815366185849737),
+ [1 1 0 0 1] (3.552033456460516E-4),
+ [0 1 1 1 0] (7.527524585367831E-4),
+ [0 0 1 0 1] (0.5020846331150696),   <----
+ [0 0 0 1 1] (0.010080257992495553),
+ [1 0 0 1 1] (2.122478513416293E-4),
+ [1 0 0 1 0] (8.451529549521636E-5),
+ [0 1 0 0 0] (8.464949012471663E-4),
+ [1 0 1 0 0] (7.478328544167349E-4)}
+
+So I am on the right track:
+ - Hack: Find the values that really stick out. On those markings, generate the exceptional message.
+ - TO EXPLORE: 1 net per message or multiple? I think one for the time being.
+ - Explore what can be predicted of a PN blocking with 3 buffer positions. This, I think, is going to be a challenge!
+ - What do I do with this data? ANSWER: The best PNs currently only have the four transitions from
+   common messages: :m{1,2}-{start,complete}-job. Penalize them for not picking up these states!
+   Note that in the thesis, I'll need to greatly develop an notion of ordinary and exceptional states. 
+
+
+;;;================================
+;;; "2017-10-14T16:01:32.088-00:00"
+;;;================================
+
+#_(defn rand-link
+  "Return a link randomly based on rates as a distribution."
+  [links]
+  (if (empty? (rest links))
+    (first links)
+    (let [r (rand (reduce (fn [sum p] (+ sum (:rate p))) 0 links))] ; 'normalized'
+      (loop [dist links
+             sum (:rate (first dist))]
+        (if (>= sum r)
+          (first dist)
+          (recur (rest dist)
+                 (+ sum (:rate (second dist)))))))))
+
+Train-msg should be focused here:
+
+ {:act :m1-blocked, :indx 83, :Mp [1 0 1 1 0]}
+
+
+Remember, these are markings *before* the message is issued. 
+ :marking-key [:buffer :m1-blocked :m1-busy :m2-busy :m2-starved],
+{[0 0 1 1 1] (0.0029173766349587576),
+ [0 1 0 1 0] (0.010295815469699498),
+ [0 0 1 0 0] (0.020741385638722343),
+ [1 1 1 0 0] (0.1087655294662472),
+ [1 1 1 0 1] (0.004653502469207442),
+ [1 1 1 1 0] (0.20252683360991686),  -------------------
+ [1 1 1 1 1] (0.009052816123555844),
+ [1 1 0 1 0] (0.23329072829540412),  --------------------
+ [1 0 1 1 1] (0.05997003895083395),
+ [1 0 1 1 0] (0.46622465781334127),  <================
+ [0 1 0 0 1] (7.838834977832934E-4),
+ [1 0 0 0 1] (0.040618371217003346),
+ [0 0 0 1 0] (0.06497873649625274),
+ [0 1 1 0 0] (0.003826940766801914),
+ [0 1 0 1 1] (0.0011718929482984833),
+ [1 0 0 0 0] (0.3669008067673059),   --------------------
+ [0 1 1 1 1] (0.0011982379842475606),
+ [1 1 0 1 1] (0.013480548190330847),
+ [1 1 0 0 0] (0.1335369664091334),
+ [1 0 1 0 1] (0.027572304581496017),
+ [0 0 0 0 0] (0.03052809795719632),
+ [0 0 1 1 0] (0.043591120336184896),
+ [0 0 0 0 1] (0.001728043671144907),
+ [0 1 1 0 1] (8.329802448781809E-4),
+ [1 1 0 0 1] (0.0064276345919307525),
+ [0 1 1 1 0] (0.007525857141341357),
+ [0 0 1 0 1] (0.0017037574375984757),
+ [0 0 0 1 1] (0.0032252669917181686),
+ [1 0 0 1 1] (0.08657307428918151),
+ [1 0 0 1 0] (0.47377156966911843),  <======================
+ [0 1 0 0 0] (0.004732378920547691),
+ [1 0 1 0 0] (0.34935193979919243)}  ----------------
+
+Up it to N = 3:
+
+{:places
+ [{:name :buffer, :pid 0, :initial-tokens 0}
+  {:name :m1-blocked, :pid 1, :initial-tokens 0}
+  {:name :m1-busy, :pid 2, :initial-tokens 1}
+  {:name :m2-busy, :pid 3, :initial-tokens 1}
+  {:name :m2-starved, :pid 4, :initial-tokens 0}],
+ :transitions
+ [{:name :m1-complete-job, :tid 6, :type :exponential, :rate 0.9}
+  {:name :m1-start-job, :tid 7, :type :immediate, :rate 1.0}
+  {:name :m2-complete-job, :tid 8, :type :exponential, :rate 1.0}
+  {:name :m2-start-job, :tid 9, :type :immediate, :rate 1.0}],
+ :arcs
+ [{:aid 10, :source :buffer, :target :m1-start-job, :name :aa-10, :type :inhibitor, :multiplicity 3, :bind {:jtype :blue}, :priority 1}
+  {:aid 11, :source :buffer, :target :m2-start-job, :name :aa-11, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 12, :source :m1-blocked, :target :m1-start-job, :name :aa-12, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 13, :source :m1-busy, :target :m1-complete-job, :name :aa-13, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 14, :source :m1-complete-job, :target :m1-blocked, :name :aa-14, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 15, :source :m1-start-job, :target :buffer, :name :aa-15, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 2}
+  {:aid 16, :source :m1-start-job, :target :m1-busy, :name :aa-16, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 17, :source :m2-busy, :target :m2-complete-job, :name :aa-17, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 18, :source :m2-complete-job, :target :m2-starved, :name :aa-18, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 19, :source :m2-start-job, :target :m2-busy, :name :aa-19, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 20, :source :m2-starved, :target :m2-start-job, :name :aa-20, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}],
+
+
+It finds the correct marking [2 0 1 1 0], but also finds (with higher output) some others.
+There were no [3 x x x x] in the training set....
+
+{[0 1 0 1 0] (5.549461889057023E-4),
+x [3 1 0 1 0] (0.6294868572524179),          ---
+ [2 0 1 1 0] (0.4948199552414176),          --- [2 0 1 1 0] is correct
+ [1 1 0 1 0] (0.023416682526472516),
+x [3 0 1 0 1] (0.3042044058918704),          ---
+ [1 0 1 1 0] (0.06413460720002971),
+ [0 1 0 0 1] (2.771058193120149E-4),
+ [2 1 0 1 0] (0.3676130561062305),          ---
+ x[3 0 1 1 0] (0.6745330223944722),          ---
+ [1 0 1 0 1] (0.0032852658778391563),
+x [3 1 0 0 1] (0.12346562117201441),         ---
+ [0 0 1 1 0] (0.00120299772467288),
+ [0 0 1 0 1] (2.768080867333533E-4),
+ [2 0 1 0 1] (0.03642975892330856)}
+
+....that may be because the best starting point was not selected:
+[{:M [2 0 1 1 0], :fire :m2-complete-job, :Mp [2 0 1 0 1], :rate 1.0, :indx 0}
+ {:M [2 0 1 0 1], :fire :m2-start-job, :Mp [1 0 1 1 0], :rate 1.0, :indx 1}
+ {:M [1 0 1 1 0], :fire :m1-complete-job, :Mp [1 1 0 1 0], :rate 0.9, :indx 2}
+ {:act :m1-unblocked, :indx 3, :Mp [1 1 0 1 0]} <--- Should have been [2....]
+
+...I didn't really fix that, I forced it...
+
+[:buffer :m1-blocked :m1-busy :m2-busy :m2-starved],
+{[0 1 0 1 0] (0.0017895003982370866),
+ [3 1 0 1 0] (0.22378470544860013),   ---
+ [2 0 1 1 0] (0.16743098988462166),   ---
+ [1 1 0 1 0] (0.00602596135097194),
+ [3 0 1 0 1] (0.04608724408758049),
+ [1 0 1 1 0] (0.023825563363044592),
+ [0 1 0 0 1] (7.693009936841852E-4),
+ [2 1 0 1 0] (0.04471892129091981),
+ [3 0 1 1 0] (0.37895365976991946),   ====
+ [1 0 1 0 1] (0.001098938177264504),
+ [3 1 0 0 1] (0.010355586788422933),
+ [0 0 1 1 0] (0.0029815440599645126),
+ [0 0 1 0 1] (6.096164525442954E-4),
+ [2 0 1 0 1] (0.004934344319503168)}
+
+Looks good! 
+
+;;;;;;;;;;;;;;;;;;;;;;;
+Trying all starting markings. (THIS ISN'T A VERY GOOD TEST YET BECAUSE *ALWAYS* BLOCKING.)
+
+I am indexing the nets by the starting state. Each will associate a different marking with the
+exceptional msg (defined as :fires-on). They all map [3 0 1 1 0] to the highest value of the NN.
+Yet only the second one was trained for that outcome! The problem is that higher values are
+going to drive the NN higher. (For example [10 0 1 1 0] give values even closer to 1 in each case.)
+I can at least conclude that the one with the correct starting marking has the most prominent max
+value (0.398 versus 0.213) is almost double, whereas the others are only  (0.57 versus 0.53) and
+(0.71 vs 0.67) In all three cases, second best is [3 1 0 1 0].
+
+Therefore,
+Advantage: The correct starting state has fewer false positives. It will do best. 
+Problem: The algorithm is just going to focus on the buffer being high/low. This is fine for
+blocking/starving events but not good for state-but-not-transition situations.
+
+BTW, I still have to deal with vanishing transitions. I need to generate blocking/starving messages
+ONLY when the net sojourns at blocking/starving. So simulation has to be better and I need to
+distinguish these immediate transitions some how. 
+
+NEXT STEP: Try a more mild blocking situation.
+
+It should not be so forgiving about these wrong starting states. <-- That (the "forgiving" part) is not really true .
+The results now would be good enough except for the "looking for high buffer numbers problem."
+
+Learn org mode. 
+
+---> Would it help to train on vectors that aren't markings? (e.g. get ranges)
+---> Would it help to penalize numbers higher than any in the marking? 
+---> Would it help to have more layers? 
+
+
+[:buffer :m1-blocked :m1-busy :m2-busy :m2-starved],
+
+(test-markings (get nnns [2 0 1 1 0]))   :fires-on {[2 0 1 1 0] 491}},
+{[0 1 0 1 0] (0.0019047821808839684),
+ [3 1 0 1 0] (0.5329793128418048),
+ [2 0 1 1 0] (0.4557148825447303),
+ [1 1 0 1 0] (0.028426845459858803),
+ [3 0 1 0 1] (0.2520620080684257),
+ [1 0 1 1 0] (0.0824105061449745),
+ [0 1 0 0 1] (4.4899449786599065E-4),
+ [2 1 0 1 0] (0.3112057574008602),
+ [3 0 1 1 0] (0.5690740829317157),   ----- (next best is 0.53, which is :fires-on)
+ [1 0 1 0 1] (0.007984861441426688),
+ [3 1 0 0 1] (0.33543893173498296),
+ [0 0 1 1 0] (0.0017534551604061264),
+ [0 0 1 0 1] (0.0010127514448150464),
+ [2 0 1 0 1] (0.04765593309469408)}
+
+(test-markings (get nnns [3 0 1 1 0]))   :fires-on {[3 0 1 1 0] 491}},
+{[0 1 0 1 0] (0.0014487996373689941),
+ [3 1 0 1 0] (0.21293141920670883),
+ [2 0 1 1 0] (0.15438051750729484),
+ [1 1 0 1 0] (0.005105555396279919),
+ [3 0 1 0 1] (0.05425027679413153),
+ [1 0 1 1 0] (0.017136382643884614),
+ [0 1 0 0 1] (4.6382801763844935E-4),
+ [2 1 0 1 0] (0.03850346112492955),
+ [3 0 1 1 0] (0.39880145491033164), ----- This IS fires-on. (next best is 0.213) 
+ [1 0 1 0 1] (0.006230800133017719),
+ [3 1 0 0 1] (0.03105553855253639),
+ [0 0 1 1 0] (0.002015237400342786),
+ [0 0 1 0 1] (0.001066242446042215),
+ [2 0 1 0 1] (0.022575588402398115)}
+
+(test-markings (get nnns [1 0 1 1 0]))   :fires-on {[1 0 1 1 0] 388}}}
+{[0 1 0 1 0] (0.014569799679218615),
+ [3 1 0 1 0] (0.6721408448530173),
+ [2 0 1 1 0] (0.6688434016370715),
+ [1 1 0 1 0] (0.21941460772717947),
+ [3 0 1 0 1] (0.6601096030824811),
+ [1 0 1 1 0] (0.46608997395936497),
+ [0 1 0 0 1] (0.001252201438882003),
+ [2 1 0 1 0] (0.5432656472113356),
+ [3 0 1 1 0] (0.7113587186344846),  --- (next best is 0.672, which is [3 1 0 1 0]
+ [1 0 1 0 1] (0.033295385315624364),
+ [3 1 0 0 1] (0.5286157002824883),
+ [0 0 1 1 0] (0.04039619976094015),
+ [0 0 1 0 1] (0.00328347348876465),
+ [2 0 1 0 1] (0.41021721559535307)}
+
+

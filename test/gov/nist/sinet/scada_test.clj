@@ -13,6 +13,7 @@
                       (subvec 0 10))))))
 
 ;;;(write-pretty-log foo "data/SCADA-logs/scada-m2-j1-starve-m2-out.clj")
+;;;(write-pretty-log foo "data/SCADA-logs/m2-j1-n3-block-out.clj")
 (defn write-pretty-log
   "A stand-alone utility: Translate messages from MJPdes format to pretty (PN) format and 
    write to a file. The result can then be used by load-scada."

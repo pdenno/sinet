@@ -46,7 +46,7 @@
 
 (defn mazur-test []
   (let [targets [0.01 0.99]]
-    (-> (nn/make-net 2 2 2 0.5)
+    (-> (nn/make-net 2 2 2 0.5 1.0)
         (assoc :input [0.05 0.10]) 
         (mazur-set-weights-test)
         (nn/forward-pass-hidden-layer)
@@ -90,7 +90,7 @@
 
 (defn mazur-3-hidden [iterations]
   (let [targets [0.01 0.99]]
-    (loop [net (-> (make-net 2 2 3) ; three hidden nodes on this one (works better, BTW). 
+    (loop [net (-> (make-net 2 2 3 1.0 1.0) ; three hidden nodes on this one (works better, BTW). 
                    (assoc :input [0.05 0.10]) 
                    (mazur-set-weights-test))
            cnt iterations]
