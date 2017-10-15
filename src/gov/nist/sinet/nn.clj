@@ -9,21 +9,20 @@
 
 ;;; Note that :weights are on arcs INTO the neuron.
 
-(defrecord Neuron [name weights])
+(defrecord Neuron [weights])
 
 (def ^:private diag (atom nil))
 
 (defn make-neuron
   "Create an neuron with n-inputs+1 (+1 for bias) weights. 
    Name can be anything; make it useful for indexing. See make-net."
-  [name n-inputs bias] 
-  (map->Neuron {:name name
-                :weights (vec (into (list bias) (repeatedly n-inputs #(- (rand 2.0) 1.0)))) ; POD doesn't matter?
+  [n-inputs bias] 
+  (map->Neuron {:weights (vec (into (list bias) (repeatedly n-inputs #(- (rand 2.0) 1.0)))) ; POD doesn't matter?
                 :net-output nil ; value before application of activation function
                 :output nil}))  ; value after application of activation function
 
 (s/def ::weights (s/and vector? #(every? number? %) #(>= (count %) 1)))
-(s/def ::neuron (s/keys :req-un [::net-output ::output ::weights] :opt-un [::name]))
+(s/def ::neuron (s/keys :req-un [::net-output ::output ::weights]))
 
 (defn sigmoid 
   "Return the value of sigmoid (simplified logistic) function at the argument."
@@ -36,24 +35,23 @@
                       eta
                       total-error
                       activation
-                      doutdnet
-                      bias])
+                      doutdnet])
 
 ;;; POD For the time being, and probably a long time to come, I assume 1 hidden layer.
 ;;; POD inc for Mazur numbering (starts at 1). 
 (defn make-net
   "Create a neural net structure. Assume 1 hidden layer, and thus names like this: [:h 3]."
-  ([n-inputs n-outputs n-neurons-per-hl] (make-net n-inputs n-outputs n-neurons-per-hl 1.0 1.0))
+  ([n-inputs n-outputs n-neurons-per-hl]
+   (make-net n-inputs n-outputs n-neurons-per-hl 1.0 1.0))
   ([n-inputs n-outputs n-neurons-per-hl eta bias]
-  (map->NeuralNet {:input   (vec (repeat n-inputs :init-val))
-                   :hlayers (vec (repeatedly 1 (fn [] (vec (map #(make-neuron [:h %] n-inputs bias)
-                                                                (range n-neurons-per-hl))))))
-                   :olayer  (vec (map #(make-neuron [:o %] n-neurons-per-hl bias)
-                                      (range n-outputs)))
-                   :eta  eta ; "learning rate" (multiplier on gradient). 
-                   :total-error :init-val
-                   :activation sigmoid
-                   :doutdnet (fn [out] (* out (- 1.0 out)))})))
+   (map->NeuralNet {:input   (vec (repeat n-inputs :init-val))
+                    :hlayers (vec (repeatedly 1 (fn [] (vec (repeatedly n-neurons-per-hl
+                                                                        #(make-neuron n-inputs bias))))))
+                    :olayer  (vec (repeatedly n-outputs #(make-neuron n-neurons-per-hl bias)))
+                    :eta  eta ; "learning rate" (multiplier on gradient). 
+                    :total-error :init-val
+                    :activation sigmoid
+                    :doutdnet (fn [out] (* out (- 1.0 out)))})))
 
 ;;; POD the count requirements are just for testing.
 (s/def ::activation fn?)
@@ -65,17 +63,7 @@
 (s/def ::layer   (s/and (s/coll-of ::neuron :kind vector?) #(>= (-> % first count) 1)))
 (s/def ::hlayers (s/and (s/coll-of ::layer  :kind vector?) #(>= (-> % first count) 1)))
 (s/def ::net (s/keys :req-un [::total-error ::hlayers ::olayer ::activation ::doutdnet]
-                     :opt-un [::name ::input])) ; At this point, input might not be set.
-
-(defn set-weight [net layer n-index w-index val]
-  "Set a weight. layer=1 is first hidden layer. Layer=2 is (typically) output. 
-   n-index index, of neuron, is [0..<number of neurons in layer>].
-   w-index, index of arc, is [0..<number of neurons in previous layer>]"
-  (let [nlayers (count (:hlayers net))]
-    (assert (== 1 nlayers)) ; POD deeper nets NYI.
-    (if (= layer :hlayers)
-      (assoc-in net [:hlayers 0 n-index :weights w-index] val)
-      (assoc-in net [:olayer    n-index :weights w-index] val))))
+                     :opt-un [::input])) ; At this point, input might not be set.
 
 (defn hnode
   "Get the hidden-layer neuron at the index."
@@ -138,7 +126,7 @@
 
 (s/fdef forward-pass-output-layer :args (s/cat :net ::net) :ret ::net)
 
-(defn total-error
+(defn total-error  
   "Calculate (and set) the total error in the net."
   [net targets]
   (let [outputs (map :output (:olayer net))]

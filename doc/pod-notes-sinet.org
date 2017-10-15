@@ -1,7 +1,9 @@
-* Tasks
+* Org Mode Tasks
 ** DONE Start using org for programming notes.
    CLOSED: [2017-10-14 Sat 18:06]
-** TODO Learn how to 'open' and edit a link. Right now the org manual link is just the URL. 
+** DONE Learn how to 'open' and edit a link. Right now the org manual link is just the URL. 
+   CLOSED: [2017-10-15 Sun 12:25]
+** TODO Find out what good the source code marking is. I see that you can edit it with C-c ' but so what?
 
 * Notes on org mode
 ** Useful Links
@@ -16,25 +18,43 @@
 *** Linking
 **** C-c l (store link)
 **** C-c C-l bring the link here
+**** C-c C-l also to edit a link (when point is on the link)
 **** Links look like this: [[link][description] ...] 
   Here I inserted elipsis to stop that from turning into a link. An actual 
   link to a web page would appear like this: [[http://orgmode.org/worg/org-tutorials/orgtutorial_dto.html][the tutorial]]. 
 **** C-c C-o (open) open a link without the mouse.   
     This is especially sweet for local links. It splits showing two buffers. 
 
-*** TODO
-**** C-c C-t (terminate?) marks a TODO as done.
+*** TODO Operations
 **** M-Shift-Ret open a TODO.
+
+**** C-c C-t (terminate?) marks a TODO as done.
+*** Miscellaneous
+**** Timestamps C-c . (C-c ! is similar but 'without creating an agenda entry' whatever that means.)
+
+**** Source Code C-c ' (open and close) #+BEGIN_SRC clojure ... #+END_SRC
 
 
 * Sinet TODOs
 ** TODO Try a more mild blocking situation.
-** TODO Investigate possible bugs with MJPdes and create more 'deterministic' test cases.
+** DONE Fix bug in pnr/simple-reach. See bug <2017-10-15 Sun>
+   CLOSED: [2017-10-15 Sun 18:13]
+** TODO Decide whether setting all transitions to timed makes sense for simple-reach. See discussion <2017-10-15 Sun>
+** TODO Investigate possible bugs with MJPdes 'coordination' and create more 'deterministic' test cases.
+** TODO Conceive of a strategy for using exceptional fitness
+ In some cases like blocking/starving it seem that having a place represent the state is appropriate. 
+ But is that generally the case? This ToDo is closely related to the next about vanishing transitions,
+ but I don't think it is the same issue. I think I need to see the result of the "mild blocking" 
+ situation before I can sort this out. Remember that the goal is to get rates out of these things. 
+** TODO Find out a way to find the pathname "to a namespace" so I can run tests on dependent packages. 
+*** IDEA: Maybe award fitness to PNs that represent it. 
+***       Award a little less to those who can at least cope with it with a NN. 
 ** TODO Deal with vanishing transitions. 
  I need to generate blocking/starving messages ONLY when the net sojourns at blocking/starving. 
  So simulation has to be better and I need to distinguish these immediate transitions some how. 
-* Sinet Log 
-** 2017-10-14
+
+* Sinet Log *
+** <2017-10-14 Sat>
 *** I started with this log file: [[file:~/Documents/git/sinet/data/SCADA-logs/m2-j1-n3-block-out.clj::%5B][m2-j1-n3-block-out.clj]] which blocks like crazy. 
 *** I switched from returning 'the first' good starting marking to all markings.
 *** I then compared the results from all three:
@@ -101,8 +121,100 @@ value (0.398 versus 0.213) is almost double, whereas the others are only  (0.57 
 **** Advantage: 
      The correct starting state has fewer false positives. It will do best. 
 
-**** Problem: 
+n**** Problem: 
      The algorithm is just going to focus on the buffer being high/low. This is fine for 
      blocking/starving events but not good for state-but-not-transition situations.
 
+** <2017-10-15 Sun>
+*** I ended up with data that blocks 30 times and starves 14 times: 
+This was after about 30 experiments, fine tuning the parameters. The problem is that it
+is very easy to get very short blocking/starving periods. 
+Input:   file:~/Documents/git/sinet/data/SCADA-logs/m2-j1-n3-block-mild.clj]]
+Output:  [[file:~/Documents/git/sinet/data/SCADA-logs/m2-j1-n3-block-mild-b30-s14.clj:::status%20nil,][file:~/Documents/git/sinet/data/SCADA-logs/m2-j1-n3-block-mild-b30-s14.clj]]
+Pretty:  [[file:~/Documents/git/sinet/data/SCADA-logs/m2-j1-n3-block-mild-out.clj::%5B][file:~/Documents/git/sinet/data/SCADA-logs/m2-j1-n3-block-mild-out.clj]]
+*** This was achieved with these parameters:
+#+BEGIN_SRC clojure
+  (map->Model
+   {:line 
+    {:m1 (map->ExpoMachine {:lambda 0.6 :mu 3.5 :W 1.0}) 
+     :b1 (map->Buffer {:N 3})
+     :m2 (map->ExpoMachine {:lambda 0.001 :mu 0.99 :W 1.0})}
+    :number-of-simulations 1
+    :report {:log? true :max-lines 3000}
+    :topology [:m1 :b1 :m2]
+    :entry-point :m1
+    :params {:warm-up-time 2000 :run-to-time 10000}
+    :jobmix {:jobType1 (map->JobType {:portion 1.0 :w {:m1 1.0, :m2 1.17}})}})
+#+END_SRC
+*** The m2-j1-n3 PN 
+#+BEGIN_SRC clojure
+{:places
+ [{:name :buffer, :pid 0, :initial-tokens 0}
+  {:name :m1-blocked, :pid 1, :initial-tokens 0}
+  {:name :m1-busy, :pid 2, :initial-tokens 1}
+  {:name :m2-busy, :pid 3, :initial-tokens 1}
+  {:name :m2-starved, :pid 4, :initial-tokens 0}],
+ :transitions
+ [{:name :m1-complete-job, :tid 6, :type :exponential, :rate 0.9}
+  {:name :m1-start-job, :tid 7, :type :immediate, :rate 1.0}
+  {:name :m2-complete-job, :tid 8, :type :exponential, :rate 1.0}
+  {:name :m2-start-job, :tid 9, :type :immediate, :rate 1.0}],
+ :arcs
+ [{:aid 10, :source :buffer, :target :m1-start-job, :name :aa-10, :type :inhibitor, :multiplicity 3, :bind {:jtype :blue}, :priority 1}
+  {:aid 11, :source :buffer, :target :m2-start-job, :name :aa-11, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 12, :source :m1-blocked, :target :m1-start-job, :name :aa-12, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 13, :source :m1-busy, :target :m1-complete-job, :name :aa-13, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 14, :source :m1-complete-job, :target :m1-blocked, :name :aa-14, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 15, :source :m1-start-job, :target :buffer, :name :aa-15, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 2}
+  {:aid 16, :source :m1-start-job, :target :m1-busy, :name :aa-16, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 17, :source :m2-busy, :target :m2-complete-job, :name :aa-17, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 18, :source :m2-complete-job, :target :m2-starved, :name :aa-18, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 19, :source :m2-start-job, :target :m2-busy, :name :aa-19, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 20, :source :m2-starved, :target :m2-start-job, :name :aa-20, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}]}
+#+END_SRC 
+ 
+*** Does it make sense to have an entry point with no :fire-ons?  (Yes, but...)
+ I get two entry point markings, only one has anything in :fires-on. 
+ I search for 50 steps supposedly, but it goes 225 lines, ending on the only exceptional msg, 
+ which is {:act :m2-starved, :indx 225, :Mp [1 0 1 0 1]}. None of that should matter, we
+ aren't looking for exceptional one yet. 
+**** Is the problem that it is using the short data?
+**** Yeah, ok this is wrong! : 
+     (def foo (interpret-scada reach1 (-> (app-info) :problem :scada-log) lili))
+     (count foo) ==> 225
+     So I have been using the wrong data all the time, or it is stopping early?
+     Good! It is stopping after 225 (the other goes 3000). I'm guessing that it gets 
+     stuck in a situation it cannot interpret. Verify...
+   
+     Here is the new "failed-on" information:
+     {:failed-prior   {:M [1 0 1 1 0], :fire :m2-complete-job, :Mp [1 0 1 0 1], :rate 1.0, :indx 224},
+      :failed-on-link {:act :m2-starved, :indx 225, :Mp [1 0 1 0 1]},
+      :failed-on-msg  {:act :m1-complete-job, :bf :b1, :j 1745, :n 0, :clk 2067.08452126566, :line 226, :mjpact :bj, :m :m1}}
 
+     According to the reachability graph, the only thing that can occur after [1 0 1 0 1] is :m2-start-job
+     {:M [1 0 1 0 1], :fire :m2-start-job, :Mp [0 0 1 1 0], :rate 1.0}
+     That makes sense because ...
+      [:buffer     1
+       :m1-blocked 0
+       :m1-busy    1
+       :m2-busy    0
+       :m2-starved 1]
+      ... No, it doesn't make sense. [1 1 0 0 1] should also be possible. This is a vanishing transition to :m1-blocked.
+***** BUG 
+      The reachability graph must be wrong, but before I fix it, I won't build nets where :failed-on-msg is on last. DONE. 
+      Something is seriously wrong. I created pnml for the N=3 PN but I don't get the same reachability as I did earlier
+      (def reach1 ...) This one is much smaller. 
+
+      Even the N=1 net is wrong. It should have 12 links, not 10:
+      [[file:~/TwoDrive/OneDrive/Repo/mindmaps/images/m2-n1-no-immediate-reach.jpg]]
+
+      First of all, these PNs have immediate transitions. 
+          
+      This is bad, there should be two here!    
+    
+      (next-links pnpn [0 1 0 1 0])
+      [{:M [0 1 0 1 0], :fire :m1-start-job, :Mp [1 0 1 1 0], :rate 1.0}]
+      The problem was that I was not setting all transitions to timed. THIS MAY NEED MORE THOUGHT (to TODO)
+*** So now I have larger rgraphs (e.g. 28 vs 18 for N=3) do things still work?
+**** write code to generate simple-reach
+**** write fitness assessment. 

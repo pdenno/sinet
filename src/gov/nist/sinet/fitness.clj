@@ -294,40 +294,13 @@
                        (update :ix inc)
                        (update-in [:excepts event] #(distinct (conj %1 %2)) mark)))))))))
 
-;;; This is the reachability graph for m2-inhib-bas:
-#_(def reach1
-  [{:M [0 0 1 1 0], :fire :m1-complete-job, :Mp [0 1 0 1 0], :rate 0.9}
-   {:M [1 1 0 0 1], :fire :m2-start-job, :Mp [0 1 0 1 0], :rate 1.0}
-   {:M [0 1 0 1 0], :fire :m1-start-job, :Mp [1 0 1 1 0], :rate 1.0}
-   {:M [0 0 1 0 1], :fire :m1-complete-job, :Mp [0 1 0 0 1], :rate 0.9}
-   {:M [1 0 1 1 0], :fire :m1-complete-job, :Mp [1 1 0 1 0], :rate 0.9}
-   {:M [1 0 1 0 1], :fire :m2-start-job, :Mp [0 0 1 1 0], :rate 1.0}
-   {:M [1 0 1 1 0], :fire :m2-complete-job, :Mp [1 0 1 0 1], :rate 1.0}
-   {:M [0 1 0 0 1], :fire :m1-start-job, :Mp [1 0 1 0 1], :rate 1.0}
-   {:M [1 1 0 1 0], :fire :m2-complete-job, :Mp [1 1 0 0 1], :rate 1.0}
-   {:M [0 0 1 1 0], :fire :m2-complete-job, :Mp [0 0 1 0 1], :rate 1.0}])
-
 ;;; :marking-key [:buffer :m1-blocked :m1-busy :m2-busy :m2-starved],
 ;;; It blocks after [2 0 1 1 0]
 (def reach1
-  [{:M [0 0 1 1 0], :fire :m1-complete-job, :Mp [0 1 0 1 0], :rate 0.9}
-   {:M [2 0 1 1 0], :fire :m1-complete-job, :Mp [2 1 0 1 0], :rate 0.9}
-   {:M [2 0 1 1 0], :fire :m2-complete-job, :Mp [2 0 1 0 1], :rate 1.0}
-   {:M [0 1 0 1 0], :fire :m1-start-job, :Mp [1 0 1 1 0], :rate 1.0}
-   {:M [3 1 0 0 1], :fire :m2-start-job, :Mp [2 1 0 1 0], :rate 1.0}
-   {:M [3 0 1 0 1], :fire :m2-start-job, :Mp [2 0 1 1 0], :rate 1.0}
-   {:M [2 1 0 1 0], :fire :m1-start-job, :Mp [3 0 1 1 0], :rate 1.0}
-   {:M [3 0 1 1 0], :fire :m2-complete-job, :Mp [3 0 1 0 1], :rate 1.0}
-   {:M [3 1 0 1 0], :fire :m2-complete-job, :Mp [3 1 0 0 1], :rate 1.0}
-   {:M [0 0 1 0 1], :fire :m1-complete-job, :Mp [0 1 0 0 1], :rate 0.9}
-   {:M [1 0 1 1 0], :fire :m1-complete-job, :Mp [1 1 0 1 0], :rate 0.9}
-   {:M [1 0 1 0 1], :fire :m2-start-job, :Mp [0 0 1 1 0], :rate 1.0}
-   {:M [1 1 0 1 0], :fire :m1-start-job, :Mp [2 0 1 1 0], :rate 1.0}
-   {:M [1 0 1 1 0], :fire :m2-complete-job, :Mp [1 0 1 0 1], :rate 1.0}
-   {:M [0 1 0 0 1], :fire :m1-start-job, :Mp [1 0 1 0 1], :rate 1.0}
-   {:M [3 0 1 1 0], :fire :m1-complete-job, :Mp [3 1 0 1 0], :rate 0.9}
-   {:M [0 0 1 1 0], :fire :m2-complete-job, :Mp [0 0 1 0 1], :rate 1.0}
-   {:M [2 0 1 0 1], :fire :m2-start-job, :Mp [1 0 1 1 0], :rate 1.0}])
+  (-> "data/PNs/m2-inhib-n3.xml"
+      pnml/read-pnml
+      pnr/renumber-pids
+      pnr/simple-reach))
 
 ;;; Idea: This (excep-starting-mark) could force an initial-marking on the PN.
 ;;;       That might be a good thing!
@@ -399,7 +372,7 @@
 
 ;;; POD PN transitions will need :rate 
 (defn next-match
-  "If the argument msg is not ordinary, return its act. 
+  "If the argument msg is not ordinary, return its act and the state it enters (Mp). 
    If the argument msg can advance the rgraph, return *the* corresponding link.
    otherwise return nil."
   [msg link rgraph]
@@ -429,7 +402,9 @@
             next-msg (if (== last-indx indx) nil (nth data (inc indx)))
             matched  (when next-msg (next-match next-msg (last interp) rgraph))]
         (cond (not next-msg)   interp
-              (not matched)    interp
+              (not matched)    (conj interp {:failed-prior (nth interp (- (count interp) 2))
+                                             :failed-on-link (last interp)
+                                             :failed-on-msg next-msg})
               :otherwise (recur (conj interp matched)))))))
 
 ;;; {:M [1 0 1 0 1], :fire :m2-start-job, :Mp [0 0 1 1 0], :rate 1.0, :indx 37}
@@ -437,10 +412,11 @@
 ;;; {:act :m2-starved, :indx 39, :Mp [0 0 1 0 1]}
 ;;; :marking-key [:buffer :m1-blocked :m1-busy :m2-busy :m2-starved],
 ;;; (train-msg (nn/make-net 5 1 5) (-> (util/app-info) :problem :scada-log) :m1-blocked)
+(declare train-msg-aux)
 (defn train-msg
   "Create a map of neural nets identifying msg-type exceptional messages for each starting marking."
   [net train-data msg-type]
-  (let [start-links (starting-link reach1 train-data 0)]
+  (let [start-links (starting-links reach1 train-data 0)]
     (zipmap
      (map :M start-links)
      (map #(train-msg-aux net train-data msg-type %) start-links))))
@@ -449,27 +425,29 @@
   [net scada-data msg-type start-link]
   (let [train-data (interpret-scada reach1 scada-data start-link)
         last-indx (-> train-data last :indx)
-        fires-on (atom {})]
-    (loop [net net
-           indx 0]
-      (if (>= indx last-indx) ; terminate
-        (assoc net :fires-on @fires-on)
-        (let [msg (nth train-data indx)
-              label (if (= (:act msg) msg-type) 1 0)           ; (rand-int 2)
-              inputs (cond (== label 1)             (:Mp msg), ; (noise) ;  ; [0 0 1 0 1] ; (:Mp msg),  POD just to be sure....
-                           (contains? msg :fire)    (:M  msg), ; (noise) ;  
-                           :otherwise :skip)]
-          (when (== label 1) ; track markings it is firing on
-            (if (contains? @fires-on (:Mp msg))
-              (swap! fires-on #(update % (:Mp msg) inc))
-              (swap! fires-on #(assoc % (:Mp msg) 1))))
-          (recur
-           (if (= inputs :skip)
-             net
-             (nn/train-step net
-                            (vec (map double inputs))
-                            (vector (double label))))
-           (inc indx)))))))
+        fires-on (atom {:msg-type msg-type})]
+    (when-not (contains? (last train-data) :failed-on-msg)
+      (loop [net net
+             indx 0]
+        (if (>= indx last-indx) ; terminate
+          (assoc net :fires-on @fires-on), 
+          (let [msg (nth train-data indx)
+                label (if (= (:act msg) msg-type) 1 0)           ; (rand-int 2)
+                inputs (cond (== label 1)             (:Mp msg), ; (noise) 
+                             (contains? msg :fire)    (:M  msg), ; (noise) 
+                             :otherwise :skip)] ; an exceptional message but not the one I'm learning. 
+            (when (== label 1) ; track markings it is firing on
+              ;(println msg)
+              (if (contains? @fires-on (:Mp msg))
+                (swap! fires-on #(update % (:Mp msg) inc))
+                (swap! fires-on #(assoc  % (:Mp msg) 1))))
+            (recur
+             (if (= inputs :skip)
+               net
+               (nn/train-step net
+                              (vec (map double inputs))
+                              (vector (double label))))
+             (inc indx))))))))
 
 #_(def markings
   [[0 0 0 0 0] [0 0 0 0 1] [0 0 0 1 0] [0 0 0 1 1] [0 0 1 0 0] [0 0 1 0 1] [0 0 1 1 0] [0 0 1 1 1] 
@@ -482,7 +460,6 @@
   [[0 0 1 1 0] [2 0 1 1 0] [2 0 1 1 0] [0 1 0 1 0] [3 1 0 0 1] [3 0 1 0 1]
    [2 1 0 1 0] [3 0 1 1 0] [3 1 0 1 0] [0 0 1 0 1] [1 0 1 1 0] [1 0 1 0 1]
    [1 1 0 1 0] [1 0 1 1 0] [0 1 0 0 1] [3 0 1 1 0] [0 0 1 1 0] [2 0 1 0 1]])
-
 
 (defn test-markings [net]
   (zipmap markings
@@ -580,3 +557,6 @@
                #_(sim/simulate :max-steps steps))]
     #_(workflow-fitness (util/map->Inv {:pn pn}))
     pn))
+
+
+

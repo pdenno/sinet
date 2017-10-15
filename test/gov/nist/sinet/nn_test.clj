@@ -10,38 +10,49 @@
 
 ;;;(require '[clojure.spec.test.alpha :as stest])
 
+(defn set-weight [net layer n-index w-index val]
+  "Set a weight (for mazur diagnostics). layer=1 is first hidden layer. 
+   Layer=2 is (typically) output. 
+   n-index index, of neuron, is [0..<number of neurons in layer>].
+   w-index, index of arc, is [0..<number of neurons in previous layer>]"
+  (let [nlayers (count (:hlayers net))]
+    (assert (== 1 nlayers)) ; POD deeper nets NYI.
+    (if (= layer :hlayers)
+      (assoc-in net [:hlayers 0 n-index :weights w-index] val)
+      (assoc-in net [:olayer    n-index :weights w-index] val))))
+
 ;;; https://mattmazur.com/2015/03/17/a-step-by-step-backpropagation-example/
 (defn mazur-set-weights-test [net]
   (cond (== 2 (-> net :hlayers first count))
         (-> net
-            (nn/set-weight :hlayers 0 0 0.15)
-            (nn/set-weight :hlayers 0 1 0.20)
-            (nn/set-weight :hlayers 0 2 0.35)
-            (nn/set-weight :hlayers 1 0 0.25)
-            (nn/set-weight :hlayers 1 1 0.30)
-            (nn/set-weight :hlayers 1 2 0.35)
-            (nn/set-weight :olayer 0 0 0.40)
-            (nn/set-weight :olayer 0 1 0.45)
-            (nn/set-weight :olayer 0 2 0.60)
-            (nn/set-weight :olayer 1 0 0.50)
-            (nn/set-weight :olayer 1 1 0.55)
-            (nn/set-weight :olayer 1 2 0.60)),
+            (set-weight :hlayers 0 0 0.15)
+            (set-weight :hlayers 0 1 0.20)
+            (set-weight :hlayers 0 2 0.35)
+            (set-weight :hlayers 1 0 0.25)
+            (set-weight :hlayers 1 1 0.30)
+            (set-weight :hlayers 1 2 0.35)
+            (set-weight :olayer 0 0 0.40)
+            (set-weight :olayer 0 1 0.45)
+            (set-weight :olayer 0 2 0.60)
+            (set-weight :olayer 1 0 0.50)
+            (set-weight :olayer 1 1 0.55)
+            (set-weight :olayer 1 2 0.60)),
         (== 3 (-> net :hlayers first count))
         (-> net
-            (nn/set-weight :hlayers 0 0 0.15)
-            (nn/set-weight :hlayers 0 1 0.20)
-            (nn/set-weight :hlayers 0 2 0.20)
-            (nn/set-weight :hlayers 0 3 0.35)
-            (nn/set-weight :hlayers 1 0 0.25)
-            (nn/set-weight :hlayers 1 1 0.30)
-            (nn/set-weight :hlayers 1 2 0.30)
-            (nn/set-weight :hlayers 1 3 0.35)
-            (nn/set-weight :olayer 0 0 0.40)
-            (nn/set-weight :olayer 0 1 0.45)
-            (nn/set-weight :olayer 0 2 0.60)
-            (nn/set-weight :olayer 1 0 0.50)
-            (nn/set-weight :olayer 1 1 0.55)
-            (nn/set-weight :olayer 1 2 0.60))
+            (set-weight :hlayers 0 0 0.15)
+            (set-weight :hlayers 0 1 0.20)
+            (set-weight :hlayers 0 2 0.20)
+            (set-weight :hlayers 0 3 0.35)
+            (set-weight :hlayers 1 0 0.25)
+            (set-weight :hlayers 1 1 0.30)
+            (set-weight :hlayers 1 2 0.30)
+            (set-weight :hlayers 1 3 0.35)
+            (set-weight :olayer 0 0 0.40)
+            (set-weight :olayer 0 1 0.45)
+            (set-weight :olayer 0 2 0.60)
+            (set-weight :olayer 1 0 0.50)
+            (set-weight :olayer 1 1 0.55)
+            (set-weight :olayer 1 2 0.60))
         :otherwise (/ 3 0)))
 
 (defn mazur-test []
@@ -58,7 +69,7 @@
         (forward-pass-output-layer))))
 
 (deftest total-error-tests
-  (testing "whether total-error calculation is correct"
+  (testing "whether total-error calculation is correct."
     (is (< 0.2983711
            (:total-error (mazur-test))
            0.29837111))))
@@ -67,7 +78,7 @@
   (< (- given tol) calculated (+ given tol)))
 
 (deftest backprop-output-layer-tests
-  (testing "whether calculation of updated output layer weights is correct"
+  (testing "whether calculation of updated output layer weights is correct."
     (let [net (mazur-test)]
       (is (=* (-> net :olayer (nth 0) :new-weights (nth 0)) 0.35891647971788465 0.0000001))
       (is (=* (-> net :olayer (nth 0) :new-weights (nth 1)) 0.40866618607623345 0.0000001))
@@ -77,8 +88,8 @@
 (deftest backprop-hidden-layer-output-layer-tests
   (testing "derivative of total error in an output with respect to an output neuron."
     (let [net (mazur-test)]
-      (is (=* (dEtotaldouth net [0.01 0.99] 0) 0.03635030639314468 0.0000001))
-      (is (=* (dEtotaldouth net [0.01 0.99] 1) 0.04137032264874471 0.0000001)))))
+      (is (=* (nn/dEtotaldouth net [0.01 0.99] 0) 0.03635030639314468 0.0000001))
+      (is (=* (nn/dEtotaldouth net [0.01 0.99] 1) 0.04137032264874471 0.0000001)))))
 
 (deftest backprop-hidden-layer-tests
   (testing "whether calculation of updated hidden layer weights is correct"
