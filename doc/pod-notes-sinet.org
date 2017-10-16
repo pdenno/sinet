@@ -39,6 +39,7 @@
 ** TODO Try a more mild blocking situation.
 ** DONE Fix bug in pnr/simple-reach. See bug <2017-10-15 Sun>
    CLOSED: [2017-10-15 Sun 18:13]
+** TODO Consider the possibility/advantages of an 'abbreviated' reachability graph. 
 ** TODO Decide whether setting all transitions to timed makes sense for simple-reach. See discussion <2017-10-15 Sun>
 ** TODO Investigate possible bugs with MJPdes 'coordination' and create more 'deterministic' test cases.
 ** TODO Conceive of a strategy for using exceptional fitness
@@ -216,5 +217,32 @@ Pretty:  [[file:~/Documents/git/sinet/data/SCADA-logs/m2-j1-n3-block-mild-out.cl
       [{:M [0 1 0 1 0], :fire :m1-start-job, :Mp [1 0 1 1 0], :rate 1.0}]
       The problem was that I was not setting all transitions to timed. THIS MAY NEED MORE THOUGHT (to TODO)
 *** So now I have larger rgraphs (e.g. 28 vs 18 for N=3) do things still work?
-**** write code to generate simple-reach
+**** DONE write code to generate simple-reach
+     CLOSED: [2017-10-15 Sun 20:07]
 **** write fitness assessment. 
+*** Junk I'll probably never use
+#_(defn prev-ordinary
+  "Return an ordinary message, at index n or earlier."
+  [data n]
+  (loop [indx n]
+    (cond (ordinary? (nth data indx)) (nth data indx), 
+          (== indx 0) nil
+          :otherwise (recur (dec indx)))))
+
+(defn big-train
+  ([net] (big-train net :m1-blocked 1))
+  ([net msg-type cnt]
+   (reduce (fn [n _] (train-msg n msg-type))
+           net
+           (range cnt))))
+
+;;; POD This is for :m2-starved. 
+(defn more-exceptional-training
+  [net cnt]
+  (reduce (fn [n _]
+            (nn/train-step net [0.0 0.0 1.0 0.0 1.0] [1.0]))
+          net
+          (range cnt)))
+
+
+*** TODO Write code to defobulate/zipmap (and pick best???)
