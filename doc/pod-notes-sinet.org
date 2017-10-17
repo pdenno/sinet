@@ -43,16 +43,30 @@
 ** TODO Decide whether setting all transitions to timed makes sense for simple-reach. See discussion <2017-10-15 Sun>
 ** TODO Investigate possible bugs with MJPdes 'coordination' and create more 'deterministic' test cases.
 ** TODO Conceive of a strategy for using exceptional fitness
+ [I think I missed the whole point in the stuff below, but just to be sure: There are messages that
+  are not associated with transitions. They are associated with STATES. I may have a place in the network
+  that is essentially "M1-BLOCKED" but it won't be labelled as such! A nice thing about this is that 
+  I DON'T WANT to get a M1-BLOCKED message every (vanishing) time that there is a token in that place.
+  I only want these when the buffer is filled (a state where the buffer place looms large). That's what 
+  will happen, and we don't have to worry about labeling the "m1-blocked" place!]
+
  In some cases like blocking/starving it seem that having a place represent the state is appropriate. 
  But is that generally the case? This ToDo is closely related to the next about vanishing transitions,
  but I don't think it is the same issue. I think I need to see the result of the "mild blocking" 
  situation before I can sort this out. Remember that the goal is to get rates out of these things. 
-** TODO Find out a way to find the pathname "to a namespace" so I can run tests on dependent packages. 
-*** IDEA: Maybe award fitness to PNs that represent it. 
-***       Award a little less to those who can at least cope with it with a NN. 
+
+ (More on this): I think there might be quirk to what I'm trying to do: I'd like to allow the PN to handle 
+ exceptional messages just as some do for block/starve, but block/starve are places, not transitions, and 
+ they won't have meaningful names. I think I'll just wait to explore this after getting the exceptional 
+ fitness hooked in. 
+
 ** TODO Deal with vanishing transitions. 
  I need to generate blocking/starving messages ONLY when the net sojourns at blocking/starving. 
  So simulation has to be better and I need to distinguish these immediate transitions some how. 
+
+** TODO Find out a way to find the pathname "to a namespace" so I can run tests on dependent packages. 
+*** IDEA: Maybe award fitness to PNs that represent it. 
+***       Award a little less to those who can at least cope with it with a NN. 
 
 * Sinet Log *
 ** <2017-10-14 Sat>
@@ -245,4 +259,140 @@ Pretty:  [[file:~/Documents/git/sinet/data/SCADA-logs/m2-j1-n3-block-mild-out.cl
           (range cnt)))
 
 
-*** TODO Write code to defobulate/zipmap (and pick best???)
+*** DONE Write code to defobulate/zipmap (and pick best???)
+    CLOSED: [2017-10-17 Tue 14:17]
+** <2017-10-16 Mon>
+ So far there is only one NN per message. 
+
+I cleaned things up so that I get one NN per message. 
+
+I studied Probabilistic Neural Nets briefly. They require one neuron for each training instance
+and therefore for my application I think would be equivalent of a lookup table encompasing the whole
+training set. I think they make more sense when there are points "between" the elements in the
+training set. (Do I have these???) Needs more study, but maybe not so promising.
+
+Let's look at how these things do against the 
+
+** <2017-10-17 Tue>
+
+*** Cortex
+Cortex layer types (what I'm seeing [[https://github.com/thinktopic/cortex/commit/4be1c559675b9612249abbb94963d989d70817fe][here]]): convolutional, max-pooling, dropout, relu, linear, softmax.
+But *this* matters: [[https://machinelearningmastery.com/confusion-matrix-machine-learning/][Confusion matrix]]: Describes what one is and how to calculate one for the 2-class
+classification problem!
+
+*** Confusion matrix
+"A confusion matrix is a technique for summarizing the performance of a classification algorithm."
+Thus if I have one of these, I can use it directly to determine the fitness of the combination of
+PN + NNs as an identification of the system. 
+
+Easy enough. Should also look at precision, recall, specificity and sensitivity. 
+These are all defined on this [[https://en.wikipedia.org/wiki/Confusion_matrix][wikipedia page]]. I also have a paper by D. M. W. Powers in the ML
+section of Mendeley.
+
+*** fitness.clj
+I think before I go much further, I have to fix the problem any problems deciding the class. 
+I had hoped that it was just a matter of choosing marking > 0.5. Is this the case? 
+
+HELP! No marking hits on any exceptional message. I don't think I have looked at results
+since the "dense" exceptional messages of Saturday. 
+
+*** What does the marking used as input to training mean?
+    I was hoping that it was the marking just before the message is issued. 
+    Messages are issued on complete-job / start-job but MJPdes doesn't 
+    order these where they all happen simultaneously. Maybe it should???
+
+[:buffer :m1-blocked :m1-busy :m2-busy :m2-starved]
+ {:msg-type :m1-blocked,   [3 0 1 1 0] 30} ... I assume next msg is m1-complete-job
+ {:msg-type :m1-unblocked, [2 1 0 1 0] 30} ... 
+ {:msg-type :m2-starved,   [0 0 1 0 1] 14} 
+ {:msg-type :m2-unstarved, [0 0 1 1 0] 14} 
+ 
+Let's generate the interpretation [[file:~/Documents/git/sinet/data/SCADA-logs/m2-j2-n3-block-mild-interpreted.clj::{:act%20:m1-blocked,%20:prev-act%20:m1-start-job,%20:indx%20710,%20:Mp%20%5B3%200%201%201%200%5D,%20:clk%202206.0879216608246}][AND SAVE IT AS A FILE]]. 
+
+Start link is the same for all 4 message types, yet I interpret the log four times. Nice. 
+    
+**** Typical output with "data/SCADA-logs/m2-j1-n3-block-mild-out.clj"       
+gov.nist.sinet.fitness> (ppprint (zipmap markings1
+                                         (map #(first (nn/eval-net (:m1-blocked nnns) %)) markings1)))
+{[0 1 0 1 0] 0.024485036900973763,
+ [3 1 0 1 0] 0.008046179155291305,
+ [2 0 1 1 0] 0.004074497484690655,
+ [1 1 0 1 0] 0.013784127155537253,
+ [3 0 1 0 1] 0.004062515347353122,
+ [1 0 1 1 0] 0.005371589317720032,
+ [0 1 0 0 1] 0.0521152547076084, <-- wrong, and next best is 0.027
+ [2 1 0 1 0] 0.009709532322778542,
+ [3 0 1 1 0] 0.003524192574949857,
+ [1 0 1 0 1] 0.009338700112664192,
+ [3 1 0 0 1] 0.010161648095898495,
+ [0 0 1 1 0] 0.008800298059058962,
+ [1 1 0 0 1] 0.026920570777390792,
+ [0 0 1 0 1] 0.01845261113215176,
+ [2 1 0 0 1] 0.014811122272394004,
+ [2 0 1 0 1] 0.0055072388527700866}
+nil
+gov.nist.sinet.fitness> (ppprint (zipmap markings1
+                                         (map #(first (nn/eval-net (:m1-unblocked nnns) %)) markings1)))
+{[0 1 0 1 0] 0.025163102369711258,
+ [3 1 0 1 0] 0.016114179019312516,
+ [2 0 1 1 0] 0.007977926858371297,
+ [1 1 0 1 0] 0.0201854362883496,
+ [3 0 1 0 1] 0.014301613606198235,
+ [1 0 1 1 0] 0.008978827733614799,
+ [0 1 0 0 1] 0.06621052090624126,  <--- wrong, next is 0.036
+ [2 1 0 1 0] 0.01751290729163327,
+ [3 0 1 1 0] 0.007622303706912641,
+ [1 0 1 0 1] 0.018487183654880144,
+ [3 1 0 0 1] 0.029438724652992698,
+ [0 0 1 1 0] 0.01104428285399589,
+ [1 1 0 0 1] 0.04735457640118155,
+ [0 0 1 0 1] 0.02363169658896575,
+ [2 1 0 0 1] 0.036172647847275446,
+ [2 0 1 0 1] 0.01569931368097529}
+nil
+gov.nist.sinet.fitness> (ppprint (zipmap markings1
+                                         (map #(first (nn/eval-net (:m2-starved nnns) %)) markings1)))
+
+[:buffer :m1-blocked :m1-busy :m2-busy :m2-starved]
+{[0 1 0 1 0] 0.017027576075899276,
+ [3 1 0 1 0] 0.004886266737864184,
+ [2 0 1 1 0] 0.006935985604851713,
+ [1 1 0 1 0] 0.008132810057098754,
+ [3 0 1 0 1] 0.008690333194503956,
+ [1 0 1 1 0] 0.011443272037409967,
+ [0 1 0 0 1] 0.06431606145668564,
+ [2 1 0 1 0] 0.005697633024429593,
+ [3 0 1 1 0] 0.005600030048084727,
+ [1 0 1 0 1] 0.03823100286076116,
+ [3 1 0 0 1] 0.00657718778677882,
+ [0 0 1 1 0] 0.029978431187203013,
+ [1 1 0 0 1] 0.019941922787321802,
+ [0 0 1 0 1] 0.11582262659576607, <-- yes. next is 0.064
+ [2 1 0 0 1] 0.00937067227357531,
+ [2 0 1 0 1] 0.014909753268535426}
+nil
+gov.nist.sinet.fitness> (ppprint (zipmap markings1
+                                         (map #(first (nn/eval-net (:m2-unstarved nnns) %)) markings1)))
+[:buffer :m1-blocked :m1-busy :m2-busy :m2-starved]
+{[0 1 0 1 0] 0.026026209106502097,
+ [3 1 0 1 0] 0.0034988958592581513,
+ [2 0 1 1 0] 0.00601129014254703,
+ [1 1 0 1 0] 0.010186463188839843,
+ [3 0 1 0 1] 0.0033239310083816543,
+ [1 0 1 1 0] 0.011904922484223533,
+ [0 1 0 0 1] 0.016127654355549154,
+ [2 1 0 1 0] 0.00529834749317781,
+ [3 0 1 1 0] 0.00385956712448291,
+ [1 0 1 0 1] 0.008798843571705668,
+ [3 1 0 0 1] 0.0029969968812421986,
+ [0 0 1 1 0] 0.03188710693160681, <--- I guess...what does the marking mean???
+ [1 1 0 0 1] 0.007127766343136932,
+ [0 0 1 0 1] 0.020988809038561193,
+ [2 1 0 0 1] 0.004186967134676599,
+ [2 0 1 0 1] 0.00488250449212974}
+nil
+gov.nist.sinet.fitness> 
+
+
+Let's go back to the dense messages and see if we still get good results.
+

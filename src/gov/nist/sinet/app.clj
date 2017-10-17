@@ -44,7 +44,7 @@
   (atom 
    {:use-cpus (.availableProcessors (Runtime/getRuntime)) ; Counts hyperthreading, apparently. 
     :keep-vs-ignore 0.8
-    :scada-data-file "data/SCADA-logs/m2-j1-n3-block-mild-out.clj"
+    :scada-data-file "data/SCADA-logs/m2-j1-n3-block-mild-out.clj"      
     #_"data/SCADA-logs/m2-j1-n3-block-out.clj"
     #_"data/SCADA-logs/scada-m2-j1-starve-m2-out.clj" ;"scada-f0-imbalanced.clj"
     :pattern-reserves #{:act :jt :bf :m :n}}))

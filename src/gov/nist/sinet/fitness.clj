@@ -356,12 +356,14 @@
    otherwise return nil."
   [msg link rgraph]
   (if (not (ordinary? msg))
-    {:act (:act msg) :indx (:line msg) :Mp (:Mp link)}
+    {:act (:act msg) :prev-act (:fire link) :indx (:line msg) :Mp (:Mp link) :clk (:clk msg)}
     (when-let [link (some #(when (and (= (:Mp link) (:M %))
                                        (= (:fire %) (:act msg)))
                               %)
-                             rgraph)]
-      (assoc link :indx (:line msg)))))
+                          rgraph)]
+      (-> link
+          (assoc :clk  (:clk msg))
+          (assoc :indx (:line msg))))))
 
 ;;; (interpret-scada reach1 (subvec (-> (util/app-info) :problem :scada-log) 0 100))
 ;;; (interpret-scada reach1 (subvec (-> (util/app-info) :problem :scada-log) 0 100)
@@ -384,75 +386,94 @@
                                              :failed-on-msg next-msg})
               :otherwise (recur (conj interp matched)))))))
 
+(defn best-interpretation
+  "Find the best starting link and interpretation of the SCADA log. 
+   Return a map {:rgraph x, :start-link y :interpreted-log z}."
+  [pn scada-log]
+  (let [rgraph (pnr/simple-reach pn)]
+    (loop [links (starting-links rgraph scada-log 0)]
+      (let [interp (interpret-scada rgraph scada-log (first links))]
+        (cond
+          (empty? links) nil, 
+          (not (contains? (last interp) :failed-on-msg))
+          {:start-link (first links)
+           :rgraph rgraph
+           :interpreted-log interp},
+          true (recur (rest links)))))))
+
 ;;; :marking-key [:buffer :m1-blocked :m1-busy :m2-busy :m2-starved],
 ;;; It blocks after [2 0 1 1 0]
-(def pnpn
-  (-> "data/PNs/m2-inhib-n3.xml"
-      pnml/read-pnml
-      pnr/renumber-pids))
+(def pnpn (pnml/read-pnml "data/PNs/m2-inhib-n3.xml"))
 
+;;; POD NYI
+(defn pick-net 
+  "Given a list of NN, choose the most accurate one for its message."
+  [nets]
+  (let [result (filter nn/net? nets)]
+    (when (> (count result) 1)
+      (println "Multiple nets. Pick NYI."))
+    (first nets)))
+  
 ;;; (train-all pnpn)
 (defn train-all
   "Return a map providing the best NN for each message."
   [pn]
-  (let [pn     (pnr/renumber-pids pn)
-        size   (count (:marking-key pn))
-        rgraph (pnr/simple-reach pn)
+  (let [size   (count (:marking-key pn))
+        interp (best-interpretation pn)
         msgs   (-> (app-info) :problem :exceptional-msgs)]
-    (map #(train-msg (nn/make-net size 1 size) rgraph %) msgs)))
+    (zipmap msgs
+            (map #(train-msg (nn/make-net size 1 size) interp %) msgs))))
 
-;;; {:M [1 0 1 0 1], :fire :m2-start-job, :Mp [0 0 1 1 0], :rate 1.0, :indx 37}
-;;; {:M [0 0 1 1 0], :fire :m2-complete-job, :Mp [0 0 1 0 1], :rate 1.0, :indx 38}
-;;; {:act :m2-starved, :indx 39, :Mp [0 0 1 0 1]}
-;;; :marking-key [:buffer :m1-blocked :m1-busy :m2-busy :m2-starved],
-;;; (train-msg (nn/make-net 5 1 5) (-> (util/app-info) :problem :scada-log) :m1-blocked)
-(declare train-msg-aux)
 (defn train-msg
-  "Create a map of neural nets identifying msg-type exceptional messages for each starting marking."
-  [net rgraph msg-type]
-  (let [scada-log (-> (util/app-info) :problem :scada-log)
-        start-links (starting-links rgraph scada-log 0)]
-    (zipmap
-     (map :M start-links)
-     (map #(train-msg-aux net scada-log msg-type %) start-links))))
-
-(defn train-msg-aux
-  [net scada-data graph msg-type start-link]
-  (let [train-data (interpret-scada rgraph scada-data start-link)
+  [net interp msg-type]
+  (let [train-data (:interpreted-log interp)
         last-indx (-> train-data last :indx)
         fires-on (atom {:msg-type msg-type})]
-    (when-not (contains? (last train-data) :failed-on-msg)
-      (loop [net net
-             indx 0]
-        (if (>= indx last-indx) ; terminate
-          (assoc net :fires-on @fires-on), 
-          (let [msg (nth train-data indx)
-                label (if (= (:act msg) msg-type) 1 0)           ; (rand-int 2)
-                inputs (cond (== label 1)             (:Mp msg), ; (noise) 
-                             (contains? msg :fire)    (:M  msg), ; (noise) 
-                             :otherwise :skip)] ; an exceptional message but not the one I'm learning. 
-            (when (== label 1) ; track markings it is firing on
-              ;(println msg)
-              (if (contains? @fires-on (:Mp msg))
-                (swap! fires-on #(update % (:Mp msg) inc))
-                (swap! fires-on #(assoc  % (:Mp msg) 1))))
-            (recur
-             (if (= inputs :skip)
-               net
-               (nn/train-step net
-                              (vec (map double inputs))
-                              (vector (double label))))
-             (inc indx))))))))
+    (loop [net net
+           indx 0]
+      (if (>= indx last-indx) ; terminate
+        (-> net
+            (assoc :fires-on @fires-on)
+            (assoc :msg-type msg-type)
+            (assoc :start-link (:start-link interp)))
+        (let [msg (nth train-data indx)
+              label (if (= (:act msg) msg-type) 1 0)           ; (rand-int 2)
+              inputs (cond (== label 1)             (:Mp msg), ; (noise) 
+                           (contains? msg :fire)    (:M  msg), ; (noise) 
+                           :otherwise :skip)] ; an exceptional message but not the one I'm learning. 
+          (when (== label 1) ; track markings it is firing on
+                                        ;(println msg)
+            (if (contains? @fires-on (:Mp msg))
+              (swap! fires-on #(update % (:Mp msg) inc))
+              (swap! fires-on #(assoc  % (:Mp msg) 1))))
+          (recur
+           (if (= inputs :skip)
+             net
+             (nn/train-step net
+                            (vec (map double inputs))
+                            (vector (double label))))
+           (inc indx)))))))
 
-(def markings "diag for m2-n3"
-  [[0 0 1 1 0] [2 0 1 1 0] [3 0 1 0 1] [1 1 0 0 1] [1 1 0 0 1] [2 0 1 1 0] [1 0 1 0 1]
-   [0 1 0 1 0] [3 1 0 0 1] [3 0 1 0 1] [2 1 0 1 0] [3 0 1 1 0] [3 1 0 1 0] [0 0 1 0 1]
-   [1 0 1 1 0] [1 0 1 0 1] [1 1 0 1 0] [2 1 0 0 1] [1 0 1 1 0] [0 1 0 0 1] [2 1 0 0 1]
-   [1 1 0 1 0] [0 1 0 1 0] [2 0 1 0 1] [3 0 1 1 0] [0 0 1 1 0] [2 1 0 1 0] [2 0 1 0 1]])
+(defn exceptional-markings
+  "Return a vector of {:marking x :value y} indicating that the 
+   marking associates with the exceptional class of the neural net."
+  [net markings]
+  (let [results (zipmap markings
+                         (map #(first (nn/eval-net net %)) markings))]
+    (reduce (fn [success [mark class-val]]
+              (if (> class-val 0.5)
+                (conj success {:marking mark :value class-val})
+                success))
+            []
+            results)))
 
-(defn test-markings [net]
-  (zipmap markings
-          (map #(nn/eval-net net %) markings)))
+(defn tryme [pn]
+  (let [nets (train-all pn)
+        markings (distinct (map :M (pnr/simple-reach pn)))] ; POD already done in train-all.
+    (reduce (fn [res [msg net]]
+              (assoc res msg (exceptional-markings net markings)))
+            {}
+            nets)))
 
 (defn noise []
   (vec (repeatedly 5 #(rand-int 2))))

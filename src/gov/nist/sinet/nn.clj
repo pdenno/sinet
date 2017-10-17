@@ -53,6 +53,13 @@
                     :activation sigmoid
                     :doutdnet (fn [out] (* out (- 1.0 out)))})))
 
+(defn net?
+  "Return obj if it is a neural net."
+  [obj]
+  (when (and (contains? obj :hlayers)
+             (contains? obj :olayer))
+    obj))
+
 ;;; POD the count requirements are just for testing.
 (s/def ::activation fn?)
 (s/def ::doutdnet fn?)
