@@ -9,7 +9,8 @@
             [gov.nist.sinet.simulate :as sim :refer-only (simulate)]
             [gov.nist.sinet.util :as util :refer (app-info reset)]
             [gov.nist.sinet.scada :as scada]
-            [gov.nist.sinet.nn :as nn]))
+            [gov.nist.sinet.nn :as nn]
+            [gov.nist.sinet.pnn :as pnn]))
 
 ;;; ToDo: Currently fitness only concerns violation of partial orders it should
 ;;;       additionally include:
@@ -388,22 +389,100 @@
 
 (defn best-interpretation
   "Find the best starting link and interpretation of the SCADA log. 
-   Return a map {:rgraph x, :start-link y :interpreted-log z}."
+   Return a map {:rgraph x, :start-link y :interpreted-log z}.
+   PN should have a marking key."
   [pn scada-log]
-  (let [rgraph (pnr/simple-reach pn)]
+  (let [pn (pnr/renumber-pids pn)
+        rgraph (pnr/simple-reach pn)]
     (loop [links (starting-links rgraph scada-log 0)]
       (let [interp (interpret-scada rgraph scada-log (first links))]
         (cond
           (empty? links) nil, 
           (not (contains? (last interp) :failed-on-msg))
           {:start-link (first links)
+           :marking-key (:marking-key pn)
            :rgraph rgraph
            :interpreted-log interp},
           true (recur (rest links)))))))
 
+;;;====  PNN ==========================================
+
+;;; You can have the same marking associated with more than one class. The more times you have
+;;; it associated with a class, the stronger the result will be for that class. To make
+;;; the following efficient, I'll have to count the number of times each marking is associated
+;;; with each class. Then I'll use that as a factor in calculating the PDF. 
+(defn compute-pnn-data
+  "Return a map indicating what markings are associated with what message types, 
+   where message types are either ':ordinary' or some exceptional message type."
+  [pn scada-log]
+  (let [interp (best-interpretation pn scada-log)
+        msg-types (conj (-> (app-info) :problem :exceptional-msgs) :ordinary)
+        markings (map :M (:rgraph interp))
+        report (reduce (fn [sum msg] 
+                         (if (contains? msg :act)
+                           (update-in sum [(:act msg) (:Mp msg)] inc)
+                           (update-in sum [:ordinary (:M msg)] inc)))
+                       (zipmap msg-types
+                               (repeatedly (count msg-types)
+                                           #(zipmap markings (repeat (count markings) 0))))
+                       (:interpreted-log interp))]
+    ;; Outer map is indexed by msg-types; inner map in indexed by markings, values are count.
+    ;; Eliminate entries where the count is zero. 
+    (reduce (fn [map key]
+              (update-in map [key]
+                         #(persistent!
+                           (reduce (fn [m k] (if (== 0 (get m k)) (dissoc! m k) m))
+                                   (transient %)
+                                   (keys %)))))
+            report
+            msg-types)))
+
+    
+    
+    
+
+            
+
+                           
+    
+
+
+
+#_(defn compute-pnn-data
+  "Return a map indicating what markings are associated with what message types, 
+   where message types are either ':ordinary' or some exceptional message type."
+  [pn scada-log]
+  (let [interp (best-interpretation pn scada-log)
+        markings (-> (map :M (:rgraph interp)) set)
+        excepts (->> (filter #(contains? % :act) (:interpreted-log interp))
+                     (map #(dissoc % :clk))
+                     (map #(dissoc % :indx))
+                     distinct)
+        classes (conj (distinct (map :act excepts)) :ordinary)
+        emarks (set (map :Mp excepts))
+        data (reduce
+              (fn [data mark]
+                (if (contains? emarks mark)
+                  (update-in data
+                             [(some #(when (= (:Mp %) mark) (:act %)) excepts)]
+                             #(conj % mark))
+                  (update-in data [:ordinary] #(conj % mark))))
+              (zipmap classes (repeat (count classes) []))
+              markings)]
+    data))
+
+
+        
+    
+
+
+
+
+;;;====  END PNN ======================================
+
 ;;; :marking-key [:buffer :m1-blocked :m1-busy :m2-busy :m2-starved],
 ;;; It blocks after [2 0 1 1 0]
-(def pnpn (pnml/read-pnml "data/PNs/m2-inhib-n3.xml"))
+(def pnpn (-> "data/PNs/m2-inhib-n3.xml" pnml/read-pnml pnr/renumber-pids))
 
 ;;; POD NYI
 (defn pick-net 
@@ -414,17 +493,8 @@
       (println "Multiple nets. Pick NYI."))
     (first nets)))
   
-;;; (train-all pnpn)
-(defn train-all
-  "Return a map providing the best NN for each message."
-  [pn]
-  (let [size   (count (:marking-key pn))
-        interp (best-interpretation pn)
-        msgs   (-> (app-info) :problem :exceptional-msgs)]
-    (zipmap msgs
-            (map #(train-msg (nn/make-net size 1 size) interp %) msgs))))
-
 (defn train-msg
+  "Train the net for the msg-type using the log interpretation."
   [net interp msg-type]
   (let [train-data (:interpreted-log interp)
         last-indx (-> train-data last :indx)
@@ -442,7 +512,7 @@
                            (contains? msg :fire)    (:M  msg), ; (noise) 
                            :otherwise :skip)] ; an exceptional message but not the one I'm learning. 
           (when (== label 1) ; track markings it is firing on
-                                        ;(println msg)
+            ;;(println msg)
             (if (contains? @fires-on (:Mp msg))
               (swap! fires-on #(update % (:Mp msg) inc))
               (swap! fires-on #(assoc  % (:Mp msg) 1))))
@@ -453,6 +523,14 @@
                             (vec (map double inputs))
                             (vector (double label))))
            (inc indx)))))))
+
+(defn train-all
+  "Given a SCADA log interpretation, return a map providing the best NN for each message."
+  [interp]
+  (let [size   (-> interp :marking-key count)
+        msgs   (-> (app-info) :problem :exceptional-msgs)]
+    (zipmap msgs
+            (map #(train-msg (nn/make-net size 1 size) interp %) msgs))))
 
 (defn exceptional-markings
   "Return a vector of {:marking x :value y} indicating that the 
@@ -467,9 +545,11 @@
             []
             results)))
 
-(defn tryme [pn]
-  (let [nets (train-all pn)
-        markings (distinct (map :M (pnr/simple-reach pn)))] ; POD already done in train-all.
+;;; (tryme pnpn (-> (app-info) :problem :scada-log))
+#_(defn tryme [pn scada-log]
+  (let [interp (best-interpretation pn scada-log) ; POD stop after have all markings. 
+        nets (train-all interp)
+        markings (distinct (map :M (:rgraph interp)))]
     (reduce (fn [res [msg net]]
               (assoc res msg (exceptional-markings net markings)))
             {}
@@ -477,6 +557,9 @@
 
 (defn noise []
   (vec (repeatedly 5 #(rand-int 2))))
+
+
+
 
 ;;; We generate the reachability graph (including non-tangible states) and test the
 ;;; complete SCADA log against it. We aren't running the QPN, rather we are testing

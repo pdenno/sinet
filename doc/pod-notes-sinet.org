@@ -65,6 +65,7 @@
  So simulation has to be better and I need to distinguish these immediate transitions some how. 
 
 ** TODO Find out a way to find the pathname "to a namespace" so I can run tests on dependent packages. 
+** TODO Fix MJPdes as described in log <2017-10-17 Tue>
 *** IDEA: Maybe award fitness to PNs that represent it. 
 ***       Award a little less to those who can at least cope with it with a NN. 
 
@@ -280,6 +281,47 @@ Cortex layer types (what I'm seeing [[https://github.com/thinktopic/cortex/commi
 But *this* matters: [[https://machinelearningmastery.com/confusion-matrix-machine-learning/][Confusion matrix]]: Describes what one is and how to calculate one for the 2-class
 classification problem!
 
+[[https://adeshpande3.github.io/adeshpande3.github.io/A-Beginner's-Guide-To-Understanding-Convolutional-Neural-Networks-Part-2/][Nice discussion of use of layers in CNN]].
+
+**** Dropout 
+     Seems to be primarily about overfitting and regularization - introducing additional information to solve ill-posed problems
+     Regularization is NOT what I want. 
+
+     "The idea of dropout is simplistic in nature. This layer “drops out” a random set of activations in that 
+      layer by setting them to zero. Simple as that. Now, what are the benefits of such a simple and seemingly 
+      unnecessary and counterintuitive process? Well, in a way, it forces the network to be redundant. 
+      By that I mean the network should be able to provide the right classification or output for a specific 
+      example even if some of the activations are dropped out"
+
+**** Max-pooling
+     Used in convolutional NNs. Use biggest value on a window. [[https://leonardoaraujosantos.gitbooks.io/artificial-inteligence/content/pooling_layer.html][example here]]. The goal is to reduce spatial dimensions (but not depth)
+     on a convolutional NN. Not what I want.
+
+**** ReLu [[https://stackoverflow.com/questions/27319931/relu-and-dropout-in-cnn][here]]. (Rectified Linear Unit, Not a layer, the activation function of a single neuron.)
+     The rectifier function is an activation function f(x) = Max(0, x) which can be used by neurons just like 
+     any other activation function, a node using the rectifier activation function is called a ReLu node. 
+     The main reason that it is used is because of how efficiently it can be computed compared to more conventional 
+     activation functions like the sigmoid and hyperbolic tangent, without making a significant difference to 
+     generalisation accuracy. The rectifier activation function is used instead of a linear activation function to 
+     add non linearity to the network, otherwise the network would only ever be able to compute a linear function.
+
+     This part sounds useful "to add non-linearity to the network, otherwise the network would only ever be able to
+     compute a linear function." That is the problem I'm experiencing now. 
+
+**** Convolutional 
+     They aren't fully connected...
+
+**** Softmax (Not a layer, the activation function of a single neuron.)
+     In mathematics, the softmax function, or normalized exponential function is a generalization of the 
+     logistic function that "squashes" a K-dimensional vector z of arbitrary real values to a K-dimensional vector 
+      {\displaystyle \sigma (\mathbf {z} )} \sigma (\mathbf {z} ) of real values in the range [0, 1] that add up to 1.
+     (wikipedia)
+     [[https://github.com/Kulbear/deep-learning-nano-foundation/wiki/ReLU-and-Softmax-Activation-Functions][Softmax and ReLU]].
+
+**** Probabilistic Neural Nets
+   [[https://web.archive.org/web/20101218121158/http://herselfsai.com/2007/03/probabilistic-neural-networks.html][Start here]].
+
+
 *** Confusion matrix
 "A confusion matrix is a technique for summarizing the performance of a classification algorithm."
 Thus if I have one of these, I can use it directly to determine the fitness of the combination of
@@ -396,3 +438,146 @@ gov.nist.sinet.fitness>
 
 Let's go back to the dense messages and see if we still get good results.
 
+
+
+Some bad news (Sort of. Hey, we need an interesting paper!): With more exceptional instances
+things work pretty well.
+
+[:buffer :m1-blocked :m1-busy :m2-busy :m2-starved]
+{:m1-unblocked
+ [{:marking [0 1 0 1 0], :value 0.50118328747075}
+  {:marking [1 1 0 1 0], :value 0.5228651697897436}
+  {:marking [2 1 0 1 0], :value 0.5181440750582226}],
+ :m1-blocked 
+ [{:marking [3 1 0 1 0], :value 0.546424705570647} 
+  {:marking [3 0 1 1 0], :value 0.5841860833305524}]}
+
+...actually the unblocks look goofed up. 
+
+This is not correct (or at least not best):
+
+[:buffer :m1-blocked :m1-busy :m2-busy :m2-starved]
+
+How did m1-starting a job result in there being another job in the buffer?!?!?!
+  {:M [1 1 0 1 0], :fire :m1-start-job, :Mp [2 0 1 1 0], :rate 1.0, :clk 3719.7720757450656, :indx 2984}
+  {:act :m1-blocked, :prev-act :m1-start-job, :indx 2985, :Mp [2 0 1 1 0], :clk 3720.7720757450656}
+
+The "out" log: (it shows the buffer being full, m2 pulling one, m1 completing one which would set it back to N=3.
+
+{:act :m2-start-job, :bf :b1, :j 1082, :n 3, :clk 3719.7720757450656, :line 2981, :mjpact :sm, :m :m2}
+{:act :m1-complete-job, :bf :b1, :j 1085, :n 2, :clk 3719.7720757450656, :line 2982, :mjpact :bj, :m :m1}
+{:act :m1-unblocked, :m :m1, :clk 3719.7720757450656, :line 2983, :mjpact :ub}
+{:act :m1-start-job, :j 1086, :jt :jobType1, :ends 3720.7720757450656, :clk 3719.7720757450656, :line 2984, :mjpact :aj, :m :m1}
+
+The above  would be easier to read as this:
+
+{:act :m2-start-job, :bf :b1, :j 1082, :n 3,    :clk 3719.7720757450656, :line 2981, :mjpact :sm, :m :m2}
+{:act :m1-unblocked, :m :m1,                    :clk 3719.7720757450656, :line 2983, :mjpact :ub}
+{:act :m1-complete-job, :bf :b1, :j 1085, :n 2, :clk 3719.7720757450656, :line 2982, :mjpact :bj, :m :m1} (move job)
+{:act :m1-start-job, :j 1086, :jt :jobType1,    :clk 3719.7720757450656, :ends 3720.7720757450656, :line 2984, :mjpact :aj, :m :m1}
+
+FIX MJPdes: 
+- MJPdes ought to report things upstream happening first. (sort that way (upstream? x y)
+- Everything would be easier to read if :clk was first, then :act. 
+
+** <2017-10-18 Wed>
+
+#_(defn reliable? [m]
+    (= ReliableMachine (type m)))
+
+#_(defn machine? [m]
+  (let [t (type m)]
+    (or (= ExpoMachine t) (= ReliableMachine t) (= Machine t))))
+
+#_(defn buffer? [b]
+  (let [t (type b)]
+    (or (= Buffer t) (= InfiniteBuffer t) (= DedicatedBuffer t))))
+
+** <2017-10-19 Thu>
+
+I reviewed PNNs and found a nice Python implementation. The notebook is [[file:~/Documents/git/sinet/data/SCADA-logs/m2-j2-n3-block-mild-interpreted.clj::{:act%20:m1-blocked,%20:prev-act%20:m1-start-job,%20:indx%20710,%20:Mp%20%5B3%200%201%201%200%5D,%20:clk%202206.0879216608246}][here]].
+
+** <2017-10-20 Fri>
+
+I need to review my rationale for any of this: It is clear that I need a means to 
+explain messages that do not correspond to transitions. I need to discover the 
+pattern associated with these other messages, if such a pattern exists. The NN is
+just the way to do this. Do we associate a semantics to these messages? We can assume
+that in general that may not be possible, but there is a "PN semantics" in the case
+of blocking and starvation that it would be useful to know. (Likewise for competition for
+resources and deadlocking). In the blocking/starvation cases, there is still the matter
+of determining where the problem buffer is. Once starving happens it continues upstream, 
+and blocking continues downstream. (You could check for that in the causal model.)
+Likewise could look at non-delivery of a part from a feeder line. 
+
+[Think about what is being inferred. 
+
+ What role do the "starving/blocking" places have? Can they be added?
+
+- Define the steps 
+   - recognition of a pattern
+   - hypothesis generation
+   - hypothesis testing (causal? comparison?)
+
+** <2017-10-21 Sat>
+
+I implement the PNN algorithm from [[http://www.personal.reading.ac.uk/~sis01xh/teaching/CY2D2/Pattern3.pdf][here]].
+
+The key think I'm learning is that you can have the same marking associated with many classes. 
+But if a class only has one datapoint, it wins when you hit it. This is good! This 
+might be useful for distinguishing the size of buffers with different "best-interpretations."
+
+All of this will be useful when I want to compare to the steady-state behavior using 
+a parametric infinitessimal! 
+
+(ppprint (subvec (best-interpretation pnpn (-> (app-info) :problem :scada-log)) 0 300))
+
+Interestingly, starve and unstarve are coming up as both ordinary and exceptional. 
+For the time being, this shouldn't matter much given that there is only 1 class in 
+these exceptional markings. 
+
+{:m2-unstarved {[0 0 1 1 0] 14},
+ :m1-unblocked {[2 1 0 1 0] 30},
+ :m2-starved {[0 0 1 0 1] 14},
+ :ordinary
+ {[0 1 0 1 0] 203,
+  [2 0 1 1 0] 511,
+  [1 1 0 1 0] 263,
+  [3 0 1 0 1] 248,
+  [1 0 1 1 0] 466,
+  [0 1 0 0 1] 14,
+  [2 1 0 1 0] 248,
+  [3 0 1 1 0] 248,
+  [1 0 1 0 1] 217,
+  [0 0 1 1 0] 217,
+  [0 0 1 0 1] 14,
+  [2 0 1 0 1] 263},
+ :m1-blocked {[3 0 1 1 0] 30}}
+
+;;; Results with sigma = 1.0
+{[0 1 0 1 0] [:m2-unstarved 0.36787944117144233],
+ [2 0 1 1 0] [:m1-blocked 0.6065306597126334],
+ [1 1 0 1 0] [:m1-unblocked 0.6065306597126334],
+ [3 0 1 0 1] [:m1-blocked 0.3678794411714423],
+ [1 0 1 1 0] [:m2-unstarved 0.6065306597126334],
+ [0 1 0 0 1] [:m2-starved 0.36787944117144233],
+ [2 1 0 1 0] [:m1-unblocked 1.0],
+ [3 0 1 1 0] [:m1-blocked 1.0],
+ [1 0 1 0 1] [:m2-starved 0.6065306597126334],
+ [0 0 1 1 0] [:m2-unstarved 1.0],
+ [0 0 1 0 1] [:m2-starved 1.0],
+ [2 0 1 0 1] [:ordinary 0.3312510892460261]}
+
+;;; Results with sigma = 0.2 MAKES PERFECT SENSE!
+{[0 1 0 1 0] [:ordinary 0.06971187503880233],
+ [2 0 1 1 0] [:ordinary 0.17548168297989752],
+ [1 1 0 1 0] [:ordinary 0.09031651123868557],
+ [3 0 1 0 1] [:ordinary 0.0851651717421801],
+ [1 0 1 1 0] [:ordinary 0.16002840419305475],
+ [0 1 0 0 1] [:ordinary 0.0048076923087272344],
+ [2 1 0 1 0] [:m1-unblocked 1.0],
+ [3 0 1 1 0] [:m1-blocked 1.0],
+ [1 0 1 0 1] [:ordinary 0.07451958526421719],
+ [0 0 1 1 0] [:m2-unstarved 1.0],
+ [0 0 1 0 1] [:m2-starved 1.0],
+ [2 0 1 0 1] [:ordinary 0.09031652915550199]}
