@@ -4,15 +4,13 @@
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :global-vars {*assert* true}
-  :dependencies [[org.clojure/clojure        "1.9.0-beta2"]
-                 ;[org.clojure/tools.reader   "1.1.0"] ; this one can probably go. 
-                 [org.clojure/clojurescript  "1.9.946"]
-                 [org.clojure/tools.trace    "0.7.9"]
-                 ;[medley                     "1.0.0"] ; this one can probably go. 
-                 [org.clojure/core.async     "0.3.443"]
-                 [com.cemerick/piggieback    "0.2.2"]
-                 [com.stuartsierra/component "0.3.2"]
-                 [environ "1.1.0"]
+  :dependencies [[org.clojure/clojure            "1.9.0-beta2"]
+                 [org.clojure/clojurescript      "1.9.946"]
+                 [org.clojure/tools.trace        "0.7.9"]
+                 [org.clojure/core.async         "0.3.443"]
+                 [com.cemerick/piggieback        "0.2.2"]
+                 [com.stuartsierra/component     "0.3.2"]
+                 [environ                        "1.1.0"]
                  [ch.qos.logback/logback-classic "1.2.3"] 
                  [org.clojure/tools.logging      "0.4.0"]
                  
@@ -29,6 +27,8 @@
                  [re-frisk                   "0.5.0"] 
                  [org.webjars/bootstrap      "3.3.7"] ; "4.0.0-alpha" had problems with menu
                  [quil                       "2.6.0"]
+
+                 [aysylu/loom                "1.0.0"]
 
                  [gov.nist/spntools          "0.1.0-SNAPSHOT" :exclusions [org.clojure/clojure]]]
 

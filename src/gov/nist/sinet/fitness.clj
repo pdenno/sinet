@@ -2,6 +2,8 @@
   "Compute the fitness of an individual"
   (:require [clojure.pprint :refer (cl-format pprint)]
             [clojure.set :as set]
+            [loom.alg :as alg]
+            [loom.graph :as graph]
             [gov.nist.spntools.core :as pn :refer :all]
             [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp)]
             [gov.nist.spntools.util.reach :as pnr :refer (reachability renumber-pids)]
@@ -9,7 +11,6 @@
             [gov.nist.sinet.simulate :as sim :refer-only (simulate)]
             [gov.nist.sinet.util :as util :refer (app-info reset)]
             [gov.nist.sinet.scada :as scada]
-            [gov.nist.sinet.nn :as nn]
             [gov.nist.sinet.pnn :as pnn]))
 
 ;;; ToDo: Currently fitness only concerns violation of partial orders it should
@@ -245,8 +246,6 @@
 ;;;====================================================================================
 ;;; Exceptional Fitness
 ;;;====================================================================================
-(declare navigate-qpn)
-
 ;;; POD reachability graph is apt to be too sensitive to initial marking???
 ;;; There is a loose end in this design concerning the PN's marking determining its rgraph. 
 ;;; Some markings may not necessarily enable the best interpretation of the sdata.
@@ -255,45 +254,6 @@
 ;;; Also, I would perhaps do the workflow analysis after I do the SCADA analysis
 ;;; (and maybe reconceive its implementation to exploit the SCADA analysis work).
 
-#_(defn best-nav
-  "Picking various starting points in the SCADA log, return the 
-   longest path of it that can be walked using the QPN." 
-  [inv]
-  (let [rgraph (pnr/simple-reach (:pn inv))
-        exceptional (set/difference scada-msg-types (set (map :fire rgraph)))
-        msg1 (first scada-msgs)
-        start-marks (map :Mp (filter #(= (:fire %) (:name msg1)) rgraph))]
-    (map #(navigate-qpn (:pn inv) rgraph exceptional % 0 (dec (count scada-msgs))) start-marks)))
-
-;;; The set of exceptional message types is decided on a per-QPN basis.
-;;; Whatever is in the SCADA log but not a QPN event is exceptional for that QPN. 
-
-;;; POD I think it is enough to always start at position 0 in the SCADA log because
-;;;     exceptional situations are the only thing in the way. 
-;;;     But is this still sensitive to to the initial marking???
-(def scada-msgs nil) ; <================================================== POD
-(defn navigate-qpn
-  "Using the QPN, try to walk the SCADA log from the argument marking and associated 
-   starting position in the log to the argument stop position.
-   Return a map describing how far it was possible to navigate and what markings were
-   associated with the exceptional messages encountered."
-  [pn rgraph excepts mark start stop]
-  (let [pn (pnr/renumber-pids pn)]
-    (loop [result {:start start :ix (+ start 1) :mark mark :path [] :excepts {}}]
-      (let [links (filter #(= (:M %) (:mark result)) rgraph)
-            event (:name (nth scada-msgs (:ix result)))
-            link  (some #(when (= event (:fire %)) %) links)]
-        (if (or (and (not link)
-                     (not (some #(= event %) excepts)))
-                (>= (inc (:ix result)) stop))
-          result 
-          (recur (if link
-                   (-> result
-                       (update :ix inc)
-                       (assoc :mark (:Mp link)))
-                   (-> result
-                       (update :ix inc)
-                       (update-in [:excepts event] #(distinct (conj %1 %2)) mark)))))))))
 
 ;;; Idea: This (excep-starting-mark) could force an initial-marking on the PN.
 ;;;       That might be a good thing!
@@ -332,11 +292,12 @@
       (rest paths)
       (into (vec (map #(conj (first paths) %) good-steps)) (rest paths))))) ; depth-first
 
-;;; (starting-link reach1 (subvec (-> (util/app-info) :problem :scada-log) 0 100) 0)
+;;; (starting-link pn (subvec (-> (util/app-info) :problem :scada-log) 0 100) 0)
 (defn starting-links
   "Return all links that interpret the SCADA log well from start-indx"
-  [rgraph data start-indx]
-  (let [winners (atom [])]
+  [pn data start-indx]
+  (let [rgraph (:rgraph pn)
+        winners (atom [])]
     (loop [paths (map
                   vector
                   (vec
@@ -366,8 +327,8 @@
           (assoc :clk  (:clk msg))
           (assoc :indx (:line msg))))))
 
-;;; (interpret-scada reach1 (subvec (-> (util/app-info) :problem :scada-log) 0 100))
-;;; (interpret-scada reach1 (subvec (-> (util/app-info) :problem :scada-log) 0 100)
+;;; (interpret-scada pn (subvec (-> (util/app-info) :problem :scada-log) 0 100))
+;;; (interpret-scada pn (subvec (-> (util/app-info) :problem :scada-log) 0 100)
 ;;;                  {:M [3 0 1 1 0], :fire :m2-complete-job, :Mp [3 0 1 0 1], :rate 1.0, :indx 0})
 ;;; POD In production, the arg list will be [pn data start-link] -- data will be abbreviated. 
 (defn interpret-scada
@@ -375,11 +336,12 @@
    Return a sequence where an element is:
     - a link (if an ordinary message is processed), or
     - a map naming an exceptional message (if an such a message is processed)."
-  [rgraph data start-link] 
-  (let [last-indx (-> data last :line)]
+  [pn log start-link] 
+  (let [rgraph (:rgraph pn)
+        last-indx (-> log last :line)]
     (loop [interp (vector start-link)]
       (let [indx (-> interp last :indx)
-            next-msg (if (== last-indx indx) nil (nth data (inc indx)))
+            next-msg (if (== last-indx indx) nil (nth log (inc indx)))
             matched  (when next-msg (next-match next-msg (last interp) rgraph))]
         (cond (not next-msg)   interp
               (not matched)    (conj interp {:failed-prior (nth interp (- (count interp) 2))
@@ -387,35 +349,27 @@
                                              :failed-on-msg next-msg})
               :otherwise (recur (conj interp matched)))))))
 
-(defn best-interpretation
-  "Find the best starting link and interpretation of the SCADA log. 
-   Return a map {:rgraph x, :start-link y :interpreted-log z}.
-   PN should have a marking key."
+;;; POD this is probably the most time consuming part of the pnn process. 
+(defn first-interpretation
+  "Return a vector of all the PN links/exceptional messages that interprets the log."
   [pn scada-log]
-  (let [pn (pnr/renumber-pids pn)
-        rgraph (pnr/simple-reach pn)]
-    (loop [links (starting-links rgraph scada-log 0)]
-      (let [interp (interpret-scada rgraph scada-log (first links))]
-        (cond
-          (empty? links) nil, 
-          (not (contains? (last interp) :failed-on-msg))
-          {:start-link (first links)
-           :marking-key (:marking-key pn)
-           :rgraph rgraph
-           :interpreted-log interp},
-          true (recur (rest links)))))))
-
-;;;====  PNN ==========================================
+  (loop [links (:starting-links pn)]
+    (let [interp (interpret-scada pn scada-log (first links))]
+      (cond
+        (empty? links) nil, 
+        (not (contains? (last interp) :failed-on-msg))
+        interp
+        true (recur (rest links))))))
 
 ;;; You can have the same marking associated with more than one class. The more times you have
 ;;; it associated with a class, the stronger the result will be for that class. To make
 ;;; the following efficient, I'll have to count the number of times each marking is associated
 ;;; with each class. Then I'll use that as a factor in calculating the PDF. 
-(defn compute-pnn-data
+(defn compute-msg-table
   "Return a map indicating what markings are associated with what message types, 
    where message types are either ':ordinary' or some exceptional message type."
   [pn scada-log]
-  (let [interp (best-interpretation pn scada-log)
+  (let [interp (first-interpretation pn scada-log)
         msg-types (conj (-> (app-info) :problem :exceptional-msgs) :ordinary)
         markings (map :M (:rgraph interp))
         report (reduce (fn [sum msg] 
@@ -427,139 +381,68 @@
                                            #(zipmap markings (repeat (count markings) 0))))
                        (:interpreted-log interp))]
     ;; Outer map is indexed by msg-types; inner map in indexed by markings, values are count.
-    ;; Eliminate entries where the count is zero. 
-    (reduce (fn [map key]
-              (update-in map [key]
-                         #(persistent!
-                           (reduce (fn [m k] (if (== 0 (get m k)) (dissoc! m k) m))
-                                   (transient %)
-                                   (keys %)))))
-            report
-            msg-types)))
+    ;; Eliminate entries where the count is zero.
+    (assoc pn :msg-table
+           (reduce (fn [map key]
+                     (update-in map [key]
+                                #(persistent!
+                                  (reduce (fn [m k] (if (== 0 (get m k)) (dissoc! m k) m))
+                                          (transient %)
+                                          (keys %)))))
+                   report
+                   msg-types))))
 
-    
-    
-    
+(defn rgraph2loom-graph
+  "Return a loom weighted-digraph for the argument simple reachability graph."
+  [rgraph]
+  (apply graph/weighted-digraph
+         (map #(vector (:M %) (:Mp %) 1) rgraph)))
 
-            
+(defn graph-distance-fn
+  "Return a function that calculates graph distance for the PN."
+  [pn]
+  (let [graph (rgraph2loom-graph (-> pn :rgraph))]
+    (fn [from to]
+      (alg/dijkstra-path graph from to))))
 
-                           
-    
+;;; (parzen-pdf-msg (:ordinary example-interp) 0.2)
+(defn parzen-pdf-msg
+  "Return the parzen-pdf function for the argument class using message counts."
+  [pn]
+   (let [msg-table (:msg-table pn)
+         sigma (:sigma pn)
+         dist-fn (:distance-fn pn)
+         size (apply + (vals msg-table)) ; the total number of messages
+         sig2 (* 2 sigma sigma)]
+     (fn [x]
+       (* (/ 1 size)
+          (reduce (fn [sum [mark cnt]] ; cnt the number of messages with this marking
+                    (+ sum (* cnt (Math/exp (- (/ (dist-fn mark x) sig2))))))
+                  0.0
+                  msg-table)))))
 
-
-
-#_(defn compute-pnn-data
-  "Return a map indicating what markings are associated with what message types, 
-   where message types are either ':ordinary' or some exceptional message type."
-  [pn scada-log]
-  (let [interp (best-interpretation pn scada-log)
-        markings (-> (map :M (:rgraph interp)) set)
-        excepts (->> (filter #(contains? % :act) (:interpreted-log interp))
-                     (map #(dissoc % :clk))
-                     (map #(dissoc % :indx))
-                     distinct)
-        classes (conj (distinct (map :act excepts)) :ordinary)
-        emarks (set (map :Mp excepts))
-        data (reduce
-              (fn [data mark]
-                (if (contains? emarks mark)
-                  (update-in data
-                             [(some #(when (= (:Mp %) mark) (:act %)) excepts)]
-                             #(conj % mark))
-                  (update-in data [:ordinary] #(conj % mark))))
-              (zipmap classes (repeat (count classes) []))
-              markings)]
-    data))
-
-
-        
-    
-
-
-
-
-;;;====  END PNN ======================================
-
-;;; :marking-key [:buffer :m1-blocked :m1-busy :m2-busy :m2-starved],
-;;; It blocks after [2 0 1 1 0]
-(def pnpn (-> "data/PNs/m2-inhib-n3.xml" pnml/read-pnml pnr/renumber-pids))
-
-;;; POD NYI
-(defn pick-net 
-  "Given a list of NN, choose the most accurate one for its message."
-  [nets]
-  (let [result (filter nn/net? nets)]
-    (when (> (count result) 1)
-      (println "Multiple nets. Pick NYI."))
-    (first nets)))
-  
-(defn train-msg
-  "Train the net for the msg-type using the log interpretation."
-  [net interp msg-type]
-  (let [train-data (:interpreted-log interp)
-        last-indx (-> train-data last :indx)
-        fires-on (atom {:msg-type msg-type})]
-    (loop [net net
-           indx 0]
-      (if (>= indx last-indx) ; terminate
-        (-> net
-            (assoc :fires-on @fires-on)
-            (assoc :msg-type msg-type)
-            (assoc :start-link (:start-link interp)))
-        (let [msg (nth train-data indx)
-              label (if (= (:act msg) msg-type) 1 0)           ; (rand-int 2)
-              inputs (cond (== label 1)             (:Mp msg), ; (noise) 
-                           (contains? msg :fire)    (:M  msg), ; (noise) 
-                           :otherwise :skip)] ; an exceptional message but not the one I'm learning. 
-          (when (== label 1) ; track markings it is firing on
-            ;;(println msg)
-            (if (contains? @fires-on (:Mp msg))
-              (swap! fires-on #(update % (:Mp msg) inc))
-              (swap! fires-on #(assoc  % (:Mp msg) 1))))
-          (recur
-           (if (= inputs :skip)
-             net
-             (nn/train-step net
-                            (vec (map double inputs))
-                            (vector (double label))))
-           (inc indx)))))))
-
-(defn train-all
-  "Given a SCADA log interpretation, return a map providing the best NN for each message."
-  [interp]
-  (let [size   (-> interp :marking-key count)
-        msgs   (-> (app-info) :problem :exceptional-msgs)]
-    (zipmap msgs
-            (map #(train-msg (nn/make-net size 1 size) interp %) msgs))))
-
-(defn exceptional-markings
-  "Return a vector of {:marking x :value y} indicating that the 
-   marking associates with the exceptional class of the neural net."
-  [net markings]
-  (let [results (zipmap markings
-                         (map #(first (nn/eval-net net %)) markings))]
-    (reduce (fn [success [mark class-val]]
-              (if (> class-val 0.5)
-                (conj success {:marking mark :value class-val})
-                success))
-            []
-            results)))
-
-;;; (tryme pnpn (-> (app-info) :problem :scada-log))
-#_(defn tryme [pn scada-log]
-  (let [interp (best-interpretation pn scada-log) ; POD stop after have all markings. 
-        nets (train-all interp)
-        markings (distinct (map :M (:rgraph interp)))]
-    (reduce (fn [res [msg net]]
-              (assoc res msg (exceptional-markings net markings)))
+(defn choose-winners
+  "Map of the winners for each marking."
+  [pn]
+  (let [msg-table  (:msg-table pn)
+        dist-fn    (:distance-fn pn)
+        sigma      (:sigma pn)
+        classes    (keys msg-table)
+        parzen-fns (zipmap classes
+                           (map #(parzen-pdf-msg (% msg-table) sigma dist-fn) classes))
+         marks (distinct
+                (mapcat keys (map #(get msg-table %) classes)))]
+    (reduce (fn [results mark]
+              (let [result (reduce (fn [[best-class best-score] class]
+                                     (let [my-score ((class parzen-fns) mark)]
+                                       (if (> my-score best-score)
+                                         [class  my-score]
+                                         [best-class best-score])))
+                                   [nil 0]
+                                   classes)]
+                (assoc results mark result)))
             {}
-            nets)))
-
-(defn noise []
-  (vec (repeatedly 5 #(rand-int 2))))
-
-
-
+            marks)))
 
 ;;; We generate the reachability graph (including non-tangible states) and test the
 ;;; complete SCADA log against it. We aren't running the QPN, rather we are testing
@@ -571,7 +454,16 @@
   "Return a value assessing how well the individual addresses 
    exceptional circumstances (blocking and starvation)."
   [inv]
-  0)
+  (let [log (-> (app-info) :problem :scada-log)]
+    (as-> (:pn inv) ?pn
+      (pnr/renumber-pids ?pn) ; assign :marking-key
+      (assoc ?pn :rgraph (pnr/simple-reach ?pn))
+      (assoc ?pn :starting-links (starting-links ?pn log 0))
+      (assoc ?pn :msg-table (compute-msg-table ?pn log))
+      (assoc ?pn :distance-fn (graph-distance-fn ?pn))
+      (assoc ?pn :sigma 0.2)
+      (assoc ?pn :parzen-pdf-fn (parzen-pdf-msg ?pn))
+      (assoc ?pn :winners (choose-winners ?pn)))))
 
 ;;; These are useful to understanding how things work. 
 ;;; This one for an Eden INV:
@@ -630,6 +522,3 @@
                #_(sim/simulate :max-steps steps))]
     #_(workflow-fitness (util/map->Inv {:pn pn}))
     pn))
-
-
-

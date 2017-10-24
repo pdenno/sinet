@@ -36,7 +36,8 @@
 
 
 * Sinet TODOs
-** TODO Try a more mild blocking situation.
+** DONE Try a more mild blocking situation.
+   CLOSED: [2017-10-23 Mon 19:05]
 ** DONE Fix bug in pnr/simple-reach. See bug <2017-10-15 Sun>
    CLOSED: [2017-10-15 Sun 18:13]
 ** TODO Consider the possibility/advantages of an 'abbreviated' reachability graph. 
@@ -64,9 +65,36 @@
  I need to generate blocking/starving messages ONLY when the net sojourns at blocking/starving. 
  So simulation has to be better and I need to distinguish these immediate transitions some how. 
 
-** TODO Find out a way to find the pathname "to a namespace" so I can run tests on dependent packages. 
-** TODO Fix MJPdes as described in log <2017-10-17 Tue>
-*** IDEA: Maybe award fitness to PNs that represent it. 
+** TODO Find a way to find the pathname "to a namespace" so I can run tests on dependent packages. 
+** TODO Create a project for simple neural nets. Sinet log date <2017-10-23 Mon> has some code for it. 
+
+** DONE Fix MJPdes as described in log <2017-10-17 Tue>
+   CLOSED: [2017-10-22 Sun 14:25]
+* Discussion
+** Rationale for PNN
+It is clear that I need a means to explain messages that do not correspond to transitions. 
+I need to discover the pattern associated with these other messages, if such a pattern exists. 
+The PNN is just the way to do this. Do we associate a semantics to these messages? We can assume
+that in general that may not be possible, but there is a "PN semantics" in the case
+of blocking and starvation that it would be useful to know. (Likewise for competition for
+resources and deadlocking). In the blocking/starvation cases, there is still the matter
+of determining where the problem buffer is. Once starving happens it continues upstream, 
+and blocking continues downstream. (You could check for that in the causal model.)
+Likewise could look at non-delivery of a part from a feeder line. 
+
+*** Think about the role of PNN in causal modeling
+The nice thing here is that using the parametric infinitessimal, I'll have real-numbered 
+quantities of tokens in places. The PNN essentially shows the state changes while I move around the parameters.
+
+*** Think about what is being inferred. 
+
+*** What role do the "starving/blocking" places have? Can they be added?
+
+*** Define the steps 
+   - recognition of a pattern
+   - hypothesis generation
+   - hypothesis testing (causal? comparison?)
+** IDEA: Maybe award fitness to PNs that represent it. 
 ***       Award a little less to those who can at least cope with it with a NN. 
 
 * Sinet Log *
@@ -499,26 +527,7 @@ I reviewed PNNs and found a nice Python implementation. The notebook is [[file:~
 
 ** <2017-10-20 Fri>
 
-I need to review my rationale for any of this: It is clear that I need a means to 
-explain messages that do not correspond to transitions. I need to discover the 
-pattern associated with these other messages, if such a pattern exists. The NN is
-just the way to do this. Do we associate a semantics to these messages? We can assume
-that in general that may not be possible, but there is a "PN semantics" in the case
-of blocking and starvation that it would be useful to know. (Likewise for competition for
-resources and deadlocking). In the blocking/starvation cases, there is still the matter
-of determining where the problem buffer is. Once starving happens it continues upstream, 
-and blocking continues downstream. (You could check for that in the causal model.)
-Likewise could look at non-delivery of a part from a feeder line. 
-
-[Think about what is being inferred. 
-
- What role do the "starving/blocking" places have? Can they be added?
-
-- Define the steps 
-   - recognition of a pattern
-   - hypothesis generation
-   - hypothesis testing (causal? comparison?)
-
+See discussion on keeping my head straight in Discussion area. 
 ** <2017-10-21 Sat>
 
 I implement the PNN algorithm from [[http://www.personal.reading.ac.uk/~sis01xh/teaching/CY2D2/Pattern3.pdf][here]].
@@ -581,3 +590,218 @@ these exceptional markings.
  [0 0 1 1 0] [:m2-unstarved 1.0],
  [0 0 1 0 1] [:m2-starved 1.0],
  [2 0 1 0 1] [:ordinary 0.09031652915550199]}
+
+** <2017-10-22 Sun>
+
+Yesterday I got PNNs working nicely! If only every day were that productive!
+This morning (well, until 2:30PM!) I cleaned up MJPdes. 
+Today we experiment with the idea of replacing euclid-dist2 with some notion of "pn network distance."
+
+- Places are dimensions, movement can be along one or more dimensions. 
+- Transitions are the things that determine movement; only dimensions referenced in the
+  transition change between states. 
+- Each marking has an associated classification. Markings that are very dissimilar from the
+  classified marking should have a large distance measure from it. EUCLIDEAN DISTANCE ENSURES THIS.
+  The PDF distributes the classification among each training instance. 
+
+- I was concerned about the proximity of activity over time. That changes according to rates. 
+  If one part of the network has high-rate transitions, we'd expect more activity from it. But so what?
+- I was thinking about "locality of reference" -- that with each transition, only connected places change. 
+
+--> Maybe then what I'm after is to use the distance between transitions in the measure of 
+    distance between states. 
+    Q: But what does that mean? 
+    A: A transition occurs -- we want to learn the relationship between transition and the emission of 
+       exceptional messages. This is a temporal relationship (E.g. How many steps after firing X do
+       I see exceptional message M?) This isn't judged by pn-path stuff, it is by reachability graph!
+
+Maybe just do the Euclidean distance between markings times the number of steps. 
+
+- There is nothing preventing 
+- Transitions that are far from the 
+
+(defn paths-to
+  "Return the paths from FROM to TO (both are names of places or transitions) 
+   in exactly STEPS steps (counting places, transitions and arcs)."
+  [pn from to nsteps & {:keys [back?]}]
+
+** <2017-10-23 Mon>
+
+Another productive day (without really working too hard!). 
+The distance function that I'm using is strictly distance between nodes in the rgraph. 
+I use loom to calculate this (20 minutes work). 
+I'm moving the parzen-pdf-msg stuff from pnn to fitness. 
+
+*** This stuff isn't going to be used
+#_(defn min-pn-steps
+  "Return the pn distance from FROM to TO in either direction."
+  [pn [from to]]
+  (if (= from to)
+    0
+    (loop [cnt 1]
+      (if (> cnt 100) 1000, ; POD 1000, it is probably down stream
+          (if-let [path (or (not-empty (pnu/paths-to pn from to cnt))
+                            (not-empty (pnu/paths-to pn to from cnt)))]
+            (/ (-> path first count) 4) ; counts arcs, transitions; I want place to place.
+            (recur (inc cnt)))))))
+
+#_(defn pn-distance-table
+  "Return a table of all pn distances"
+  [pn]
+  (let [places (map :name (:places pn))
+        keys (for [from places
+                   to   places]
+               [from to])]
+    (zipmap keys
+            (map #(min-pn-steps pn %) keys))))
+
+
+*** This stuff could go in project just of simple neural nets
+;;; :marking-key [:buffer :m1-blocked :m1-busy :m2-busy :m2-starved],
+;;; It blocks after [2 0 1 1 0]
+
+;;; POD NYI
+#_(defn pick-net 
+  "Given a list of NN, choose the most accurate one for its message."
+  [nets]
+  (let [result (filter nn/net? nets)]
+    (when (> (count result) 1)
+      (println "Multiple nets. Pick NYI."))
+    (first nets)))
+  
+#_(defn train-msg
+  "Train the net for the msg-type using the log interpretation."
+  [net interp msg-type]
+  (let [train-data (:interpreted-log interp)
+        last-indx (-> train-data last :indx)
+        fires-on (atom {:msg-type msg-type})]
+    (loop [net net
+           indx 0]
+      (if (>= indx last-indx) ; terminate
+        (-> net
+            (assoc :fires-on @fires-on)
+            (assoc :msg-type msg-type)
+            (assoc :start-link (:start-link interp)))
+        (let [msg (nth train-data indx)
+              label (if (= (:act msg) msg-type) 1 0)           ; (rand-int 2)
+              inputs (cond (== label 1)             (:Mp msg), ; (noise) 
+                           (contains? msg :fire)    (:M  msg), ; (noise) 
+                           :otherwise :skip)] ; an exceptional message but not the one I'm learning. 
+          (when (== label 1) ; track markings it is firing on
+            ;;(println msg)
+            (if (contains? @fires-on (:Mp msg))
+              (swap! fires-on #(update % (:Mp msg) inc))
+              (swap! fires-on #(assoc  % (:Mp msg) 1))))
+          (recur
+           (if (= inputs :skip)
+             net
+             (nn/train-step net
+                            (vec (map double inputs))
+                            (vector (double label))))
+           (inc indx)))))))
+
+#_(defn train-all
+  "Given a SCADA log interpretation, return a map providing the best NN for each message."
+  [interp]
+  (let [size   (-> interp :marking-key count)
+        msgs   (-> (app-info) :problem :exceptional-msgs)]
+    (zipmap msgs
+            (map #(train-msg (nn/make-net size 1 size) interp %) msgs))))
+
+#_(defn exceptional-markings
+  "Return a vector of {:marking x :value y} indicating that the 
+   marking associates with the exceptional class of the neural net."
+  [net markings]
+  (let [results (zipmap markings
+                         (map #(first (nn/eval-net net %)) markings))]
+    (reduce (fn [success [mark class-val]]
+              (if (> class-val 0.5)
+                (conj success {:marking mark :value class-val})
+                success))
+            []
+            results)))
+
+;;; (tryme pnpn (-> (app-info) :problem :scada-log))
+#_(defn tryme [pn scada-log]
+  (let [interp (best-interpretation pn scada-log) ; POD stop after have all markings. 
+        nets (train-all interp)
+        markings (distinct (map :M (:rgraph interp)))]
+    (reduce (fn [res [msg net]]
+              (assoc res msg (exceptional-markings net markings)))
+            {}
+            nets)))
+
+#_(defn noise []
+  (vec (repeatedly 5 #(rand-int 2))))
+
+*** This stuff is what I used prior to recognizing that I need occurrence counts for the parzen-fn
+It has been replaced by compute-msg-table.
+(defn compute-pnn-data
+  "Return a map indicating what markings are associated with what message types, 
+   where message types are either ':ordinary' or some exceptional message type."
+  [pn scada-log]
+  (let [interp (best-interpretation pn scada-log)
+        markings (-> (map :M (:rgraph interp)) set)
+        excepts (->> (filter #(contains? % :act) (:interpreted-log interp))
+                     (map #(dissoc % :clk))
+                     (map #(dissoc % :indx))
+                     distinct)
+        classes (conj (distinct (map :act excepts)) :ordinary)
+        emarks (set (map :Mp excepts))
+        data (reduce
+              (fn [data mark]
+                (if (contains? emarks mark)
+                  (update-in data
+                             [(some #(when (= (:Mp %) mark) (:act %)) excepts)]
+                             #(conj % mark))
+                  (update-in data [:ordinary] #(conj % mark))))
+              (zipmap classes (repeat (count classes) []))
+              markings)]
+    data))
+
+
+        
+*** This stuff was my first pass at interpretation???
+#_(defn best-nav
+  "Picking various starting points in the SCADA log, return the 
+   longest path of it that can be walked using the QPN." 
+  [inv]
+  (let [rgraph (pnr/simple-reach (:pn inv))
+        exceptional (set/difference scada-msg-types (set (map :fire rgraph)))
+        msg1 (first scada-msgs)
+        start-marks (map :Mp (filter #(= (:fire %) (:name msg1)) rgraph))]
+    (map #(navigate-qpn (:pn inv) rgraph exceptional % 0 (dec (count scada-msgs))) start-marks)))
+
+;;; The set of exceptional message types is decided on a per-QPN basis.
+;;; Whatever is in the SCADA log but not a QPN event is exceptional for that QPN. 
+
+;;; POD I think it is enough to always start at position 0 in the SCADA log because
+;;;     exceptional situations are the only thing in the way. 
+;;;     But is this still sensitive to to the initial marking???
+(defn navigate-qpn
+  "Using the QPN, try to walk the SCADA log from the argument marking and associated 
+   starting position in the log to the argument stop position.
+   Return a map describing how far it was possible to navigate and what markings were
+   associated with the exceptional messages encountered."
+  [pn rgraph excepts mark start stop]
+  (let [pn (pnr/renumber-pids pn)]
+    (loop [result {:start start :ix (+ start 1) :mark mark :path [] :excepts {}}]
+      (let [links (filter #(= (:M %) (:mark result)) rgraph)
+            event (:name (nth scada-msgs (:ix result)))
+            link  (some #(when (= event (:fire %)) %) links)]
+        (if (or (and (not link)
+                     (not (some #(= event %) excepts)))
+                (>= (inc (:ix result)) stop))
+          result 
+          (recur (if link
+                   (-> result
+                       (update :ix inc)
+                       (assoc :mark (:Mp link)))
+                   (-> result
+                       (update :ix inc)
+                       (update-in [:excepts event] #(distinct (conj %1 %2)) mark)))))))))
+
+
+As is apparent from the four subtopics above, I cut out a lot of code today!
+
+Refactors stuff has not yet been tested. 

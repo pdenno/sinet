@@ -72,6 +72,7 @@
   (testing "That a PN matching the log scores zero."
     (is (=* 0.0 (m2-inhib-bas-workflow-fit 200) 0.01))))
 
+;;; POD Better than this would be to use the new MJPdes output directly. (Don't mess with app-info.)
 (defn problem-setting-fixture
   "Set the 'problem' (the log we look at) to the m2-inhib-bas problem."
   [f]
@@ -83,3 +84,74 @@
     (util/big-reset)))
 
 (use-fixtures :once problem-setting-fixture)
+
+(def example-msgs
+  {:m2-unstarved {[0 0 1 1 0] 14},
+   :m1-unblocked {[2 1 0 1 0] 30},
+   :m2-starved   {[0 0 1 0 1] 14},
+   :m1-blocked   {[3 0 1 1 0] 30},
+   :ordinary
+   {[0 1 0 1 0] 203,
+    [2 0 1 1 0] 511,
+    [1 1 0 1 0] 263,
+    [3 0 1 0 1] 248,
+    [1 0 1 1 0] 466,
+    [0 1 0 0 1] 14,
+    [2 1 0 1 0] 248,
+    [3 0 1 1 0] 248,
+    [1 0 1 0 1] 217,
+    [0 0 1 1 0] 217,
+    [0 0 1 0 1] 14,
+    [2 0 1 0 1] 263}})
+
+(defn pnn-all-ok?
+  "Returns true if calculated are as expected."
+  [calculated expected]
+  (every? (fn [[mark [msg value]]]
+            (and (= msg    (-> (get expected mark) first))
+                 (=* value (-> (get expected mark) second) 0.00001)))
+          calculated))
+
+;;; There are more state that this in the PN, but not all occurred in the 3000 msgs logged. That's okay. 
+(deftest pnn-for-msgs
+  (testing "that we get good values processing real messages."
+    ;; Results with sigma = 1.0
+    (is (pnn-all-ok?
+         (fit/choose-winners example-msgs 1.0)  ;; <========================= POD start here
+         {[0 1 0 1 0] [:m2-unstarved 0.36787944117144233],
+          [2 0 1 1 0] [:m1-blocked 0.6065306597126334],
+          [1 1 0 1 0] [:m1-unblocked 0.6065306597126334],
+          [3 0 1 0 1] [:m1-blocked 0.3678794411714423],
+          [1 0 1 1 0] [:m2-unstarved 0.6065306597126334],
+          [0 1 0 0 1] [:m2-starved 0.36787944117144233],
+          [2 1 0 1 0] [:m1-unblocked 1.0],
+          [3 0 1 1 0] [:m1-blocked 1.0],
+          [1 0 1 0 1] [:m2-starved 0.6065306597126334],
+          [0 0 1 1 0] [:m2-unstarved 1.0],
+          [0 0 1 0 1] [:m2-starved 1.0],
+          [2 0 1 0 1] [:ordinary 0.3312510892460261]}))
+    ;; Results with sigma = 0.2
+    (is (pnn-all-ok?
+         (fit/choose-winners example-msgs 0.2)
+         {[0 1 0 1 0] [:ordinary 0.06971187503880233],
+          [2 0 1 1 0] [:ordinary 0.17548168297989752],
+          [1 1 0 1 0] [:ordinary 0.09031651123868557],
+          [3 0 1 0 1] [:ordinary 0.0851651717421801],
+          [1 0 1 1 0] [:ordinary 0.16002840419305475],
+          [0 1 0 0 1] [:ordinary 0.0048076923087272344],
+          [2 1 0 1 0] [:m1-unblocked 1.0],
+          [3 0 1 1 0] [:m1-blocked 1.0],
+          [1 0 1 0 1] [:ordinary 0.07451958526421719],
+          [0 0 1 1 0] [:m2-unstarved 1.0],
+          [0 0 1 0 1] [:m2-starved 1.0],
+          [2 0 1 0 1] [:ordinary 0.09031652915550199]}))))
+
+(def pn-test
+  (-> "data/PNs/m2-inhib-bas.xml" ;; <========================= POD start here REALLY!
+      pnml/read-pnml
+      pnr/renumber-pids))
+
+
+
+
+

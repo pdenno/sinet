@@ -3976,7 +3976,7 @@ BTW, I still have to deal with vanishing transitions. I need to generate blockin
 ONLY when the net sojourns at blocking/starving. So simulation has to be better and I need to
 distinguish these immediate transitions some how. 
 
-NEXT STEP: Try a more mild blocking situation.
+NEXT STEP: 
 
 It should not be so forgiving about these wrong starting states. <-- That (the "forgiving" part) is not really true .
 The results now would be good enough except for the "looking for high buffer numbers problem."
