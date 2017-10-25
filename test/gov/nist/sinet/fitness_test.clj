@@ -1,14 +1,20 @@
 (ns gov.nist.sinet.fitness-test
   (:require [clojure.test :refer :all]
+            [clojure.pprint :refer (cl-format pprint)]
             [gov.nist.spntools.core :as spn]
             [gov.nist.spntools.util.reach :as pnr]
+            [gov.nist.spntools.util.pnml :as pnml]
             [gov.nist.spntools.core :as pn]
             [gov.nist.sinet.util :as util :refer (map->Inv app-info reset big-reset)]
             [gov.nist.sinet.app :as app]
             [gov.nist.sinet.run :as run]
+            [gov.nist.sinet.scada :as scada]
             [gov.nist.sinet.gp :as gp]
             [gov.nist.sinet.simulate :as sim]
+            [gov.nist.sinet.pnn :as pnn]
             [gov.nist.sinet.fitness :as fit]))
+
+(def ^:private diag (atom nil))
 
 (defn =*
   "Check that v1 == v2 +/i tolerance."
@@ -61,7 +67,7 @@
 (defn m2-inhib-bas-workflow-fit
   "Setup the m2-inhib-bas PN for a fitness test"
   [steps]    
-  (let [pn (-> "/data/PNs/m2-inhib-bas.xml" 
+  (let [pn (-> "data/PNs/m2-inhib-bas.xml" 
                spn/run-ready
                gp/add-color-binding
                (gp/diag-force-priority [{:source :m1-start-job, :target :buffer :priority 2}])
@@ -73,7 +79,7 @@
     (is (=* 0.0 (m2-inhib-bas-workflow-fit 200) 0.01))))
 
 ;;; POD Better than this would be to use the new MJPdes output directly. (Don't mess with app-info.)
-(defn problem-setting-fixture
+#_(defn problem-setting-fixture
   "Set the 'problem' (the log we look at) to the m2-inhib-bas problem."
   [f]
   (let [orig-scada (-> (app-info) :problem :scada-data-file)]
@@ -83,7 +89,7 @@
     (swap! app/problem #(assoc % :scada-data-file orig-scada))
     (util/big-reset)))
 
-(use-fixtures :once problem-setting-fixture)
+#_(use-fixtures :once problem-setting-fixture)
 
 (def example-msgs
   {:m2-unstarved {[0 0 1 1 0] 14},
@@ -112,44 +118,97 @@
                  (=* value (-> (get expected mark) second) 0.00001)))
           calculated))
 
-;;; There are more state that this in the PN, but not all occurred in the 3000 msgs logged. That's okay. 
-(deftest pnn-for-msgs
-  (testing "that we get good values processing real messages."
-    ;; Results with sigma = 1.0
-    (is (pnn-all-ok?
-         (fit/choose-winners example-msgs 1.0)  ;; <========================= POD start here
-         {[0 1 0 1 0] [:m2-unstarved 0.36787944117144233],
-          [2 0 1 1 0] [:m1-blocked 0.6065306597126334],
-          [1 1 0 1 0] [:m1-unblocked 0.6065306597126334],
-          [3 0 1 0 1] [:m1-blocked 0.3678794411714423],
-          [1 0 1 1 0] [:m2-unstarved 0.6065306597126334],
-          [0 1 0 0 1] [:m2-starved 0.36787944117144233],
-          [2 1 0 1 0] [:m1-unblocked 1.0],
-          [3 0 1 1 0] [:m1-blocked 1.0],
-          [1 0 1 0 1] [:m2-starved 0.6065306597126334],
-          [0 0 1 1 0] [:m2-unstarved 1.0],
-          [0 0 1 0 1] [:m2-starved 1.0],
-          [2 0 1 0 1] [:ordinary 0.3312510892460261]}))
-    ;; Results with sigma = 0.2
-    (is (pnn-all-ok?
-         (fit/choose-winners example-msgs 0.2)
-         {[0 1 0 1 0] [:ordinary 0.06971187503880233],
-          [2 0 1 1 0] [:ordinary 0.17548168297989752],
-          [1 1 0 1 0] [:ordinary 0.09031651123868557],
-          [3 0 1 0 1] [:ordinary 0.0851651717421801],
-          [1 0 1 1 0] [:ordinary 0.16002840419305475],
-          [0 1 0 0 1] [:ordinary 0.0048076923087272344],
-          [2 1 0 1 0] [:m1-unblocked 1.0],
-          [3 0 1 1 0] [:m1-blocked 1.0],
-          [1 0 1 0 1] [:ordinary 0.07451958526421719],
-          [0 0 1 1 0] [:m2-unstarved 1.0],
-          [0 0 1 0 1] [:m2-starved 1.0],
-          [2 0 1 0 1] [:ordinary 0.09031652915550199]}))))
-
+;;; POD *THIS* (and not problem-setting-feature if you can help it) is how to code these.
+;;;     Here I am loading scada directly, not counting on app.clj
 (def pn-test
-  (-> "data/PNs/m2-inhib-bas.xml" ;; <========================= POD start here REALLY!
-      pnml/read-pnml
-      pnr/renumber-pids))
+  "Partiallly complete PN for PNN testing."
+  (let [log (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj")]
+    (as-> "data/PNs/m2-inhib-n3.xml" ?pn
+      (pnml/read-pnml ?pn)
+      (pnr/renumber-pids ?pn)
+      (assoc ?pn :rgraph (pnr/simple-reach ?pn))
+      (assoc ?pn :starting-links (fit/starting-links ?pn log 0))
+      (assoc ?pn :msg-table (fit/compute-msg-table ?pn log))
+      (assoc ?pn :distance-fn pnn/euclid-dist2))))
+
+;;; There are more state that this in the PN, but not all occurred in the 3000 msgs logged. That's okay. 
+(deftest pnn-for-msgs-1 
+  (testing "PNN-based classification using Euclidean/sigma=0.2"
+    (let [pn (as-> pn-test ?pn
+               (assoc ?pn :sigma 0.2)  ; sigma = 0.2
+               (assoc ?pn :pdf-fns
+                      (zipmap (-> ?pn :msg-table keys)
+                              (map #(fit/parzen-pdf-msg ?pn %)
+                                   (-> ?pn :msg-table keys)))))]
+      ;; Good values, but the sigma is so tight that it won't generalize well. 
+      (is (pnn-all-ok?
+           (fit/choose-winners pn)
+           {[0 1 0 1 0] [:ordinary 0.06971187503880233],
+            [2 0 1 1 0] [:ordinary 0.17548168297989752],
+            [1 1 0 1 0] [:ordinary 0.09031651123868557],
+            [3 0 1 0 1] [:ordinary 0.0851651717421801],
+            [1 0 1 1 0] [:ordinary 0.16002840419305475],
+            [0 1 0 0 1] [:ordinary 0.0048076923087272344],
+            [2 1 0 1 0] [:m1-unblocked 1.0],
+            [3 0 1 1 0] [:m1-blocked 1.0],
+            [1 0 1 0 1] [:ordinary 0.07451958526421719],
+            [0 0 1 1 0] [:m2-unstarved 1.0],
+            [0 0 1 0 1] [:m2-starved 1.0],
+            [2 0 1 0 1] [:ordinary 0.09031652915550199]})))))
+
+(deftest pnn-for-msgs-2
+  (testing "PNN-based classification using Euclidean/sigma=0.75"
+    (let [pn (as-> pn-test ?pn
+                 (assoc ?pn :sigma 0.75)
+                 (assoc ?pn :pdf-fns
+                        (zipmap (-> ?pn :msg-table keys)
+                                (map #(fit/parzen-pdf-msg ?pn %)
+                                     (-> ?pn :msg-table keys)))))]
+      ;; Much larger sigma, but bad performance.
+      (is (pnn-all-ok?
+           (fit/choose-winners pn)
+           {[0 1 0 1 0] [:m2-unstarved 0.1690133154060661],
+            [2 0 1 1 0] [:m1-blocked 0.41111229050718745],
+            [1 1 0 1 0] [:m1-unblocked 0.41111229050718745],
+            [3 0 1 0 1] [:m1-blocked 0.1690133154060661],
+            [1 0 1 1 0] [:m2-unstarved 0.41111229050718745],
+            [0 1 0 0 1] [:m2-starved 0.1690133154060661], ; <---- Needs investigation. Should not be in rgraph!
+            [2 1 0 1 0] [:m1-unblocked 1.0],
+            [3 0 1 1 0] [:m1-blocked 1.0],
+            [1 0 1 0 1] [:m2-starved 0.41111229050718745],
+            [0 0 1 1 0] [:m2-unstarved 1.0],
+            [0 0 1 0 1] [:m2-starved 1.0],
+            [2 0 1 0 1] [:ordinary 0.20673002778168464]})))))
+
+(deftest pnn-for-msgs-3
+  (testing "PNN-based classification using graph-distance/sigma=0.75"
+    (let [pn (as-> pn-test ?pn
+               (assoc ?pn :sigma 0.75)
+               (assoc ?pn :distance-fn (fit/graph-distance-fn ?pn))
+               (assoc ?pn :pdf-fns
+                      (zipmap (-> ?pn :msg-table keys)
+                              (map #(fit/parzen-pdf-msg ?pn %)
+                                   (-> ?pn :msg-table keys)))))]
+      ;; graph-distance scaling gives good results at wide sigma. 
+      (is (pnn-all-ok?
+           (fit/choose-winners pn)
+           {[0 1 0 1 0] [:ordinary 0.07812345592321546],
+            [2 0 1 1 0] [:ordinary 0.19350798937548197],
+            [1 1 0 1 0] [:ordinary 0.10565451941946981],
+            [3 0 1 0 1] [:ordinary 0.09387730377891051],
+            [1 0 1 1 0] [:ordinary 0.1783054552497219],
+            [0 1 0 0 1] [:m2-starved 0.028565500784550373],
+            [2 1 0 1 0] [:m1-unblocked 1.0],
+            [3 0 1 1 0] [:m1-blocked 1.0],
+            [1 0 1 0 1] [:ordinary 0.08572916833008677],
+            [0 0 1 1 0] [:m2-unstarved 1.0],
+            [0 0 1 0 1] [:m2-starved 1.0],
+            [2 0 1 0 1] [:ordinary 0.10642989332503937]})))))
+
+
+
+
+
 
 
 

@@ -287,29 +287,38 @@
         from (-> paths first last :Mp) ; current state along first path
         all-steps (filter #(= (:M %) from) rgraph)
         good-steps (filter #(= (:fire %) (:act next-msg)) all-steps)   ; matches a msg
-        good-steps (map #(assoc % :indx (:line next-msg)) good-steps)] ; track where you found it. 
+        good-steps (map #(assoc % :indx (:line next-msg)) good-steps)] ; track where you found it.
+    ;(println "good-steps=" good-steps)
+    ;(println "paths=" paths)
     (if (empty? good-steps) ; This path is a dead end. 
       (rest paths)
       (into (vec (map #(conj (first paths) %) good-steps)) (rest paths))))) ; depth-first
 
-;;; (starting-link pn (subvec (-> (util/app-info) :problem :scada-log) 0 100) 0)
+;;; (starting-links pn (-> (util/app-info) :problem :scada-log) 0)
+;;; (starting-links pn (-> (util/app-info) :problem :scada-log) 0
+;;;                 [[{:M [3 0 1 1 0], :fire :m1-complete-job, :Mp [3 1 0 1 0], :rate 0.9 :indx 0}]])
 (defn starting-links
-  "Return all links that interpret the SCADA log well from start-indx"
-  [pn data start-indx]
+  "Return all links (containing reference scada log line) that interpret 
+   the SCADA log well from start-indx"
+  [pn log start-indx & {:keys [diag-path]}]
   (let [rgraph (:rgraph pn)
         winners (atom [])]
-    (loop [paths (map
-                  vector
-                  (vec
-                   (map #(assoc % :indx start-indx)
-                        (filter #(= (:act (next-ordinary data start-indx))
-                                    (:fire %))
-                                rgraph))))]
-      (let [goods (filter #(>= (count %) 50) paths)] ; POD 50 
-        (swap! winners #(into % (vec (map first goods))))
-        (if (empty? paths) (distinct @winners)
-            (let [next-msg-indx (-> paths first last :indx inc)]
-              (recur (next-paths paths rgraph data next-msg-indx))))))))
+    (loop [paths
+           (or diag-path
+               (map
+                vector
+                (vec
+                 (map #(assoc % :indx start-indx)
+                      (filter #(= (:act (next-ordinary log start-indx))
+                                  (:fire %))
+                              rgraph)))))]
+      (when (> (-> paths first count) 50)
+        (swap! winners #(conj  % (-> paths first first))))
+                                        ;(println "indx =" (-> paths first last :indx))
+      (if (empty? paths) (distinct @winners)
+          (let [paths (if (> (-> paths first count) 50) (rest paths) paths)
+                next-msg-indx (-> paths first last :indx inc)]
+            (recur (next-paths paths rgraph log next-msg-indx)))))))
 
 ;;; POD PN transitions will need :rate 
 (defn next-match
@@ -330,19 +339,20 @@
 ;;; (interpret-scada pn (subvec (-> (util/app-info) :problem :scada-log) 0 100))
 ;;; (interpret-scada pn (subvec (-> (util/app-info) :problem :scada-log) 0 100)
 ;;;                  {:M [3 0 1 1 0], :fire :m2-complete-job, :Mp [3 0 1 0 1], :rate 1.0, :indx 0})
-;;; POD In production, the arg list will be [pn data start-link] -- data will be abbreviated. 
+;;; POD In production, the arg list will be [pn log start-link] -- log will be abbreviated. 
 (defn interpret-scada
   "Describe how the message stream could be accounted for by this PN. 
    Return a sequence where an element is:
     - a link (if an ordinary message is processed), or
     - a map naming an exceptional message (if an such a message is processed)."
-  [pn log start-link] 
+  [pn log start-link]
   (let [rgraph (:rgraph pn)
         last-indx (-> log last :line)]
     (loop [interp (vector start-link)]
       (let [indx (-> interp last :indx)
             next-msg (if (== last-indx indx) nil (nth log (inc indx)))
             matched  (when next-msg (next-match next-msg (last interp) rgraph))]
+        (reset! diag next-msg)
         (cond (not next-msg)   interp
               (not matched)    (conj interp {:failed-prior (nth interp (- (count interp) 2))
                                              :failed-on-link (last interp)
@@ -353,13 +363,14 @@
 (defn first-interpretation
   "Return a vector of all the PN links/exceptional messages that interprets the log."
   [pn scada-log]
-  (loop [links (:starting-links pn)]
-    (let [interp (interpret-scada pn scada-log (first links))]
-      (cond
-        (empty? links) nil, 
-        (not (contains? (last interp) :failed-on-msg))
-        interp
-        true (recur (rest links))))))
+  (when (not-empty (:starting-links pn))
+    (loop [links (:starting-links pn)]
+      (let [interp (interpret-scada pn scada-log (first links))]
+        (cond
+          (empty? links) nil, 
+          (not (contains? (last interp) :failed-on-msg))
+          interp
+          true (recur (rest links)))))))
 
 ;;; You can have the same marking associated with more than one class. The more times you have
 ;;; it associated with a class, the stronger the result will be for that class. To make
@@ -371,7 +382,7 @@
   [pn scada-log]
   (let [interp (first-interpretation pn scada-log)
         msg-types (conj (-> (app-info) :problem :exceptional-msgs) :ordinary)
-        markings (map :M (:rgraph interp))
+        markings (map :M (:rgraph pn))
         report (reduce (fn [sum msg] 
                          (if (contains? msg :act)
                            (update-in sum [(:act msg) (:Mp msg)] inc)
@@ -379,18 +390,17 @@
                        (zipmap msg-types
                                (repeatedly (count msg-types)
                                            #(zipmap markings (repeat (count markings) 0))))
-                       (:interpreted-log interp))]
+                       interp)]
     ;; Outer map is indexed by msg-types; inner map in indexed by markings, values are count.
     ;; Eliminate entries where the count is zero.
-    (assoc pn :msg-table
-           (reduce (fn [map key]
-                     (update-in map [key]
-                                #(persistent!
-                                  (reduce (fn [m k] (if (== 0 (get m k)) (dissoc! m k) m))
-                                          (transient %)
-                                          (keys %)))))
-                   report
-                   msg-types))))
+    (reduce (fn [map key]
+              (update-in map [key]
+                         #(persistent!
+                           (reduce (fn [m k] (if (== 0 (get m k)) (dissoc! m k) m))
+                                   (transient %)
+                                   (keys %)))))
+            report
+            msg-types)))
 
 (defn rgraph2loom-graph
   "Return a loom weighted-digraph for the argument simple reachability graph."
@@ -403,46 +413,50 @@
   [pn]
   (let [graph (rgraph2loom-graph (-> pn :rgraph))]
     (fn [from to]
-      (alg/dijkstra-path graph from to))))
+      (let [graph-distance (count (alg/dijkstra-path graph from to))]
+        (* graph-distance 
+           (reduce (fn [sum ix] (+ sum (Math/pow (- (nth from ix) (nth to ix)) 2)))
+                   0.0
+                   (range (count from))))))))
 
-;;; (parzen-pdf-msg (:ordinary example-interp) 0.2)
 (defn parzen-pdf-msg
   "Return the parzen-pdf function for the argument class using message counts."
-  [pn]
-   (let [msg-table (:msg-table pn)
-         sigma (:sigma pn)
-         dist-fn (:distance-fn pn)
-         size (apply + (vals msg-table)) ; the total number of messages
-         sig2 (* 2 sigma sigma)]
-     (fn [x]
-       (* (/ 1 size)
-          (reduce (fn [sum [mark cnt]] ; cnt the number of messages with this marking
-                    (+ sum (* cnt (Math/exp (- (/ (dist-fn mark x) sig2))))))
-                  0.0
-                  msg-table)))))
+  [pn class]
+  (reset! diag pn)
+  (let [msg-table (class (:msg-table pn))
+        sigma (:sigma pn)
+        dist-fn (:distance-fn pn)
+        size (apply + (vals msg-table)) ; the total number of messages
+        sig2 (* 2 sigma sigma)]
+    (fn [x]
+      (* (/ 1 size)
+         (reduce (fn [sum [mark cnt]] ; cnt the number of messages with this marking
+                   (+ sum (* cnt (Math/exp (- (/ (dist-fn mark x) sig2))))))
+                 0.0
+                 msg-table)))))
 
 (defn choose-winners
   "Map of the winners for each marking."
   [pn]
-  (let [msg-table  (:msg-table pn)
-        dist-fn    (:distance-fn pn)
-        sigma      (:sigma pn)
-        classes    (keys msg-table)
-        parzen-fns (zipmap classes
-                           (map #(parzen-pdf-msg (% msg-table) sigma dist-fn) classes))
-         marks (distinct
-                (mapcat keys (map #(get msg-table %) classes)))]
-    (reduce (fn [results mark]
-              (let [result (reduce (fn [[best-class best-score] class]
-                                     (let [my-score ((class parzen-fns) mark)]
-                                       (if (> my-score best-score)
-                                         [class  my-score]
-                                         [best-class best-score])))
-                                   [nil 0]
-                                   classes)]
-                (assoc results mark result)))
-            {}
-            marks)))
+  (when (not-empty (:pdf-fns pn))
+    (let [pdf-fns    (:pdf-fns pn)
+          msg-table  (:msg-table pn)
+          classes    (keys msg-table)
+          dist-fn    (:distance-fn pn)
+          sigma      (:sigma pn)
+          marks (distinct
+                 (mapcat keys (map #(get msg-table %) classes)))]
+      (reduce (fn [results mark]
+                (let [result (reduce (fn [[best-class best-score] class]
+                                       (let [my-score ((class pdf-fns) mark)]
+                                         (if (> my-score best-score)
+                                           [class  my-score]
+                                           [best-class best-score])))
+                                     [nil 0]
+                                     classes)]
+                  (assoc results mark result)))
+              {}
+              marks))))
 
 ;;; We generate the reachability graph (including non-tangible states) and test the
 ;;; complete SCADA log against it. We aren't running the QPN, rather we are testing
@@ -522,3 +536,58 @@
                #_(sim/simulate :max-steps steps))]
     #_(workflow-fitness (util/map->Inv {:pn pn}))
     pn))
+
+(defn tryme [sigma]
+  (let [log (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj")
+        pn (as-> "data/PNs/m2-inhib-n3.xml" ?pn
+             (pnml/read-pnml ?pn)
+             (pnr/renumber-pids ?pn)
+             (assoc ?pn :rgraph (pnr/simple-reach ?pn))
+             (assoc ?pn :starting-links (starting-links ?pn log 0))
+             (assoc ?pn :msg-table (compute-msg-table ?pn log))
+             (assoc ?pn :sigma sigma)
+             (assoc ?pn :distance-fn (graph-distance-fn ?pn))
+             (assoc ?pn :pdf-fns
+                    (zipmap (-> ?pn :msg-table keys)
+                            (map #(parzen-pdf-msg ?pn %)
+                                 (-> ?pn :msg-table keys)))))]
+    (reset! diag pn)
+    (choose-winners pn)))
+
+(defn tryme2 [sigma]
+  (let [log (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj")
+        pn (as-> "data/PNs/m2-inhib-n3.xml" ?pn
+             (pnml/read-pnml ?pn)
+             (pnr/renumber-pids ?pn)
+             (assoc ?pn :rgraph (pnr/simple-reach ?pn))
+             (assoc ?pn :starting-links (starting-links ?pn log 0))
+             (assoc ?pn :msg-table (compute-msg-table ?pn log))
+             (assoc ?pn :sigma sigma)
+             (assoc ?pn :distance-fn pnn/euclid-dist2)
+             (assoc ?pn :pdf-fns
+                    (zipmap (-> ?pn :msg-table keys)
+                            (map #(parzen-pdf-msg ?pn %)
+                                 (-> ?pn :msg-table keys)))))]
+    (choose-winners pn)))
+
+
+;;; (:marking-key pn-test) =
+;;;  [:buffer :m1-blocked :m1-busy :m2-busy :m2-starved]
+
+{:m1-blocked   {[3 0 1 1 0] 30},  ; 1% blocking
+ :m1-unblocked {[2 1 0 1 0] 30},  
+ :m2-starved   {[0 0 1 0 1] 14},  ; 0.5% starving
+ :m2-unstarved {[0 0 1 1 0] 14},
+  :ordinary
+ {[0 1 0 1 0] 203,
+  [2 0 1 1 0] 511,
+  [1 1 0 1 0] 263,
+  [3 0 1 0 1] 248,
+  [1 0 1 1 0] 466,
+  [0 1 0 0 1] 14,
+  [2 1 0 1 0] 248,
+  [3 0 1 1 0] 248,
+  [1 0 1 0 1] 217,
+  [0 0 1 1 0] 217,
+  [0 0 1 0 1] 14,
+  [2 0 1 0 1] 263}}

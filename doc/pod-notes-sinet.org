@@ -805,3 +805,158 @@ It has been replaced by compute-msg-table.
 As is apparent from the four subtopics above, I cut out a lot of code today!
 
 Refactors stuff has not yet been tested. 
+** <2017-10-24 Tue>
+
+I've got a bug in starting-links. 
+next-paths works depth first thus I don't think this code makes sense:
+      (when-let [goods (filter #(> (count %) 50) paths)]
+        (swap! winners #(into % (vec (map first goods)))))
+
+
+paths= [[{:M [0 0 1 1 0], :fire :m1-complete-job, :Mp [0 1 0 1 0], :rate 0.9, :indx 0}
+        {:M [0 1 0 1 0], :fire :m1-start-job, :Mp [1 0 1 1 0], :rate 1.0, :indx 1}
+        {:M [1 0 1 1 0], :fire :m2-complete-job, :Mp [1 0 1 0 1], :rate 1.0, :indx 2}
+        {:M [1 0 1 0 1], :fire :m2-start-job, :Mp [0 0 1 1 0], :rate 1.0, :indx 3}
+        {:M [0 0 1 1 0], :fire :m1-complete-job, :Mp [0 1 0 1 0], :rate 0.9, :indx 4} 
+        {:M [0 1 0 1 0], :fire :m1-start-job, :Mp [1 0 1 1 0], :rate 1.0, :indx 5} 
+        {:M [1 0 1 1 0], :fire :m2-complete-job, :Mp [1 0 1 0 1], :rate 1.0, :indx 6} 
+        {:M [1 0 1 0 1], :fire :m2-start-job, :Mp [0 0 1 1 0], :rate 1.0, :indx 7} 
+        {:M [0 0 1 1 0], :fire :m1-complete-job, :Mp [0 1 0 1 0], :rate 0.9, :indx 8} 
+        {:M [0 1 0 1 0], :fire :m1-start-job, :Mp [1 0 1 1 0], :rate 1.0, :indx 9}] 
+
+[{:M [1 0 1 0 1], :fire :m1-complete-job, :Mp [1 1 0 0 1], :rate 0.9, :indx 0}] 
+[{:M [0 0 1 0 1], :fire :m1-complete-job, :Mp [0 1 0 0 1], :rate 0.9, :indx 0}] 
+[{:M [1 0 1 1 0], :fire :m1-complete-job, :Mp [1 1 0 1 0], :rate 0.9, :indx 0}]]
+indx = 10
+good-steps= ()
+
+Ugh! The problem is I'm using the wrong data. Anyway, if there are no good starting-links... 
+
+{:act :m2-complete-job, :m :m2, :j 1744, :ent 2062.4506743555485, :clk 2066.1692850612535, :line 224, :mjpact :ej}
+{:act :m2-starved, :m :m2, :clk 2066.1692850612535, :line 225, :mjpact :st}
+
+I have been chasing my tail for hours! It works here, doesn't work, works....
+
+
+
+At sigma = 1.0 mine works better:
+
+Euclidean:
+         {[0 1 0 1 0] [:m2-unstarved 0.36787944117144233],
+          [2 0 1 1 0] [:m1-blocked 0.6065306597126334],
+          [1 1 0 1 0] [:m1-unblocked 0.6065306597126334],
+          [3 0 1 0 1] [:m1-blocked 0.3678794411714423],
+          [1 0 1 1 0] [:m2-unstarved 0.6065306597126334],
+          [0 1 0 0 1] [:m2-starved 0.36787944117144233],
+          [2 1 0 1 0] [:m1-unblocked 1.0],
+          [3 0 1 1 0] [:m1-blocked 1.0],
+          [1 0 1 0 1] [:m2-starved 0.6065306597126334],
+          [0 0 1 1 0] [:m2-unstarved 1.0],
+          [0 0 1 0 1] [:m2-starved 1.0],
+          [2 0 1 0 1] [:ordinary 0.3312510892460261]}))
+
+Euclidean + graph distance
+         {[0 1 0 1 0] [:m2-unstarved 0.1353352832366127],   <------- Even these
+	 [2 0 1 1 0] [:ordinary 0.24215429146359604],       <----------------
+	 [1 1 0 1 0] [:m1-unblocked 0.22313016014842982],
+	 [3 0 1 0 1] [:m1-blocked 0.1353352832366127],
+	 [1 0 1 1 0] [:ordinary 0.22681188379228487],       <----------------
+	 [0 1 0 0 1] [:m2-starved 0.1353352832366127],
+	 [2 1 0 1 0] [:m1-unblocked 1.0],
+	 [3 0 1 1 0] [:m1-blocked 1.0],
+	 [1 0 1 0 1] [:m2-starved 0.2231301601484298],
+	 [0 0 1 1 0] [:m2-unstarved 1.0],
+	 [0 0 1 0 1] [:m2-starved 1.0],
+	 [2 0 1 0 1] [:ordinary 0.1503568437398036]}
+
+
+At sigma=0.2 very little difference (but this is very tight range on trained values). 
+Euclidean
+         (fit/choose-winners (assoc pn-test :sigma 0.2))
+         {[0 1 0 1 0] [:ordinary 0.06971187503880233],
+          [2 0 1 1 0] [:ordinary 0.17548168297989752],
+          [1 1 0 1 0] [:ordinary 0.09031651123868557],
+          [3 0 1 0 1] [:ordinary 0.0851651717421801],
+          [1 0 1 1 0] [:ordinary 0.16002840419305475],
+          [0 1 0 0 1] [:ordinary 0.0048076923087272344],
+          [2 1 0 1 0] [:m1-unblocked 1.0],
+          [3 0 1 1 0] [:m1-blocked 1.0],
+          [1 0 1 0 1] [:ordinary 0.07451958526421719],
+          [0 0 1 1 0] [:m2-unstarved 1.0],
+          [0 0 1 0 1] [:m2-starved 1.0],
+          [2 0 1 0 1] [:ordinary 0.09031652915550199]}))))
+
+Mine
+         {[0 1 0 1 0] [:ordinary 0.06971153846153845],
+	 [2 0 1 1 0] [:ordinary 0.17548076923076922],
+	 [1 1 0 1 0] [:ordinary 0.09031593406593406],
+	 [3 0 1 0 1] [:ordinary 0.08516483516483515],
+	 [1 0 1 1 0] [:ordinary 0.16002747252747251],
+	 [0 1 0 0 1] [:ordinary 0.004807692307692307],
+	 [2 1 0 1 0] [:m1-unblocked 1.0],
+	 [3 0 1 1 0] [:m1-blocked 1.0],
+	 [1 0 1 0 1] [:ordinary 0.07451923076923077],
+	 [0 0 1 1 0] [:m2-unstarved 1.0],
+	 [0 0 1 0 1] [:m2-starved 1.0],
+	 [2 0 1 0 1] [:ordinary 0.09031593406593406]}
+
+At sigma = 0.8 mine is almost perfect, traditional is way off. 
+(ppprint (tryme 0.8))
+{[0 1 0 1 0] [:ordinary 0.08167651755114105],
+ [2 0 1 1 0] [:ordinary 0.20096611102341413],
+ [1 1 0 1 0] [:ordinary 0.11223204044436556],
+ [3 0 1 0 1] [:ordinary 0.09758966328235849],
+ [1 0 1 1 0] [:ordinary 0.1858113376895019],
+ [0 1 0 0 1] [:m2-starved 0.04393693362340743],  
+ [2 1 0 1 0] [:m1-unblocked 1.0],
+ [3 0 1 1 0] [:m1-blocked 1.0],
+ [1 0 1 0 1] [:m2-starved 0.09596708604499851], <--- wrong
+ [0 0 1 1 0] [:m2-unstarved 1.0],
+ [0 0 1 0 1] [:m2-starved 1.0],
+ [2 0 1 0 1] [:ordinary 0.11337198216661176]}
+nil
+gov.nist.sinet.fitness> (ppprint (tryme2 0.8))
+{[0 1 0 1 0] [:m2-unstarved 0.20961138715109787],
+ [2 0 1 1 0] [:m1-blocked 0.4578333617716143],
+ [1 1 0 1 0] [:m1-unblocked 0.4578333617716143],
+ [3 0 1 0 1] [:m1-blocked 0.20961138715109784],
+ [1 0 1 1 0] [:m2-unstarved 0.45783336177161427],
+ [0 1 0 0 1] [:m2-starved 0.20961138715109787],
+ [2 1 0 1 0] [:m1-unblocked 1.0],
+ [3 0 1 1 0] [:m1-blocked 1.0],
+ [1 0 1 0 1] [:m2-starved 0.45783336177161427],
+ [0 0 1 1 0] [:m2-unstarved 1.0],
+ [0 0 1 0 1] [:m2-starved 1.0],
+ [2 0 1 0 1] [:ordinary 0.23037282986699076]}
+
+;;; At sigma = 0.75 mine is good, theirs is still crap.
+
+
+gov.nist.sinet.fitness> (pprint (tryme 0.75))
+{[0 1 0 1 0] [:ordinary 0.07812345592321546],
+ [2 0 1 1 0] [:ordinary 0.19350798937548197],
+ [1 1 0 1 0] [:ordinary 0.10565451941946981],
+ [3 0 1 0 1] [:ordinary 0.09387730377891051],
+ [1 0 1 1 0] [:ordinary 0.1783054552497219],
+ [0 1 0 0 1] [:m2-starved 0.028565500784550373],
+ [2 1 0 1 0] [:m1-unblocked 1.0],
+ [3 0 1 1 0] [:m1-blocked 1.0],
+ [1 0 1 0 1] [:ordinary 0.08572916833008677],
+ [0 0 1 1 0] [:m2-unstarved 1.0],
+ [0 0 1 0 1] [:m2-starved 1.0],
+ [2 0 1 0 1] [:ordinary 0.10642989332503937]}
+nil
+gov.nist.sinet.fitness> (pprint (tryme2 0.75))
+{[0 1 0 1 0] [:m2-unstarved 0.1690133154060661],
+ [2 0 1 1 0] [:m1-blocked 0.41111229050718745],
+ [1 1 0 1 0] [:m1-unblocked 0.41111229050718745],
+ [3 0 1 0 1] [:m1-blocked 0.1690133154060661],
+ [1 0 1 1 0] [:m2-unstarved 0.41111229050718745],
+ [0 1 0 0 1] [:m2-starved 0.1690133154060661],
+ [2 1 0 1 0] [:m1-unblocked 1.0],
+ [3 0 1 1 0] [:m1-blocked 1.0],
+ [1 0 1 0 1] [:m2-starved 0.41111229050718745],
+ [0 0 1 1 0] [:m2-unstarved 1.0],
+ [0 0 1 0 1] [:m2-starved 1.0],
+ [2 0 1 0 1] [:ordinary 0.20673002778168464]}
+
