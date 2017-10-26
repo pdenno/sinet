@@ -2,7 +2,8 @@
   "Probabilistic neural nets (Bayesian nets)"
   (:require [clojure.spec.alpha :as s]))
 
-;;; A PNN consists of several sub-networks, each of which is a Parzen window PDF estimator for each of the classes.
+;;; A PNN consists of several sub-networks, each of which is
+;;; a Parzen window PDF estimator for each of the classes.
 (defn euclid-dist2
   "Square of Euclidean distance; typical for Gaussian kernels."
   [x y]
@@ -30,7 +31,4 @@
                    (+ sum (Math/exp (- (/ (dist-fn (nth xdata ix) x) sig2)))))
                  0.0
                  (range size)))))))
-
-
-
 

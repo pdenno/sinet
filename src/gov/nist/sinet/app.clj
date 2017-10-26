@@ -1,6 +1,7 @@
 (ns gov.nist.sinet.app
   (:require [clojure.tools.logging :as log]
             [clojure.pprint :refer (pprint)]
+            [clojure.spec.alpha :as s]
             [clojure.core.async :as async :refer [>! <! >!! <!! go-loop chan]]
             [com.stuartsierra.component :as component]
             [gov.nist.sinet.scada :as scada]
@@ -38,6 +39,7 @@
     :no-new-jobs-penalty 1.00001
     :no-qpn-log-penalty  3.000003 ; This if, for example, one transition, one place and two arcs back and forth. 
     :crossover-keeps-parents? true ; NYI
+    :exceptional-sigma 0.75 ; sigma squared is variance of PDF around training point (exceptional message).
     :mutation-dist mutation-dist}))
 
 (def problem
@@ -49,11 +51,15 @@
     #_"data/SCADA-logs/scada-m2-j1-starve-m2-out.clj" ;"scada-f0-imbalanced.clj"
     :pattern-reserves #{:act :jt :bf :m :n}}))
 
-(defn gp-system []
+(defn gp-system
+  "Create an async channel for communcation about evolution."
+  []
   {:evolve-chan (async/chan)
-   :pause-evolve? (atom false)})
+   :check-asserts? true})
 
-(defn app-start-body [component ws-connection]
+(defn app-start-body
+  "Compose the parts of component and optionally s/check-assert."
+  [component ws-connection]
   (let [comp (as-> component ?c
                (assoc ?c :gp-params @gp-params :problem @problem :gp-system (gp-system))
                (assoc-in ?c [:problem :scada-log] (-> ?c :problem :scada-data-file scada/load-scada))
@@ -62,6 +68,7 @@
                (assoc-in ?c [:problem :exceptional-msgs]
                          (scada/exceptional-msgs (-> ?c :problem :scada-patterns)
                                                  (-> ?c :problem :scada-log))))]
+    (s/check-asserts (-> comp :gp-system :check-asserts?))
     (gp/start-evolve-loop! (-> comp :gp-system :evolve-chan))
     comp))
 

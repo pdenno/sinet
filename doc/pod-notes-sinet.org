@@ -70,6 +70,17 @@
 
 ** DONE Fix MJPdes as described in log <2017-10-17 Tue>
    CLOSED: [2017-10-22 Sun 14:25]
+** TODO Rewrite disorder code to use rgraph.
+
+* Agenda for the next week:
+** Integrate exceptional fitness, try using it to place buffer limits.
+    In addition to adding an inhibitor with multiplicity, may need to attach functions that
+    will emit messages on exceptional events.
+** Add MJP 
+    This entails watching the execution times, maybe doing GPtips like regression.
+** Add Causal
+    This entails making the infinitessimal generator parametric.
+
 * Discussion
 ** Rationale for PNN
 It is clear that I need a means to explain messages that do not correspond to transitions. 
@@ -960,3 +971,127 @@ gov.nist.sinet.fitness> (pprint (tryme2 0.75))
  [0 0 1 0 1] [:m2-starved 1.0],
  [2 0 1 0 1] [:ordinary 0.20673002778168464]}
 
+
+
+{:m2-unstarved {[0 0 1 1 0] 14},
+ :m1-unblocked {[2 1 0 1 0] 30},
+ :m2-starved {[0 0 1 0 1] 14},
+ :ordinary
+ {[0 1 0 1 0] 203,
+  [2 0 1 1 0] 511,
+  [1 1 0 1 0] 263,
+  [3 0 1 0 1] 248,
+  [1 0 1 1 0] 466,
+  [0 1 0 0 1] 14,
+  [2 1 0 1 0] 248,
+  [3 0 1 1 0] 248,
+  [1 0 1 0 1] 217,
+  [0 0 1 1 0] 217,
+  [0 0 1 0 1] 14,
+  [2 0 1 0 1] 263},
+** <2017-10-25 Wed>
+
+I should be having a telecon with Charles today, but...
+
+*** Tryme functions for Euclidean and graph-distance * Euclidean
+(defn tryme [sigma]
+  (let [log (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj")
+        pn (as-> "data/PNs/m2-inhib-n3.xml" ?pn
+             (pnml/read-pnml ?pn)
+             (pnr/renumber-pids ?pn)
+             (assoc ?pn :rgraph (pnr/simple-reach ?pn))
+             (assoc ?pn :starting-links (starting-links ?pn log 0))
+             (assoc ?pn :msg-table (compute-msg-table ?pn log))
+             (assoc ?pn :sigma sigma)
+             (assoc ?pn :distance-fn (graph-distance-fn ?pn))
+             (assoc ?pn :pdf-fns
+                    (zipmap (-> ?pn :msg-table keys)
+                            (map #(parzen-pdf-msg ?pn %)
+                                 (-> ?pn :msg-table keys)))))]
+    (reset! diag pn)
+    (choose-winners pn)))
+
+(defn tryme2 [sigma]
+  (let [log (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj")
+        pn (as-> "data/PNs/m2-inhib-n3.xml" ?pn
+             (pnml/read-pnml ?pn)
+             (pnr/renumber-pids ?pn)
+             (assoc ?pn :rgraph (pnr/simple-reach ?pn))
+             (assoc ?pn :starting-links (starting-links ?pn log 0))
+             (assoc ?pn :msg-table (compute-msg-table ?pn log))
+             (assoc ?pn :sigma sigma)
+             (assoc ?pn :distance-fn pnn/euclid-dist2)
+             (assoc ?pn :pdf-fns
+                    (zipmap (-> ?pn :msg-table keys)
+                            (map #(parzen-pdf-msg ?pn %)
+                                 (-> ?pn :msg-table keys)))))]
+    (choose-winners pn)))
+See Agenda. Today I'm integrating the exceptional messages, and inhibitors.
+First, however, is to look into the possibly erroneous marking state found yesterday:
+
+[0 1 0 0 1] [:m2-starved 0.1690133154060661], ; <---- Needs investigation. Should not be in rgraph!
+
+[:buffer :m1-blocked :m1-busy :m2-busy :m2-starved]
+Means that m1 is blocked, yet there is nothing in the buffer. How does this come about?
+It is a vanishing state from m1-complete-job to m1-start-job. 
+So it is okay. 
+
+The problem I'm having with init-pop seems to be that plans don't have names. 
+This was probably erroneously removed when MJPdes was prettified. 
+
+*** More unnecessary code:
+#_(defn mjpdes2pn-trace
+  "Translate all the SCADA message maps with maps with 'nice pn names."
+  [job-trace]
+  (distinct (map scada/mjpdes2pn job-trace)))
+
+;;; POD Will need to generalize this idea of 'what a message means' I'm giving nice "pn names" to MJPdes output. 
+;;; (mjpdes2pn (first (scada/random-job-trace))) ==>  {:name :m1-start-job, :act :aj, :m :m1}
+
+#_(defn mjpdes2pn
+  "Interpret/translate the SCADA log. (Give pretty-fied pn names to MJPdes output.)" 
+  [msg]
+  (let [m (implies-machine msg)]
+    (-> msg
+        (assoc :mjpact (:act msg))
+        (assoc :m m)
+        (assoc :act (scada2pn-name msg)))))
+;;; POD Someday you might want to call this with multiple job traces.
+;;; POD This interprets/translates the SCADA log. We'll need to generalize it someday.
+(defn scada2pn-name
+  "Return a transition name for a given SCADA msg (bl/ub/st/us probably wont' be used.)"
+  [msg]
+  (let [m (implies-machine msg)]
+    (cond (= :aj (:act msg)) (read-string (cl-format nil "~A-start-job"    m)),
+          (= :ej (:act msg)) (read-string (cl-format nil "~A-complete-job" m)),
+          (= :sm (:act msg)) (read-string (cl-format nil "~A-start-job"    m)),
+          (= :bj (:act msg)) (read-string (cl-format nil "~A-complete-job" m)),
+          (= :bl (:act msg)) (read-string (cl-format nil "~A-blocked"      m)),
+          (= :ub (:act msg)) (read-string (cl-format nil "~A-unblocked"    m)),
+          (= :st (:act msg)) (read-string (cl-format nil "~A-starved"      m)),
+          (= :us (:act msg)) (read-string (cl-format nil "~A-unstarved"    m)))))
+
+(defn implies-machine
+  "Returns machine referenced/implied in message. 
+   If a buffer n is references, machine n+1 is pulling from it.
+   Returns nil if msg contains neither :bf or :m"
+  [msg]
+  (let [act (:act msg)]
+    (cond (= act :aj) :m1
+          (= act :bj) (keyword (format "m%d"      (read-string (subs (str (:bf msg)) 2)))),
+          (= act :sm) (keyword (format "m%d" (inc (read-string (subs (str (:bf msg)) 2))))),
+          (contains? msg :m) (:m msg))))
+
+
+OK, first interesting thing is that I've been using a N=3 example, but now, of course, 
+all the instances start as N=1. I guess that was expected, but it is making it harder
+to sync-up in "starting-links" 
+
+
+Arcs are all messed up: 
+ :arcs
+ [{:aid 1, :source :place-1, :target nil, :name :aa-1, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+  {:aid 2, :source nil, :target :place-2, :name :aa-2, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+  {:aid 3, :source :place-2, :target nil, :name :aa-3, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+
+Maybe fix this with clojure.spec? 

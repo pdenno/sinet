@@ -84,9 +84,12 @@
 (defrecord Inv [pn id err disorder types history])
 
 (defn print-inv [p writer]
-  (.write writer (cl-format nil "#Inv [err=~A]"
-                            (if (number? (:disorder p)) ; POD temporary. Should be :err
-                              (cl-format nil "~6,2F" (:disorder p))
+  (.write writer (cl-format nil "#Inv [dis=~A,exc=~A]"
+                            (if (number? (:disorder p)) 
+                              (cl-format nil "~5,2F" (:disorder p))
+                              :NA)
+                            (if (number? (:except p)) 
+                              (cl-format nil "~5,2F" (:except p))
                               :NA))))
 
 (defmethod print-method Inv [p writer]

@@ -120,8 +120,10 @@
 
 ;;; POD *THIS* (and not problem-setting-feature if you can help it) is how to code these.
 ;;;     Here I am loading scada directly, not counting on app.clj
-(def pn-test
+;;; defn rather than def so that I don't get dragged into fixing a bug every time I load this. 
+(defn test-pn
   "Partiallly complete PN for PNN testing."
+  []
   (let [log (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj")]
     (as-> "data/PNs/m2-inhib-n3.xml" ?pn
       (pnml/read-pnml ?pn)
@@ -134,7 +136,7 @@
 ;;; There are more state that this in the PN, but not all occurred in the 3000 msgs logged. That's okay. 
 (deftest pnn-for-msgs-1 
   (testing "PNN-based classification using Euclidean/sigma=0.2"
-    (let [pn (as-> pn-test ?pn
+    (let [pn (as-> (test-pn) ?pn
                (assoc ?pn :sigma 0.2)  ; sigma = 0.2
                (assoc ?pn :pdf-fns
                       (zipmap (-> ?pn :msg-table keys)
@@ -158,7 +160,7 @@
 
 (deftest pnn-for-msgs-2
   (testing "PNN-based classification using Euclidean/sigma=0.75"
-    (let [pn (as-> pn-test ?pn
+    (let [pn (as-> (test-pn) ?pn
                  (assoc ?pn :sigma 0.75)
                  (assoc ?pn :pdf-fns
                         (zipmap (-> ?pn :msg-table keys)
@@ -172,7 +174,7 @@
             [1 1 0 1 0] [:m1-unblocked 0.41111229050718745],
             [3 0 1 0 1] [:m1-blocked 0.1690133154060661],
             [1 0 1 1 0] [:m2-unstarved 0.41111229050718745],
-            [0 1 0 0 1] [:m2-starved 0.1690133154060661], ; <---- Needs investigation. Should not be in rgraph!
+            [0 1 0 0 1] [:m2-starved 0.1690133154060661],
             [2 1 0 1 0] [:m1-unblocked 1.0],
             [3 0 1 1 0] [:m1-blocked 1.0],
             [1 0 1 0 1] [:m2-starved 0.41111229050718745],
@@ -182,7 +184,7 @@
 
 (deftest pnn-for-msgs-3
   (testing "PNN-based classification using graph-distance/sigma=0.75"
-    (let [pn (as-> pn-test ?pn
+    (let [pn (as-> (test-pn) ?pn
                (assoc ?pn :sigma 0.75)
                (assoc ?pn :distance-fn (fit/graph-distance-fn ?pn))
                (assoc ?pn :pdf-fns

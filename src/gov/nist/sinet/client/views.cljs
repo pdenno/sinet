@@ -109,7 +109,8 @@
   (cond
     (= change-to :run)      (ws/chsk-send! [:sinet/evolve-run      {:status :best-wishes}]),
     (= change-to :pause)    (ws/chsk-send! [:sinet/evolve-pause    {:status :best-wishes}]),
-    (= change-to :continue) (ws/chsk-send! [:sinet/evolve-continue {:status :best-wishes}])))
+    (= change-to :continue) (ws/chsk-send! [:sinet/evolve-continue {:status :best-wishes}])
+    (= change-to :abort)    (ws/chsk-send! [:sinet/evolve-abort    {:status :best-wishes}])))
 
 (declare draw-it)
 
@@ -150,7 +151,10 @@
                  :on-click #(rf/dispatch [:sinet/evolve-state :pause])} "Pause"]
        [:button {:class "btn btn-primary" :style {:background-color "#CC0066"}
                  :disabled (not (= evolve-state :pause))
-                 :on-click #(rf/dispatch [:sinet/evolve-state :continue])} "Continue"]]]]))
+                 :on-click #(rf/dispatch [:sinet/evolve-state :continue])} "Continue"]
+       [:button {:class "btn btn-primary" :style {:background-color "#CC0066"}
+                 :on-click #(rf/dispatch [:sinet/evolve-state :abort])} "Abort"]]]]))
+
 
 ;;; To render the DOM representation of some part of the app state, view functions must query
 ;;; for that part of app-db, and that means using subscribe.

@@ -4,6 +4,7 @@
   (:require ;[clojure.tools.trace :as tr] ; POD temporary, use tr/deftrace instead of defn
             [clojure.pprint :refer (cl-format pprint)]
             [clojure.core.async :as async :refer [>! <! >!! <!! go-loop chan]]
+            [clojure.spec.alpha :as s]
             [gov.nist.spntools.core :as pn :refer :all]
             [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp pn-ok-> as-pn-ok->)]
             [gov.nist.spntools.util.reach :as pnr :refer (reachability)]
@@ -14,6 +15,8 @@
             [gov.nist.sinet.scada :as scada]
             [gov.nist.sinet.ws :as ws]
             [gov.nist.sinet.report :as rep]))
+
+(alias 'gp 'gov.nist.sinet.gp)
 
 ;;; Just for the record, I started with Lee Spector's "gp" demonstration software!
 
@@ -44,7 +47,6 @@
 ;;;================================================================
 ;;; Generate initial population
 ;;;================================================================
-(declare mjpdes2pn eden-pn)
 
 ;;; {:tkns [{:jtype :blue, :id 1}], :rep {:act :m2-complete-job, :mjpact :ej, :m :m2}}}
 ;;; (-> (scada/random-job-trace) mjpdes2pn make-plan)
@@ -59,19 +61,14 @@
 ;;;  :p [{:name :place-1} {:name :place-2} {:name :place-3} {:name :place-4} {:name :place-5} {:name :place-6}]}
 (defn make-vertices
   "Return map with vectors containing skeleton transition and place definition maps."
-  [e-assocs]
-  (reduce (fn [plan e-assoc]
+  [msg]
+  (reduce (fn [plan msg]
             (as-> plan ?p
               (update ?p :cnt inc)
-              (update ?p :t conj e-assoc)
+              (update ?p :t conj msg) 
               (update ?p :p conj {:name (keyword (format "place-%d" (:cnt ?p)))})))
           {:cnt 0 :t [] :p []}
-          e-assocs))
-
-(defn mjpdes2pn-trace
-  "Translate all the SCADA message maps with maps with 'nice pn names."
-  [job-trace]
-  (distinct (map scada/mjpdes2pn job-trace)))
+          msg))
 
 ;;; POD This still needs work. There needs to be higher level operations
 ;;; These include (1) recognizing subsystems and preserving them from further mucking.
@@ -107,7 +104,7 @@
   [pn plans]
   (assoc pn :transitions
          (vec (map (fn [plan]
-                     (as-> (pnu/make-transition pn :name (:name plan)) ?tr
+                     (as-> (pnu/make-transition pn :name (:act plan)) ?tr
                        (assoc ?tr :type :exponential) ; (if (= 0 (rand-int 2)) :exponential :immediate))
                        (assoc ?tr :rep (dissoc plan :name))
                        (assoc ?tr :visible? (if (= :silent (:mjpact plan)) false true))))
@@ -121,9 +118,9 @@
                  []
                  (map vec (partition
                            2 (interleave
-                              (vec (interleave (map :name (:p plan)) (map :name (:t plan))))
+                              (vec (interleave (map :name (:p plan)) (map :act (:t plan))))
                               ;; connect last first 
-                              (vec (interleave (map :name (:t plan))
+                              (vec (interleave (map :act (:t plan))
                                                (conj (vec (rest (map :name (:p plan))))
                                                      (first (map :name (:p plan))))))))))))
 
@@ -179,16 +176,40 @@
           pn
           (->> pn :transitions (map :name))))
 
-;;; (-> (scada/random-job-trace) initial-pn)
+(s/def ::clk number?)
+(s/def ::line number?)
+(s/def ::mjpact keyword?)
+(s/def ::act keyword?)
+(s/def ::rep (s/keys :req-un [::act ::mjpact ::line ::clk]))
+                     
+(s/def ::jtype keyword?)
+(s/def ::bind (s/keys :req-un [::jtype]))
+(s/def ::visible boolean?)
+(s/def ::place       (s/keys :req-un [::visible?]))
+(s/def ::transition  (s/keys :req-un [::rep ::visible?]))
+(s/def ::arc         (s/keys :req-un [::bind]))
+
+(s/def ::places      (s/and ::pnu/places      (s/coll-of ::place)))
+(s/def ::transitions (s/and ::pnu/transitions (s/coll-of ::transition)))
+(s/def ::arcs        (s/and ::pnu/arcs        (s/coll-of ::arc)))
+(s/def ::gppn (s/and ::pnu/pn
+                     (s/keys :req-un [::places ::transitions ::arcs])))
+
+(defn check-pn
+  "clojure.spec check the pn."
+  [pn]
+  (reset! diag {:pn pn})
+  (s/assert ::gppn pn))
+
 (defn initial-pn
   "Translate a SCADA job trace into a PN."
   [job-trace]
   (->> job-trace
-       mjpdes2pn-trace      ; returns maps to translate terse mjpdes log info to 'pn names'.
        make-vertices         ; returns map of skeletons for place and transition definitions
        eden-pn               ; complete skeletons and add :arcs, making a bipartite graph. 
        add-color-binding     ; add e.g. :bind {:jtype :blue} to :arcs for multi-job paths.
-       add-flow-priorities)) ; add info for deciding which tokens go where when multiple in/out on trans.
+       add-flow-priorities   ; add info for deciding which tokens go where when multiple in/out on trans.
+       check-pn))
 
 (defn initial-pop
   "Create an initial population of size pop-size."
@@ -250,13 +271,10 @@
          (let [i (mutate-m ?inv :pick-fn pick-fn :force force)]
            ;; Try 5 times to mutate; POD this skews things!
            (cond (pnu/pn? (:pn i)) (diag-record-inv i)
-                 (= n 0) (do (util/log {:in "mutate" :inv-id (:id ?inv)}) save-inv)
+                 (= n 0) (do (util/log {:in 'mutate :inv-id (:id ?inv)}) save-inv)
                  :else (recur (dec n)))))
        (add-color-binding ?inv)
        (update ?inv :pn add-flow-priorities)))))
-;;;             (reduce (fn [pn trans] (add-flow-priority-trans pn trans))
-;;;                     %
-;;;                     (->> % :transitions (map :name)))
 
 (defn- mutate-m-dispatch [inv & {:keys [pick-fn force]
                                  :or {pick-fn rand-mute-key}}]
@@ -491,12 +509,10 @@
 (defn i-error 
   "Compute the individual's score."
   [inv]
-  (let [disorder (fit/workflow-fitness    inv)
-        except   (fit/exceptional-fitness inv)]
-    (-> inv
-        (assoc :disorder disorder)
-        (assoc :except   except)
-        (assoc :err (+ disorder except)))))
+  (as-> inv ?i
+    (fit/workflow-fitness ?i)
+    (fit/exceptional-fitness ?i)
+    (assoc ?i :err (+ (:disorder ?i) (:except ?i)))))
 
 (defn sort-by-error
   "Add value for :err to each PN and used it to sort the population by disorder.
@@ -571,11 +587,13 @@
     world))
 
 (defn evolve-continue
-  "Loop through generations until success, failure or paused."
-  [world prom]
+  "Loop through generations until success, failure or paused
+   On success or failure, put a message to that effect on the channel."
+  [world prom chan]
+  (reset! diag {:world world})
   (println "evolve-continue...")
-  ;;(util/log {:defn evolve-continue :world world})
-  (reset! (rep/pause-evolve?) false)
+  (util/log {:in 'evolve-continue :world world})
+  (reset! rep/pause-evolve? false)
   (loop [w world]
     (rep/pop-stats w)
     (as-> w ?w
@@ -585,39 +603,82 @@
       (update ?w :gen inc)
       (evolve-success? ?w)
       (rep/report-gen ?w)
-      (cond @(rep/pause-evolve?) ?w, 
-            (= (:state ?w) :failure) (do (rep/push-inv (-> ?w :pop first)) (deliver prom ?w)), 
-            (= (:state ?w) :success) (do (rep/push-inv (-> ?w :pop first)) (deliver prom ?w)), 
+      (cond @rep/pause-evolve?
+            (do (deliver prom ?w)
+                (>!! chan "paused"))
+            
+            (= (:state ?w) :failure)
+            (do (rep/push-inv (-> ?w :pop first))
+                (deliver prom ?w)
+                (>!! chan "abort")),
+
+            (= (:state ?w) :success)
+            (do (rep/push-inv (-> ?w :pop first))
+                (deliver prom ?w)
+                (>!! chan "success"))
+            
             :else
             (recur (make-next-gen ?w))))))
 
-(def evolve-agent (agent nil))
+(defn evolve-error-handler
+  "Handle errors by the evolve-agent."
+  [ag ex]
+  (println "Agent had error: " ex)
+  (println "Agent value was: "@ag))
 
-;;; Both of the following get pushed when the client sends  :sinet/evolve-run (see report.clj)
+(def the-promise (atom nil))
+(def the-agent   (atom nil))
+
+;;; POD currently not doing anything with the world. 
+(defn continue-msg
+  "Setup for running the evolve loop, setting the-promise, the-agent and a reaper process."
+  [world evolve-chan]
+  (if @the-promise
+    (do (println "Ignoring second continue.") world)
+    (do (println "starting evolve-agent")
+        (reset! the-promise (promise))
+        (reset! the-agent  (agent world))
+        (set-error-handler! @the-agent evolve-error-handler)
+        (send-off @the-agent evolve-continue @the-promise evolve-chan)
+        (future
+          (let [result (deref @the-promise ; yes, 'double deref'
+                              (* 250 (-> (app-info) :gp-params :timeout-secs)) ; POD 15 seconds!
+                              :too-late)]
+            (when (= result :too-late) (>!! evolve-chan "abort"))))
+        world)))
+
+;;; Both of the following get pushed when the client sends :sinet/evolve-run (see report.clj)
 ;;; (>!! (rep/evolve-chan) "init")
 ;;; (>!! (rep/evolve-chan) "continue")
-;;; In order to see changes in this function, you need to do a reset.
+;;; =====>>> In order to see changes in this function, you need to do a util/big-reset. <<<=======
 (defn start-evolve-loop!
   "Called from app.clj when starting the app."
-  [evolve-channel]
+  [evolve-chan]
   (reset! util/+log+ [])
   (async/go-loop [world {}]
-    (let [msg (<! evolve-channel)]
-      ;(util/log (str "msg =" msg))
-      (as-> world ?w
-        (cond (= msg "init")
-              (if (not= (:state ?w) :init) (evolve-init) ?w),
-              (= msg "continue")
-              (let [p (promise)]
-                ;;(send-off evolve-agent evolve-continue ?w p)
-                (evolve-continue ?w p)
-                (deref p (* 1000 (gp-param :timeout-secs)) {:state :timeout})),
-              (= msg "pause")
-              (do (println "evolve-pause...")
-                  (reset! (rep/pause-evolve?) true) ?w))
-        (if (or (= :close (:state ?w)) (= :timeout (:state ?w)))
-          (util/log ?w)
-          (recur ?w))))))
+    (let [msg (<! evolve-chan)] ; parks thread, doesn't block. 
+      (util/log {:in "evolve-loop" :msg msg})
+      (let [world (cond (= msg "init")
+                        (if (= (:state world) :init)
+                          world ; already done. 
+                          (evolve-init)), ; blocks, returns world map with pop, etc.
+                        
+                        (= msg "continue")
+                        (continue-msg world evolve-chan) ; starts an agent and returns world
+
+                        (= msg "paused")
+                        (deref @the-promise)
+                        
+                        (= msg "report now!")
+                        (do (println "world = " world) world)
+                        
+                        (or (= msg "abort")
+                            (= msg "success"))
+                        (do (println "quitting...")
+                            (reset! the-agent nil)
+                            ;; Promise is the world
+                            (deref @the-promise 0 :timeout)))]
+        (recur world)))))
 
 ;;; This is from the ICMR 2017 days!
 #_(defn eval-inv
@@ -650,14 +711,14 @@
       inv)
     inv))
 
+;;; To stop it: (>!! (rep/evolve-chan) "abort")
 (defn diag-run
   "Run the GP in diagnostic mode from the REPL. A very useful function!"
   []
   (binding [*debugging* false] ;<===== Whether or not to save every individual
     (reset! diag-all-inv {})
-    (let [p (promise)]
-      (as-> (evolve-init) ?w
-        (evolve-continue ?w p)))))
+    (>!! (rep/evolve-chan) "init") 
+    (>!! (rep/evolve-chan) "continue")))
 
 (defn diag-sim
   "Simulate some steps on the best Inv."

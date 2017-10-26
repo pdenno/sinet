@@ -12,20 +12,3 @@
                       scada/load-scada
                       (subvec 0 10))))))
 
-;;;(write-pretty-log foo "data/SCADA-logs/scada-m2-j1-starve-m2-out.clj")
-;;;(write-pretty-log foo "data/SCADA-logs/m2-j1-n3-block-out.clj")
-;;;(write-pretty-log foo "data/SCADA-logs/m2-j1-n3-block-mild-out.clj")
-(defn write-pretty-log
-  "A stand-alone utility: Translate messages from MJPdes format to pretty (PN) format and 
-   write to a file. The result can then be used by load-scada."
-  [log out-file]
-  (let [line-cnt (atom -1)]
-    (with-open [out-stream (if out-file (clojure.java.io/writer out-file :encoding "UTF-8") *out*)]
-      (binding [*out* out-stream]
-        (println "[")
-        (doseq [msg log]
-          (-> msg
-              (assoc :line (swap! line-cnt inc))
-              scada/mjpdes2pn
-              println))
-        (println "]")))))

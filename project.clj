@@ -14,6 +14,7 @@
                  [ch.qos.logback/logback-classic "1.2.3"] 
                  [org.clojure/tools.logging      "0.4.0"]
                  
+
                  [ring                       "1.6.2" :exclusions [org.clojure/tools.namespace]]
                  [ring/ring-defaults         "0.3.1"]
                  [compojure                  "1.6.0"]

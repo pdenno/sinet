@@ -84,17 +84,6 @@
        (apply max)
        inc))
 
-(defn implies-machine
-  "Returns machine referenced/implied in message. 
-   If a buffer n is references, machine n+1 is pulling from it.
-   Returns nil if msg contains neither :bf or :m"
-  [msg]
-  (let [act (:act msg)]
-    (cond (= act :aj) :m1
-          (= act :bj) (keyword (format "m%d"      (read-string (subs (str (:bf msg)) 2)))),
-          (= act :sm) (keyword (format "m%d" (inc (read-string (subs (str (:bf msg)) 2))))),
-          (contains? msg :m) (:m msg))))
-
 ;;;====== These are used to generate scada patterns ======
 (defn scada-gather-job
   "Return a 'job trace', every mention of of job-id in chronological order."
@@ -215,33 +204,6 @@
              (reduce (fn [m s] (conj m (ordering-fn (:act (first events)) (:act s))))
                      []
                      (rest events)))))))
-
-;;; POD Someday you might want to call this with multiple job traces.
-;;; POD This interprets/translates the SCADA log. We'll need to generalize it someday.
-(defn scada2pn-name
-  "Return a transition name for a given SCADA msg (bl/ub/st/us probably wont' be used.)"
-  [msg]
-  (let [m (implies-machine msg)]
-    (cond (= :aj (:act msg)) (read-string (cl-format nil "~A-start-job"    m)),
-          (= :ej (:act msg)) (read-string (cl-format nil "~A-complete-job" m)),
-          (= :sm (:act msg)) (read-string (cl-format nil "~A-start-job"    m)),
-          (= :bj (:act msg)) (read-string (cl-format nil "~A-complete-job" m)),
-          (= :bl (:act msg)) (read-string (cl-format nil "~A-blocked"      m)),
-          (= :ub (:act msg)) (read-string (cl-format nil "~A-unblocked"    m)),
-          (= :st (:act msg)) (read-string (cl-format nil "~A-starved"      m)),
-          (= :us (:act msg)) (read-string (cl-format nil "~A-unstarved"    m)))))
-
-;;; POD Will need to generalize this idea of 'what a message means' I'm giving nice "pn names" to MJPdes output. 
-;;; (mjpdes2pn (first (scada/random-job-trace))) ==>  {:name :m1-start-job, :act :aj, :m :m1}
-
-(defn mjpdes2pn
-  "Interpret/translate the SCADA log. (Give pretty-fied pn names to MJPdes output.)" 
-  [msg]
-  (let [m (implies-machine msg)]
-    (-> msg
-        (assoc :mjpact (:act msg))
-        (assoc :m m)
-        (assoc :act (scada2pn-name msg)))))
 
 (defn exceptional-msgs
   "Return a list of the exceptional messages found in the scada log."
