@@ -2,40 +2,44 @@
   (:require [clojure.tools.logging :as log]
             [clojure.pprint :refer (pprint)]
             [clojure.spec.alpha :as s]
-            [clojure.core.async :as async :refer [>! <! >!! <!! go-loop chan]]
+            [clojure.core.async :as async :refer [>! <! >!! <!! chan]]
             [com.stuartsierra.component :as component]
             [gov.nist.sinet.scada :as scada]
-            [gov.nist.sinet.gp :as gp]))
+            [gov.nist.sinet.gp :as gp]
+            [gov.nist.sinet.untouched :as un]))
 
 (def mutation-dist "The pdf for ordinary mutations (not eden mutations)"
   [[:add-place        1/10]    ; Add place (mine can't be absorbing, thus Nobile 1&2).
    [:add-token           0]    ; Add token to some place (visible or hidden).
-   [:add-trans        1/10]    ; Add transition, connecting to input and output places.
-   [:add-arc          1/20]
+   [:add-trans           0] ; 1/10 pre-except   ; Add transition, connecting to input and output places.
+   [:add-arc          1/10] ; 1/20 pre-except
    [:add-inhibitor    1/10]    ; Add inhibitor arc, connecting a place to a trans
 ;  [:bump-inhibitor-3 1/20]    ; N.B. Makes it hard to remove, (but that might be good).
-   [:remove-place     1/10]
+   [:remove-place        0] ; 1/10 pre-except
    [:remove-token        0]
    [:remove-trans     1/10]
    [:remove-arc       1/10]
    [:remove-inhibitor 1/10]
-   [:swap-places      2/10]
-   [:swap-trans       2/10]
+   [:swap-places         0] ; 2/10 pre-except
+   [:swap-trans          0] ; 2/10 pre-except
    [:swap-priority    1/10]])
 
 (def gp-params
   (atom
    {:pn-elements [:place :token :normal-arc :inhibitor-arc :expo-trans #_:immediate-trans #_:fixed-trans]
-    :pop-size 100
+    :pop-size 25 ; 100 pre-except
     :aqpn-warm-up 5 ; "Ignore this number of tokens on both ends of the log."
-    :max-gens 30
+    
+    :max-gens 30           ; These three control how long gp runs. 
+    :success-threshold 0.1
+    :timeout-secs 120
+    
     :debugging? true
     :pn-k-bounded 10 ; When to give up on computing the reachability graph.
     :pn-max-rs 1000
     :crossover-to-mutation-ratio 0.5
     :select-pressure 4 ; POD not normalized to pop-size! Spector: 7/1000
     :elite-individuals 1
-    :timeout-secs 60
     :no-new-jobs-penalty 1.00001
     :no-qpn-log-penalty  3.000003 ; This if, for example, one transition, one place and two arcs back and forth. 
     :crossover-keeps-parents? true ; NYI
@@ -44,8 +48,7 @@
 
 (def problem
   (atom 
-   {:use-cpus (.availableProcessors (Runtime/getRuntime)) ; Counts hyperthreading, apparently. 
-    :keep-vs-ignore 0.8
+   {:keep-vs-ignore 0.8
     :scada-data-file "data/SCADA-logs/m2-j1-n3-block-mild-out.clj"      
     #_"data/SCADA-logs/m2-j1-n3-block-out.clj"
     #_"data/SCADA-logs/scada-m2-j1-starve-m2-out.clj" ;"scada-f0-imbalanced.clj"
@@ -54,8 +57,11 @@
 (defn gp-system
   "Create an async channel for communcation about evolution."
   []
-  {:evolve-chan (async/chan)
-   :check-asserts? true})
+  (let [chan (async/chan)]
+    (swap! un/old-channels conj chan)
+    {:evolve-chan chan
+     :use-cpus (.availableProcessors (Runtime/getRuntime)) ; Counts hyperthreading, apparently. 
+     :check-asserts? true}))
 
 (defn app-start-body
   "Compose the parts of component and optionally s/check-assert."
@@ -81,7 +87,8 @@
     ;; Things here should not reference app-info; it won't be set. Instead, pass args in.
     (app-start-body component ws-connection))
   (stop [component]
-    (async/close! (-> component :gp-system :evolve-chan))
+    (>!! (-> component :gp-system :evolve-chan) "ABORT")
+    ;(async/close! (-> component :gp-system :evolve-chan))
     component))
 
 (defn new-app [ws-connection]

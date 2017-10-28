@@ -9,11 +9,18 @@
             [gov.nist.sinet.util :as util :refer (app-info gp-param *debugging*)]
             [gov.nist.sinet.ws :as ws]))
 
-(defn clean-inv-for-transmit [inv]
-  "Sente can't send functions, can't send records, at least. Add error and history."
-  (as-> (:pn inv) ?pn
-    (assoc  ?pn :err (:err inv))
-    (assoc  ?pn :history (:history inv))))
+;;; Sente (edn) can't send functions or records.
+(defn clean-inv-for-transmit
+  "Create a map of minimal PN and associated information"
+  [inv]
+  (-> {}
+      (assoc :err (:err inv))
+      (assoc :disorder (:disorder inv))
+      (assoc :except  (:except inv))
+      (assoc :places (-> inv :pn :places))
+      (assoc :transitions (-> inv :pn :transitions))
+      (assoc :arcs (-> inv :pn :arcs))
+      (assoc :history (:history inv))))
 
 ;;; Respond to a request for an individual 
 (ws/register-method

@@ -72,6 +72,8 @@
    CLOSED: [2017-10-22 Sun 14:25]
 ** TODO Rewrite disorder code to use rgraph.
 
+** TODO Need a way to get the world after a time out. 
+** TODO Does the :pop really need to be on app-info?
 * Agenda for the next week:
 ** Integrate exceptional fitness, try using it to place buffer limits.
     In addition to adding an inhibitor with multiplicity, may need to attach functions that
@@ -1095,3 +1097,163 @@ Arcs are all messed up:
   {:aid 3, :source :place-2, :target nil, :name :aa-3, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
 
 Maybe fix this with clojure.spec? 
+** <2017-10-26 Thu>
+
+*** More junk?
+#_(defn diag-run
+  "Run the GP in diagnostic mode from the REPL. A very useful function!"
+  []
+  (binding [*debugging* false] ;<===== Whether or not to save every individual
+    (reset! diag-all-inv {})
+    (let [p (promise)]
+      (as-> (evolve-init) ?w
+        (evolve-continue ?w p (rep/evolve-chan))))))
+*** NEXT: Write clojure.spec for world. 
+** <2017-10-27 Fri>
+
+Writing clojure spec for world. Find a way to pause and keep world. 
+
+Once again (it was happening Oct 7, among other times) I'm getting a error
+No implementation of method: :sch-send! of protocol: #'taoensso.sente.interfaces/IServerChan found for 
+class: org.httpkit.server.AsyncChannel
+==> I started a new client (close tab, open another to localhost:8080) and it seems to work.
+
+This makes no sense. big-reset does not fix it. 
+
+==> Timeout requesting individual...Needed to provide a clean PN (no functions). DONE.
+
+No starting links because nothing can parse the log. Every individual is capable of only describing
+the path of a single job through the production resources. I think I have few options:
+
+1) Use genetic operators to produce more varied individuals, including some that 
+   might parse the log well enough to get an exceptional msg table with markings that
+   can guide design.
+
+2) Instead of next-ordinary, use next-ordinary-on-job. That will provide a parse
+   and lead to the need for queues. 
+
+3) Give some more thought about how the reachability graph can do this. 
+
+Preparation to do (1) and (2) is the same, I think: It must be possible to 
+use the msg table markings to update the PN. This is a "semantic genetic operator"
+
+{:m1-blocked   {[3 0 1 1 0] 30},
+ :m1-unblocked {[2 1 0 1 0] 30},
+ :m2-starved   {[0 0 1 0 1] 14},
+ :m2-unstarved {[0 0 1 1 0] 14},
+ :ordinary
+ {[0 1 0 1 0] 203,
+  [2 0 1 1 0] 511,
+  [1 1 0 1 0] 263,
+  [3 0 1 0 1] 248,
+  [1 0 1 1 0] 466,
+  [0 1 0 0 1] 14,
+  [2 1 0 1 0] 248,
+  [3 0 1 1 0] 248,
+  [1 0 1 0 1] 217,
+  [0 0 1 1 0] 217,
+  [0 0 1 0 1] 14,
+  [2 0 1 0 1] 263}}
+
+But that is a msg-table for N=3. A table for N=1 would have 1/0 for the first component of block/unblock.
+So what? 
+
+But why doesn't an individual emerge from evolution that can do this?
+The winning individual came real close after two iterations. 
+(You need 5 places and just the four transitions.) The only mistake
+was an arc from the buffer to m2-complete-job. That arc should have
+went to m2-start job. I think it may have stopped because success is <= 1 ??? Nope: we are looking for 0.1 or better.
+
+I'm going to cut the pop down to 25 and cut out lots of operators. 
+
+==> Something screwy is going on. It is no faster. Gets stuck sometimes after 1 iteration. 
+
+--> I remove exceptional processing. No help! Still slow! WTF is it doing???
+
+Is it that the agent is forcing things into one process??? Need to watch process meter!!
+** <2017-10-28 Sat>
+
+*** Slow Runtime investigation
+
+Yesterday: Is it that the agent is forcing things into one process??? Need to watch process meter!!
+I think that it is that I don't have an ABORT that actually leaves the loop, and that
+I don't have a record (defonce atom) ? of old evolve-chan. OTOH, these are suppose to park.
+
+[[http://www.bradcypert.com/clojure-async/][Brad Cypert on Core.Async]] 
+
+**** Before I started, there were two processes called main. 
+    MJPdes (started with lein repl) gets two processes called main too.  
+    Also get two with C-c M-j on MJPdes.
+    Starting fresh I get one. (fan starts/stops) Now two again 869 and 784
+    Killing 684 kills both.
+    ====> One starts just as the REPL server starts. --> One for program, one for repl (nREPL). 
+**** Pipe taking 30% of a CPU. Killed it. 
+**** Code suggests that nothing starts just by loading. 
+**** Oh so well behaved today!
+    Got more than 500% CPU and CPU dropped to 0.1% when done. 
+**** Big-reset didn't save on old-channel. (Reload doesn't obey defonce ???)
+    Also, no message that would suggest that ABORT happened. 
+*** Resolved runtime, but exceptional is slow!
+
+It is not just slow, it is stuck, I think. Aborting doesn't abort. Some of those 
+pmapped things are probably still running -- hung: 
+**** Need timeouts on pmapped processes???
+
+*** This was first attempt at pmap-timeout (though I didn't know it at the time!)
+(def running "Vector of futures" (atom []))
+(def promises "Promises of running individuals." (atom []))
+
+(def sched-chan ; POD defonce
+  "A channel with a buffer equal to the number of cpu/hyperthreads."
+  (async/chan (-> (app-info) :gp-system :use-cpus)))
+
+
+(defn schedule-work
+  "Schedule an individual to run; return a promise."
+  [inv work]
+  (>!! sched-chan (:id inv)) ; block if full
+    (future (deliver p (work inv))
+            (<!! sched-chan)) ; make room for more
+    p))
+
+(defn finished-work
+  "Deref a promise (with timeout) and pull from channel to free up a spot."
+  [p]
+  (let [result (deref p 10000 :timeout)]
+    (cl-format *out* "~%~A finished with ~A" (<!! sched-chan) result)
+    result))
+
+
+***    13:45 - pmap-timeout working....
+    ... but I'm back to having 700% CPU when nothing (useful) is running.  
+   
+    Agents allow shared access to mutable state. 
+    (send-off @the-agent evolve-continue @the-promise evolve-chan)
+
+    So I'm asking the agent to run evolve-continue, as opposed to just running evolve-continue
+    in a thread with future. 
+
+    I am not able to use (shutdown-agents) (nREPL uses agents). So maybe I try this 
+    with a future? 
+
+    The nice thing about agents is the error handler....
+    No difference. So SLOWWWW
+
+    Let's see if the pmap-timeout is implicated. 
+    A: No, not really. It gets stuck on 100% rather than 800% so we can at least debug it. 
+
+>>>>>    the-promise never gets delivered. 
+>>>>>    Delivering it by hand doesn't help.
+
+Temporarily, I'm not reset! the-future to nil. When I print it out:
+         (try @@the-future (catch Exception e (str e)))
+            "java.util.concurrent.CancellationException"
+
+
+This 700% problem is really weird. 
+(clojure.core.async/thread) shows one thread. 
+
+I *think* I now know why it would hang in the map case (as opposed to my pmap-timeout case):
+ It gets stuck on simple-reach. Next time I'll get the PN!!!
+
+For the 700% case, it is probably true that future-cancel isn't doing what I hoped (terminating the thread)

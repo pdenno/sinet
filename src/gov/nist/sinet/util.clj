@@ -1,8 +1,11 @@
 (ns gov.nist.sinet.util
   "General sorts of things needed in several places in the sinet project."
   {:author "Peter Denno"}
-  (:require [clojure.pprint :refer (cl-format pprint)]
-            [clojure.tools.namespace.repl :as nsp]))
+  (:require [clojure.pprint :refer (cl-format pprint pp)]
+            [clojure.tools.namespace.repl :as nsp]
+            [clojure.core.async :as async :refer [alts!! thread]]))
+
+(def ^:private diag (atom nil))
 
 (defn app-info
   "The way into the app for reading."
@@ -32,7 +35,8 @@
   []
   ;; Disable-reload! is here so that the atoms app/problem and app/gp-params don't get redefined.
   ;; I can then update them (e.g. in testing) to run various scenarios. 
-  (nsp/disable-reload! (find-ns 'gov.nist.sinet.app)) 
+  (nsp/disable-reload! (find-ns 'gov.nist.sinet.app))
+  (nsp/disable-reload! (find-ns 'gov.nist.sinet.untouched)) 
   ;(nsp/disable-reload! (find-ns 'taoensso.sente))
   ;(nsp/disable-reload! (find-ns 'org.httpkit.server))
   ;(nsp/disable-reload! (find-ns 'org.httpkit.client))
@@ -48,6 +52,7 @@
   "Reset the system, getting out of a jam if possible."
   []
   (nsp/clear)
+  (nsp/disable-reload! (find-ns 'gov.nist.sinet.untouched))
   ;(nsp/set-refresh-dirs)
   ;(nsp/disable-reload! (find-ns 'taoensso.sente))
   ;(nsp/disable-reload! (find-ns 'org.httpkit.server))
@@ -109,3 +114,52 @@
                       (let [dif (- x avg)]
                         (* dif dif)))
                     v)))))
+
+(defn pmap-timeout
+  "Like (pmap func coll) except that it returns {:timeout <member>} for those members of coll
+   for which func does not complete in timeout milliseconds after that member is started.
+   Runs as many futures in parallel as possible for the hardware. Returns a vector of results."
+  ([func members timeout]
+   (pmap-timeout func members timeout (+ 2 (.. Runtime getRuntime availableProcessors))))
+  ([func members timeout nproc]
+   (let [to-run      (atom (vec members))
+         results     (atom [])
+         running-cnt (atom 0)
+         nprocessors nproc
+         update-fn (fn [mp] ; return a (possibly new) value for the results vector member.
+                     (cond (not (:fut mp)) ;(not= #{:fut :start :mem :prom} (-> mp keys set))
+                           mp,
+                           (future-done? (:fut mp))
+                           (do (swap! running-cnt dec)
+                               (deref (:fut mp))),
+                           (> (System/currentTimeMillis)
+                              (+ (:start mp) timeout))
+                           (do (swap! running-cnt dec)
+                               (.interrupt @(:prom mp))
+                               (.stop @(:prom mp))
+                               ;; POD deref timeout here should not be necessary, but...
+                               (deref (:fut mp) 10 {:timeout (:mem mp)}))
+                           :else mp))]
+     (while (not-empty @to-run)
+       (when (< @running-cnt nprocessors)
+         (let [mem (first @to-run)
+               p   (promise)]
+           (swap! running-cnt inc)
+           (swap! to-run #(vec (rest %)))
+           (swap! results conj {:fut (future
+                                       (try (let [t (Thread/currentThread)]
+                                              (deliver p t)
+                                              (func mem))
+                                            (catch InterruptedException e
+                                              {:timeout mem})))
+                                :prom p
+                                :mem mem
+                                :start (System/currentTimeMillis)})))
+       (swap! results #(vec (map update-fn %))))
+     ;; Wait for everyone to finish/timeout. 
+     (while (some #(:fut %) @results)
+       (swap! results #(vec (map update-fn %))))
+     (reset! diag @results)
+     @results)))
+
+

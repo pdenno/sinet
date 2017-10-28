@@ -3,7 +3,7 @@
   {:author "Peter Denno"}
   (:require ;[clojure.tools.trace :as tr] ; POD temporary, use tr/deftrace instead of defn
             [clojure.pprint :refer (cl-format pprint)]
-            [clojure.core.async :as async :refer [>! <! >!! <!! go-loop chan]]
+            [clojure.core.async :as async :refer [>! <! >!! <!! go-loop chan close!]]
             [clojure.spec.alpha :as s]
             [gov.nist.spntools.core :as pn :refer :all]
             [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp pn-ok-> as-pn-ok->)]
@@ -17,6 +17,7 @@
             [gov.nist.sinet.report :as rep]))
 
 (alias 'gp 'gov.nist.sinet.gp)
+(s/check-asserts true)
 
 ;;; Just for the record, I started with Lee Spector's "gp" demonstration software!
 
@@ -510,22 +511,31 @@
   "Compute the individual's score."
   [inv]
   (as-> inv ?i
+    (assoc ?i :disorder nil)
+    (assoc ?i :except nil)
     (fit/workflow-fitness ?i)
     (fit/exceptional-fitness ?i)
     (assoc ?i :err (+ (:disorder ?i) (:except ?i)))))
+
+(def diag-timeouts (atom []))
 
 (defn sort-by-error
   "Add value for :err to each PN and used it to sort the population by disorder.
    Where disorder is equal, prefer the one with less structure."
   [popu]
-  (as-> popu ?i
-    (pmap i-error ?i) ; POD pmap
+  (as-> popu ?p
+    (util/pmap-timeout i-error ?p 5000) 
+    (map #(if (= (-> % keys set) #{:timeout})
+            (do (swap! diag-timeouts conj %)
+                (assoc (:timeout %) :err 123))
+            %)
+         ?p)
     (vec (sort #(do (reset! diag {:one %1 :two %2})
                     (cond (< (:err %1) (:err %2)) true,
                           (and (== (:err %1) (:err %2))
                                (< (pnu/pn-size (:pn %1)) (pnu/pn-size (:pn %2)))) true,
                           :else false))
-               ?i))))
+               ?p))))
 
 (defn select
   "Select an individual from a sorted population using a tournament of given size."
@@ -567,24 +577,44 @@
                     (recur (conj pop (select ?x pressure))))))))))
 
 (defn evolve-success? [world]
-  (cond (< (-> world :pop first :err) 0.1) ; good enough to count as success (POD :gp-param+)
+  (cond (< (-> world :pop first :err)
+           (gp-param :success-threshold))
         (assoc world :state :success), 
         (>= (:gen world) (gp-param :max-gens))
-        (assoc world :state :failure),         
-        :else (assoc world :state :continue)))
+        (-> world
+            (assoc :state :failure)
+            (assoc :reason :max-gens)),
+        (> (- (System/currentTimeMillis)
+              (:start-time world))
+           (* 1000 (gp-param :timeout-secs)))
+        (-> world
+            (assoc :state :failure)
+            (assoc :reason :timeout-secs)),
+        :else world))
+
+(s/def ::pop (s/coll-of #(identity %) :kind vector?))
+(s/def ::state keyword?)
+(s/def ::gen number?)
+(s/def ::world (s/keys :req-un [::gen ::state ::pop]))
+
+(def the-promise (atom nil))
+(def the-future  (atom nil))
 
 (defn evolve-init
   "Set up world map and initial population."
-  []
+  [world]
   (println "evolve-init...")
-  (reset-all!)
-  (let [world (as-> {} ?w
-                (assoc ?w :gen 0)
-                (assoc ?w :state :init)
-                (assoc ?w :start-time (System/currentTimeMillis))
-                (assoc ?w :pop (initial-pop (gp-param :pop-size))))]
-    (update-pop! (:pop world))
-    world))
+  (if @the-future
+    world ; already started.
+    (do 
+      (reset-all!)
+      (let [world (as-> {} ?w
+                    (assoc ?w :gen 0)
+                    (assoc ?w :state :init)
+                    (assoc ?w :start-time (System/currentTimeMillis))
+                    (assoc ?w :pop (initial-pop (gp-param :pop-size))))]
+        (update-pop! (:pop world))
+        world))))
 
 (defn evolve-continue
   "Loop through generations until success, failure or paused
@@ -596,6 +626,7 @@
   (reset! rep/pause-evolve? false)
   (loop [w world]
     (rep/pop-stats w)
+    (reset! diag w)
     (as-> w ?w
       (assoc ?w :state :running)
       (update ?w :pop #(sort-by-error %))
@@ -604,8 +635,9 @@
       (evolve-success? ?w)
       (rep/report-gen ?w)
       (cond @rep/pause-evolve?
-            (do (deliver prom ?w)
-                (>!! chan "paused"))
+            (do (rep/push-inv (-> ?w :pop first))
+                (deliver prom ?w)
+                (>!! chan "pause"))
             
             (= (:state ?w) :failure)
             (do (rep/push-inv (-> ?w :pop first))
@@ -615,36 +647,27 @@
             (= (:state ?w) :success)
             (do (rep/push-inv (-> ?w :pop first))
                 (deliver prom ?w)
-                (>!! chan "success"))
+                (>!! chan "success")),
             
             :else
             (recur (make-next-gen ?w))))))
 
-(defn evolve-error-handler
-  "Handle errors by the evolve-agent."
-  [ag ex]
-  (println "Agent had error: " ex)
-  (println "Agent value was: "@ag))
-
-(def the-promise (atom nil))
-(def the-agent   (atom nil))
-
 ;;; POD currently not doing anything with the world. 
 (defn continue-msg
-  "Setup for running the evolve loop, setting the-promise, the-agent and a reaper process."
+  "Setup for running the evolve loop, setting the-promise, the-future and a reaper process."
   [world evolve-chan]
-  (if @the-promise
+  (if @the-future
     (do (println "Ignoring second continue.") world)
-    (do (println "starting evolve-agent")
+    (do (println "Starting future for evolve-continue")
         (reset! the-promise (promise))
-        (reset! the-agent  (agent world))
-        (set-error-handler! @the-agent evolve-error-handler)
-        (send-off @the-agent evolve-continue @the-promise evolve-chan)
-        (future
+        (reset! the-future
+                (future (evolve-continue world @the-promise evolve-chan)))
+        (future ; This is a last resort timeout method; see also evolve-success?
           (let [result (deref @the-promise ; yes, 'double deref'
-                              (* 250 (-> (app-info) :gp-params :timeout-secs)) ; POD 15 seconds!
+                              (* 1000 (-> (app-info) :gp-params :timeout-secs)) 
                               :too-late)]
-            (when (= result :too-late) (>!! evolve-chan "abort"))))
+            (when (= result :too-late)
+              (>!! evolve-chan "abort"))))
         world)))
 
 ;;; Both of the following get pushed when the client sends :sinet/evolve-run (see report.clj)
@@ -652,33 +675,44 @@
 ;;; (>!! (rep/evolve-chan) "continue")
 ;;; =====>>> In order to see changes in this function, you need to do a util/big-reset. <<<=======
 (defn start-evolve-loop!
-  "Called from app.clj when starting the app."
+  "Called from app.clj when starting the app. Waits for messages. Never stops."
   [evolve-chan]
   (reset! util/+log+ [])
-  (async/go-loop [world {}]
-    (let [msg (<! evolve-chan)] ; parks thread, doesn't block. 
+  (async/go-loop [world nil]
+    (let [msg (<! evolve-chan)] ; parks thread, doesn't block.
+      (println (str "in loop, msg = " msg))
       (util/log {:in "evolve-loop" :msg msg})
-      (let [world (cond (= msg "init")
-                        (if (= (:state world) :init)
-                          world ; already done. 
-                          (evolve-init)), ; blocks, returns world map with pop, etc.
-                        
-                        (= msg "continue")
-                        (continue-msg world evolve-chan) ; starts an agent and returns world
-
-                        (= msg "paused")
-                        (deref @the-promise)
-                        
-                        (= msg "report now!")
-                        (do (println "world = " world) world)
-                        
-                        (or (= msg "abort")
-                            (= msg "success"))
-                        (do (println "quitting...")
-                            (reset! the-agent nil)
-                            ;; Promise is the world
-                            (deref @the-promise 0 :timeout)))]
-        (recur world)))))
+      (if (= msg "ABORT")
+        (println "Leaving go; will need to run start-evolve-loop!.")
+        (let [world (cond (= msg "init")
+                          (evolve-init world), ; returns world map with population, etc.
+                          
+                          (= msg "continue") ; new future & promise and returns world
+                          (continue-msg world evolve-chan) 
+                          
+                          (= msg "pause") ; continue-msg will have delivered it.
+                          (do (reset! the-future nil)
+                              (deref @the-promise))
+                          
+                          (= msg "report now!")
+                          (do (println "world = " world)
+                              (reset! diag {:world world})
+                              world)
+                          
+                          (= msg "success")
+                          (do (println "success!")
+                              (reset! the-future nil)
+                              (deref @the-promise))
+                          
+                          (= msg "abort")
+                          (do (println "aborting...")
+                              ;(future-cancel @the-future)
+                              (reset! the-future nil)
+                              (reset! diag {:world world})
+                              (reset! the-promise nil)
+                              world))]
+          (s/assert ::world world)
+          (recur world))))))
 
 ;;; This is from the ICMR 2017 days!
 #_(defn eval-inv
