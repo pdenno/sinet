@@ -32,7 +32,7 @@
     
     :max-gens 30           ; These three control how long gp runs. 
     :success-threshold 0.1
-    :timeout-secs 120
+    :timeout-secs 30
     
     :debugging? true
     :pn-k-bounded 10 ; When to give up on computing the reachability graph.

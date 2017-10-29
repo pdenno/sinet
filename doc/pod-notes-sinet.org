@@ -1257,3 +1257,190 @@ I *think* I now know why it would hang in the map case (as opposed to my pmap-ti
  It gets stuck on simple-reach. Next time I'll get the PN!!!
 
 For the 700% case, it is probably true that future-cancel isn't doing what I hoped (terminating the thread)
+
+Some thoughts on interrupt by [[http://puredanger.github.io/tech.puredanger.com/2009/06/08/interrupt-handling/][puredanger]].
+
+** <2017-10-29 Sun>
+
+*** Yesterday's impressive waste of time (NOT?):
+#_(defn pmap-timeout
+  "Like (pmap func coll) except that it returns {:timeout <member>} for those members of coll
+   for which func does not complete in timeout milliseconds after that member is started.
+   Runs as many futures in parallel as possible for the hardware. Returns a vector of results."
+  ([func members timeout]
+   (pmap-timeout func members timeout (+ 2 (.. Runtime getRuntime availableProcessors))))
+  ([func members timeout nproc]
+   (let [to-run      (atom (vec members))
+         results     (atom [])
+         running-cnt (atom 0)
+         nprocessors nproc
+         update-fn (fn [mp] ; return a (possibly new) value for the results vector member.
+                     (cond (not (:fut mp)) ;(not= #{:fut :start :mem :prom} (-> mp keys set))
+                           mp,
+                           (future-done? (:fut mp))
+                           (do (swap! running-cnt dec)
+                               (deref (:fut mp))),
+                           (> (System/currentTimeMillis)
+                              (+ (:start mp) timeout))
+                           (do (swap! running-cnt dec)
+                               (.interrupt @(:prom mp))
+                               (.stop @(:prom mp))
+                               ;; POD deref timeout here should not be necessary, but...
+                               (deref (:fut mp) 10 {:timeout (:mem mp)}))
+                           :else mp))]
+     (while (not-empty @to-run)
+       (when (< @running-cnt nprocessors)
+         (let [mem (first @to-run)
+               p   (promise)]
+           (swap! running-cnt inc)
+           (swap! to-run #(vec (rest %)))
+           (swap! results conj {:fut (future
+                                       (try (let [t (Thread/currentThread)]
+                                              (deliver p t)
+                                              (func mem))
+                                            (catch InterruptedException e
+                                              {:timeout mem})))
+                                :prom p
+                                :mem mem
+                                :start (System/currentTimeMillis)})))
+       (swap! results #(vec (map update-fn %))))
+     ;; Wait for everyone to finish/timeout. 
+     (while (some #(:fut %) @results)
+       (swap! results #(vec (map update-fn %))))
+     (reset! diag @results)
+     @results)))
+
+*** I'm still at it. This morning I read about timeout on alts!! in Clojure for the Brave and True. 
+
+**** First try
+(pmap-timeout (fn [n] (Thread/sleep n) :done) (repeatedly 8 #(+ 1000 (* 1000 (rand-int 5)))) 5000)
+(defn pmap-timeout
+  "Like (pmap func coll) except that it returns {:timeout <member>} for those members of coll
+   for which func does not complete in timeout milliseconds after that member is started.
+   Runs as many instances in parallel as possible for the hardware."
+  [func members maxtime]
+  (map (fn [mem]
+         (let [c (async/chan)]
+           (go (>! c {::val (func mem)}))
+           (let [[v _] (alts!! [c (timeout maxtime)])]
+             (if (contains? v ::val)
+               (::val v)
+               {:timeout mem}))))
+       members))
+
+***** Huh?
+Okay, I expected some trouble, but not this. The map here is not blocking!
+Furthermore, it takes maxtime rather than the actual execution time!
+I see one problem in that the system might not really start the process when I do go.
+I can fix that with a promise that delivers the time and channel. Let's try that first,
+THOUGH THINGS ARE ALREADY CONFUSED BY NOT BLOCKING!!! <---- doall on map!
+
+***** Naive; no promise, no doall
+(defn pmap-timeout
+  "Like (pmap func coll) except that it returns {:timeout <member>} for those members of coll
+   for which func does not complete in timeout milliseconds after that member is started.
+   Runs as many instances in parallel as possible for the hardware."
+  [func members maxtime]
+  (let [channels (map #(let [c (async/chan)]
+                         (go (>! c {::val (func %)}))
+                         c)
+                      members)
+        launched (System/currentTimeMillis)]
+    ;; This isn't perfect, but it gets around futures, which I can't get to .stop.
+    (map (fn [mem c]
+           (let [remaining (max (- maxtime (- (System/currentTimeMillis) launched)) 1)
+                 [v _] (alts!! [c (timeout remaining)])]
+             (if (contains? v ::val)
+               (::val v)
+               {:timeout mem})))
+         members
+         channels)))
+
+
+
+
+
+
+
+
+***** This one "gathers" cpus with each iteration, keeps them!
+(defn pmap-timeout
+  "Like (pmap func coll) except that it returns {:timeout <member>} for those members of coll
+   for which func does not complete in timeout milliseconds after that member is started.
+   Runs as many instances in parallel as possible for the hardware."
+  ([func members maxtime] (pmap-timeout func members maxtime :timeout))
+  ([func members maxtime timeout-key]
+   (let [chan&prom (map #(let [c (chan)
+                               p (promise)]
+                           (go (deliver p (System/currentTimeMillis))
+                               (>! c {::val (func %)}))
+                           [c p])
+                        members)]
+     ;; This was designed to gets around futures not .stop-ing. No help.
+     (doall
+      (map (fn [mem [c p]]
+             (let [launched (deref p)
+                   remaining (max (- maxtime (- (System/currentTimeMillis) launched)) 1)
+                   [v _] (alts!! [c (timeout remaining)])]
+               (if (contains? v ::val)
+                 (::val v)
+                 {timeout-key mem})))
+           members
+           chan&prom)))))
+
+;;; Apparently, it doesn't even run them in parallel!:
+
+
+
+(time (let [times (pmap-timeout (fn [n] (Thread/sleep n) n) (repeatedly 8 #(+ 1000 (* 1000 (rand-int 5)))) 5000)]
+        (println (str "times = " times))
+        (apply + (map #(if (number? %) % (:timeout %)) times)))
+"Elapsed time: 19029.34562 msecs"
+19000
+
+I GIVE UP!!!!
+times = clojure.lang.LazySeq@b6bc10ca
+"Elapsed time: 30032.256013 msecs"
+
+
+Yesterday's was better! It didn't stop either, but it used all the processors:
+times = [3000 {:timeout 5000} {:timeout 5000} {:timeout 5000} {:timeout 5000} 1000 3000 2000]
+"Elapsed time: 5007.784076 msecs"
+29000
+
+I'll update yesterday's to send the actual launch time in the promise, then I'm calling it quits.
+
+I REALLY NEED TO GIVE UP! However, when it does get stuck, it gets stuck while starting the 
+first eight. For example, the running-cnt stops at 2 or 3. 
+
+Too bad [[https://www.amazon.com/Clojure-High-Performance-JVM-Programming/dp/1787129594][this]] (high-performance clojure/jvm) is published by Packt!
+
+*** I'm going with my 'sophisticated' futures one; this is the last one with core.async
+(defn pmap-timeout
+  "Like (pmap func coll) except that it returns {:timeout <member>} for those members of coll
+   for which func does not complete in timeout milliseconds after that member is started.
+   Runs as many instances in parallel as possible for the hardware."
+  ([func members maxtime] (pmap-timeout func members maxtime :timeout))
+  ([func members maxtime timeout-key]
+   (let [chan&prom (map #(let [c (chan)
+                               p (promise)]
+                           (go (deliver p (System/currentTimeMillis))
+                               (>! c {::val (func %)}))
+                           [c p])
+                        members)]
+     ;; They won't start until I dereference??? Back to the future!
+     (map (fn [[_ p]] (future (deref p))) chan&prom)
+     ;; This was designed to gets around futures not .stop-ing. Still doesn't stop.
+     (doall
+      (map (fn [mem [c p]]
+             (let [launched (deref p)
+                   remaining (max (- maxtime (- (System/currentTimeMillis) launched)) 1)
+                   [v _] (alts!! [c (timeout remaining)])]
+               (if (contains? v ::val)
+                 (::val v)
+                 {timeout-key mem})))
+           members
+           chan&prom)))))
+
+
+

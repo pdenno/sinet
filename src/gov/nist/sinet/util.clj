@@ -3,7 +3,8 @@
   {:author "Peter Denno"}
   (:require [clojure.pprint :refer (cl-format pprint pp)]
             [clojure.tools.namespace.repl :as nsp]
-            [clojure.core.async :as async :refer [alts!! thread]]))
+            [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp pn-ok-> as-pn-ok->)] ; POD TEMPORARY!
+            [clojure.core.async :as async :refer [chan alts!! go timeout >!]]))
 
 (def ^:private diag (atom nil))
 
@@ -115,51 +116,55 @@
                         (* dif dif)))
                     v)))))
 
+(defn ^:private pmap-update-fn
+  "Return a (possibly new) value for the results vector member."
+  [m running-cnt timeout]
+  (cond (not (::fut m)) 
+        m,
+        (future-done? (::fut m))
+        (do (swap! running-cnt dec)
+            (deref (::fut m))),
+        (> (System/currentTimeMillis)
+           (+ (:started @(:prom m)) timeout))
+        (do (swap! running-cnt dec)
+            ;(.interrupt (:thread @(:prom m))) ; try...
+            ;(.stop (:thread @(:prom m)))      ; every-...
+            (future-cancel (::fut m))         ; -thing. 
+            {:timeout (:mem m)})       ; POD redundant
+        :else m))
+
 (defn pmap-timeout
   "Like (pmap func coll) except that it returns {:timeout <member>} for those members of coll
    for which func does not complete in timeout milliseconds after that member is started.
    Runs as many futures in parallel as possible for the hardware. Returns a vector of results."
   ([func members timeout]
    (pmap-timeout func members timeout (+ 2 (.. Runtime getRuntime availableProcessors))))
-  ([func members timeout nproc]
+  ([func members timeout nprocessors]
    (let [to-run      (atom (vec members))
          results     (atom [])
-         running-cnt (atom 0)
-         nprocessors nproc
-         update-fn (fn [mp] ; return a (possibly new) value for the results vector member.
-                     (cond (not (:fut mp)) ;(not= #{:fut :start :mem :prom} (-> mp keys set))
-                           mp,
-                           (future-done? (:fut mp))
-                           (do (swap! running-cnt dec)
-                               (deref (:fut mp))),
-                           (> (System/currentTimeMillis)
-                              (+ (:start mp) timeout))
-                           (do (swap! running-cnt dec)
-                               (.interrupt @(:prom mp))
-                               (.stop @(:prom mp))
-                               ;; POD deref timeout here should not be necessary, but...
-                               (deref (:fut mp) 10 {:timeout (:mem mp)}))
-                           :else mp))]
+         running-cnt (atom 0)]
      (while (not-empty @to-run)
        (when (< @running-cnt nprocessors)
          (let [mem (first @to-run)
                p   (promise)]
            (swap! running-cnt inc)
            (swap! to-run #(vec (rest %)))
-           (swap! results conj {:fut (future
-                                       (try (let [t (Thread/currentThread)]
-                                              (deliver p t)
-                                              (func mem))
-                                            (catch InterruptedException e
-                                              {:timeout mem})))
+           (swap! results conj {::fut (future
+                                        (try (let [t (Thread/currentThread)]
+                                               (deliver p {:thread t
+                                                           :started (System/currentTimeMillis)})
+                                               (func mem))
+                                             (catch InterruptedException e
+                                               {:timeout mem}))) ; POD redundant, maybe ignored.
                                 :prom p
-                                :mem mem
-                                :start (System/currentTimeMillis)})))
-       (swap! results #(vec (map update-fn %))))
+                                :mem mem})))
+       (swap! results (fn [r] (vec (doall (map #(pmap-update-fn % running-cnt timeout) r))))))
      ;; Wait for everyone to finish/timeout. 
-     (while (some #(:fut %) @results)
-       (swap! results #(vec (map update-fn %))))
-     (reset! diag @results)
+     (while (some #(::fut %) @results)
+       (swap! results (fn [r] (vec (doall (map #(pmap-update-fn % running-cnt timeout) r))))))
      @results)))
+
+
+
 
 
