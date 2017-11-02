@@ -9,7 +9,7 @@
             [gov.nist.spntools.util.pnml :as pnml]
             [gov.nist.sinet.pnn :as pnn]))
 
-(stest/instrument)
+(stest/instrument 'pnn/euclid-dist2)
 
 (defn =* [calculated given tol]
   (< (- given tol) calculated (+ given tol)))

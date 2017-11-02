@@ -30,7 +30,7 @@
                  [quil                       "2.6.0"]
 
                  [aysylu/loom                "1.0.0"]
-
+                 [pdenno/utils4pmap          "0.1.0"]
                  [gov.nist/spntools          "0.1.0-SNAPSHOT" :exclusions [org.clojure/clojure]]]
 
   :plugins [[lein-figwheel "0.5.14"]

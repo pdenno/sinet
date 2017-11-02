@@ -5,6 +5,7 @@
             [clojure.pprint :refer (cl-format pprint)]
             [clojure.core.async :as async :refer [>! <! >!! <!! go-loop chan close!]]
             [clojure.spec.alpha :as s]
+            [pdenno.utils4pmap :as u4pmap]
             [gov.nist.spntools.core :as pn :refer :all]
             [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp pn-ok-> as-pn-ok->)]
             [gov.nist.spntools.util.reach :as pnr :refer (reachability)]
@@ -199,7 +200,6 @@
 (defn check-pn
   "clojure.spec check the pn."
   [pn]
-  (reset! diag {:pn pn})
   (s/assert ::gppn pn))
 
 (defn initial-pn
@@ -524,17 +524,16 @@
    Where disorder is equal, prefer the one with less structure."
   [popu]
   (as-> popu ?p
-    (util/pmap-timeout i-error ?p 5000) 
+    (reset! diag (u4pmap/pmap-timeout1 i-error ?p 5000)) 
     (map #(if (= (-> % keys set) #{:timeout})
             (do (swap! diag-timeouts conj %)
                 (assoc (:timeout %) :err 123))
             %)
          ?p)
-    (vec (sort #(do (reset! diag {:one %1 :two %2})
-                    (cond (< (:err %1) (:err %2)) true,
-                          (and (== (:err %1) (:err %2))
-                               (< (pnu/pn-size (:pn %1)) (pnu/pn-size (:pn %2)))) true,
-                          :else false))
+    (vec (sort #(cond (< (:err %1) (:err %2)) true,
+                      (and (== (:err %1) (:err %2))
+                           (< (pnu/pn-size (:pn %1)) (pnu/pn-size (:pn %2)))) true,
+                      :else false)
                ?p))))
 
 (defn select
@@ -620,13 +619,11 @@
   "Loop through generations until success, failure or paused
    On success or failure, put a message to that effect on the channel."
   [world prom chan]
-  (reset! diag {:world world})
   (println "evolve-continue...")
   (util/log {:in 'evolve-continue :world world})
   (reset! rep/pause-evolve? false)
   (loop [w world]
     (rep/pop-stats w)
-    (reset! diag w)
     (as-> w ?w
       (assoc ?w :state :running)
       (update ?w :pop #(sort-by-error %))
@@ -696,7 +693,7 @@
                           
                           (= msg "report now!")
                           (do (println "world = " world)
-                              (reset! diag {:world world})
+                              ;(reset! diag {:world world})
                               world)
                           
                           (= msg "success")
@@ -708,7 +705,7 @@
                           (do (println "aborting...")
                               ;(future-cancel @the-future)
                               (reset! the-future nil)
-                              (reset! diag {:world world})
+                              ;(reset! diag {:world world})
                               (reset! the-promise nil)
                               world))]
           (s/assert ::world world)
@@ -837,7 +834,7 @@
 ;;; Thus here we want:
 ;;;    - m1-start-job to buffer be a low priority, sending the old part to the buffer.
 ;;;    - m2-start-job doesn't matter; it is a "fan in", will take the newest. 
-(defn diag-inject-pn
+(defn diag-inject-pn2
   "Read the PN and insert it in the population, replacing the individual specified."
   [fname ix priorities]
   (let [pn (-> (pnml/read-pnml fname)
@@ -846,5 +843,13 @@
     (update-pop! 
      (assoc (-> (app-info) :pop) ix
             (map->Inv {:pn pn})))))
+
+(defn diag-inject-pn1
+  "Read the PN and insert it in the population, replacing the individual specified."
+  [pn ix]
+    (update-pop! 
+     (assoc (-> (app-info) :pop) ix
+            (map->Inv {:pn pn}))))
+
   
   

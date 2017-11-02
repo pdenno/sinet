@@ -30,9 +30,9 @@
     :pop-size 25 ; 100 pre-except
     :aqpn-warm-up 5 ; "Ignore this number of tokens on both ends of the log."
     
-    :max-gens 30           ; These three control how long gp runs. 
+    :max-gens 30           ; These three control how long gp runs.  ; POD actually stops at :max-gens - 1.
     :success-threshold 0.1
-    :timeout-secs 30
+    :timeout-secs 120
     
     :debugging? true
     :pn-k-bounded 10 ; When to give up on computing the reachability graph.

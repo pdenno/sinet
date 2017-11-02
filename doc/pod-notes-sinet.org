@@ -13,6 +13,7 @@
     
 ** Key bindings 
 *** Opening and closing
+**** Cntl-tab open/close at point
 **** Shift-tab open/close whole document (circular)
 **** Shift-cntl open/close current
 *** Linking
@@ -66,7 +67,8 @@
  So simulation has to be better and I need to distinguish these immediate transitions some how. 
 
 ** TODO Find a way to find the pathname "to a namespace" so I can run tests on dependent packages. 
-** TODO Create a project for simple neural nets. Sinet log date <2017-10-23 Mon> has some code for it. 
+** DONE Create a project for simple neural nets. Sinet log date <2017-10-23 Mon> has some code for it. 
+   CLOSED: [2017-11-01 Wed 19:53]
 
 ** DONE Fix MJPdes as described in log <2017-10-17 Tue>
    CLOSED: [2017-10-22 Sun 14:25]
@@ -78,10 +80,71 @@
 ** Integrate exceptional fitness, try using it to place buffer limits.
     In addition to adding an inhibitor with multiplicity, may need to attach functions that
     will emit messages on exceptional events.
+** Add individuals that represent machine activity???
+   Add genetic operators that combine machine perspective with job perspective. STAR
+   Add genetic operators that keep edits within a machine. STAR
+   Thought: Evolution here is essential from job perspective to machine/topology perspective.
+             - At least when there are parallel workcenters, this will be true. 
+             - Also true about learning about buffers and accommodating other jobs.
+             - Probably want a "ready-made structure" for insertion of parallel workstations. 
 ** Add MJP 
-    This entails watching the execution times, maybe doing GPtips like regression.
+    This entails
+     (1) having an operator for adding other colours -- Not a crossover operator ???
+     (2) watching the execution times, maybe doing GPtips like regression.
 ** Add Causal
     This entails making the infinitessimal generator parametric.
+
+
+* Paper 
+** Problem Statement
+*** Production control objective, need for [what is essentially] situational awareness
+     It's for control (ISA levels 2 and 3) in an environment with ECs and changing goals 
+****  Lacunae of machine learning y=f(x) in sequencing problems, transient production
+****  Validated / Validatable Model 
+***** Validation through examination and behavior consistent with causal understanding
+
+** Outline
+*** Intro / Challenges addressed (as above)
+****  Remember to stay goal-oriented when discussing the problem and parts solved/unsolved.
+*** Related work 
+****  SI - modern method (Fu and Li paper)
+****  Process Mining (note no exceptional messages, flawed view of system, flawed simulation). 
+*** Solution Architecture (Intro and background for reading next section)
+****  ISA figure from ICMR
+****  Why GP/GA?
+*****    Why GP? (Why not completely GP/GA?)
+****  Introduce PN, GSPNs, CPN, QPNs in as far as page count permits.
+****  Why AQPNs rather than simulation (a la Satoshi)
+*****   Formal semantics agnostic to viewpoint (BBS vs BAS example, move part to down machine?)
+*****   Computationally efficient steady-state
+****  AQPN Design Space
+*****   GSPN goal -- steady state, parametric -> causal (figure from ICMR)
+*****   Colour, queueing and priority
+*** Solution Details
+****  GP Challenges: diversity and locality
+*****   Semantic GP operators 
+******    For exceptional messages
+******    For where arcs might be placed.
+******    Evolution is essential from job perspective to machine/topology perspective???
+*****   K-limited reachability graph. 
+*****   Initial population (job trace / machine op)
+*** Conclusion
+**** Restate goal
+**** Describe solved and unsolved aspects
+**** Future work: integration with sequencing algorithms, dampening, 
+
+
+** Points to make
+*** Locality and Diversity
+*** PNN Method for Exceptional Messages
+*** Parametric I Matrix and Causal Validation
+*** Role of priority / token balance
+
+** Parts of algorithm
+ - Initial pop that models jobs (Initial pop that models machines?)
+ - Preferring simpler solutions when scores are essentially the same. 
+ - Method for exceptional messages
+
 
 * Discussion
 ** Rationale for PNN
@@ -100,15 +163,79 @@ The nice thing here is that using the parametric infinitessimal, I'll have real-
 quantities of tokens in places. The PNN essentially shows the state changes while I move around the parameters.
 
 *** Think about what is being inferred. 
-
 *** What role do the "starving/blocking" places have? Can they be added?
-
 *** Define the steps 
    - recognition of a pattern
    - hypothesis generation
    - hypothesis testing (causal? comparison?)
-** IDEA: Maybe award fitness to PNs that represent it. 
+   - [TODO] Consider "evolution in stages" where fitness changes when milestones are reached.
+** IDEA: Maybe award fitness to PNs that represent exceptional messages.
 ***       Award a little less to those who can at least cope with it with a NN. 
+
+** Integrating exceptional fitness
+No starting links because nothing can parse the log. Every individual is capable of only describing
+the path of a single job through the production resources. I think I have few options:
+
+*** 1) Hope for a population that gets it right.
+   Use genetic operators to produce more varied individuals, including some that 
+   might parse the log well enough to get an exceptional msg table with markings that
+   can guide design.
+
+*** 2) Use a next-ordinary-on-job
+   Instead of next-ordinary, use next-ordinary-on-job. That will provide a parse
+   and lead to the need for queues. 
+
+   You could apply this to multiple jobs, but would that be helpful?
+
+*** 3) Give some more thought about how the reachability graph can do this. 
+
+*** Summary (and msg-table)
+Preparation to do (1) and (2) is the same, I think: It must be possible to 
+use the msg table markings to update the PN. This is a "semantic genetic operator"
+
+{:m1-blocked   {[3 0 1 1 0] 30},
+ :m1-unblocked {[2 1 0 1 0] 30},
+ :m2-starved   {[0 0 1 0 1] 14},
+ :m2-unstarved {[0 0 1 1 0] 14},
+ :ordinary
+ {[0 1 0 1 0] 203,
+  [2 0 1 1 0] 511,
+  [1 1 0 1 0] 263,
+  [3 0 1 0 1] 248,
+  [1 0 1 1 0] 466,
+  [0 1 0 0 1] 14,
+  [2 1 0 1 0] 248,
+  [3 0 1 1 0] 248,
+  [1 0 1 0 1] 217,
+  [0 0 1 1 0] 217,
+  [0 0 1 0 1] 14,
+  [2 0 1 0 1] 263}}
+
+But that is a msg-table for N=3. A table for N=1 would have 1/0 for the first component of block/unblock.
+So what? 
+
+But why doesn't an individual emerge from evolution that can do this?
+The winning individual came real close after just two iterations. 
+
+*** After 30 I still didn't get one. 
+(You need 5 places and just the four transitions.) The only mistake
+was an arc from the buffer to m2-complete-job. That arc should have
+went to m2-start job. I think it may have stopped because success is <= 1 ??? Nope: we are looking for 0.1 or better.
+
+***** I'm following jobs, what if instead I followed machines? (Or did both?)
+Essentially what is wrong with the algorithm now is that it doesn't look at what machines do.
+A Machine accepts/creates a part and starts work on it. It puts/destroys a part when done. 
+These are patterns I could inject into the initial population, similar to what I do for jobs. 
+What I really need are operators that combine the two viewpoints!!!
+
+*** I'm going to cut the pop down to 25 and cut out lots of operators. 
+   Not enough experimentation yet, but so far, that didn't work. 
+
+*** Let's force one close to this [[file:~/TwoDrive/OneDrive/Repo/mindmaps/images/close-to-correct-pn.jpg]]
+
+Find the PN for this on Sunday 2017-10-29. 
+
+
 
 * Sinet Log *
 ** <2017-10-14 Sat>
@@ -1122,49 +1249,8 @@ This makes no sense. big-reset does not fix it.
 
 ==> Timeout requesting individual...Needed to provide a clean PN (no functions). DONE.
 
-No starting links because nothing can parse the log. Every individual is capable of only describing
-the path of a single job through the production resources. I think I have few options:
+  < See Discussion>
 
-1) Use genetic operators to produce more varied individuals, including some that 
-   might parse the log well enough to get an exceptional msg table with markings that
-   can guide design.
-
-2) Instead of next-ordinary, use next-ordinary-on-job. That will provide a parse
-   and lead to the need for queues. 
-
-3) Give some more thought about how the reachability graph can do this. 
-
-Preparation to do (1) and (2) is the same, I think: It must be possible to 
-use the msg table markings to update the PN. This is a "semantic genetic operator"
-
-{:m1-blocked   {[3 0 1 1 0] 30},
- :m1-unblocked {[2 1 0 1 0] 30},
- :m2-starved   {[0 0 1 0 1] 14},
- :m2-unstarved {[0 0 1 1 0] 14},
- :ordinary
- {[0 1 0 1 0] 203,
-  [2 0 1 1 0] 511,
-  [1 1 0 1 0] 263,
-  [3 0 1 0 1] 248,
-  [1 0 1 1 0] 466,
-  [0 1 0 0 1] 14,
-  [2 1 0 1 0] 248,
-  [3 0 1 1 0] 248,
-  [1 0 1 0 1] 217,
-  [0 0 1 1 0] 217,
-  [0 0 1 0 1] 14,
-  [2 0 1 0 1] 263}}
-
-But that is a msg-table for N=3. A table for N=1 would have 1/0 for the first component of block/unblock.
-So what? 
-
-But why doesn't an individual emerge from evolution that can do this?
-The winning individual came real close after two iterations. 
-(You need 5 places and just the four transitions.) The only mistake
-was an arc from the buffer to m2-complete-job. That arc should have
-went to m2-start job. I think it may have stopped because success is <= 1 ??? Nope: we are looking for 0.1 or better.
-
-I'm going to cut the pop down to 25 and cut out lots of operators. 
 
 ==> Something screwy is going on. It is no faster. Gets stuck sometimes after 1 iteration. 
 
@@ -1416,6 +1502,8 @@ first eight. For example, the running-cnt stops at 2 or 3.
 Too bad [[https://www.amazon.com/Clojure-High-Performance-JVM-Programming/dp/1787129594][this]] (high-performance clojure/jvm) is published by Packt!
 
 *** I'm going with my 'sophisticated' futures one; this is the last one with core.async
+
+This [[https://books.google.com/books?id=wU8oDwAAQBAJ&pg=PA231&lpg=PA231&dq=clojure+realized?+versus+future-done?&source=bl&ots=jp-WamYmFj&sig=EVCmaMEv1SyUiGteYzTWgJOGNRw&hl=en&sa=X&ved=0ahUKEwi73vy0oJbXAhUJ6iYKHWwWDTcQ6AEIWjAH#v=onepage&q=clojure%20realized%3F%20versus%20future-done%3F&f=false][page]] about future-done? in hi-performance jvm ... is good.
 (defn pmap-timeout
   "Like (pmap func coll) except that it returns {:timeout <member>} for those members of coll
    for which func does not complete in timeout milliseconds after that member is started.
@@ -1444,3 +1532,373 @@ Too bad [[https://www.amazon.com/Clojure-High-Performance-JVM-Programming/dp/178
 
 
 
+*** I gave up!
+*** Here is an offending pn, it is not k-bounded
+**** Code
+(def pnpn
+{:initial-marking [1 0 0 0],
+ :transitions
+ [{:name :m1-start-job,
+   :tid 2,
+   :type :exponential,
+   :rate 1.0,
+   :rep {:act :m1-start-job, :j 2001, :jt :jobType1, :ends 2368.3676866897163, :clk 2367.3676866897163, :line 1275, :mjpact :aj, :m :m1},
+   :visible? true}
+  {:name :m1-complete-job,
+   :tid 3,
+   :type :exponential,
+   :rate 1.0,
+   :rep {:act :m1-complete-job, :bf :b1, :j 2001, :n 1, :clk 2368.3676866897163, :line 1278, :mjpact :bj, :m :m1},
+   :visible? true}
+  {:name :m2-start-job,
+   :tid 4,
+   :type :exponential,
+   :rate 1.0,
+   :rep {:act :m2-start-job, :bf :b1, :j 2001, :n 3, :clk 2370.6070474961243, :line 1287, :mjpact :sm, :m :m2},
+   :visible? true}
+  {:name :m2-complete-job,
+   :tid 5,
+   :type :exponential,
+   :rate 1.0,
+   :rep {:act :m2-complete-job, :m :m2, :j 2001, :ent 2367.3676866897163, :clk 2371.7770474961244, :line 1290, :mjpact :ej},
+   :visible? true}],
+ :sigma 0.75,
+ :winners {},
+ :arcs
+ [{:aid 2, :source :place-1, :target :m1-start-job, :name :aa-2, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+  {:aid 3, :source :m1-start-job, :target :place-2, :name :aa-3, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 4, :source :place-2, :target :m1-complete-job, :name :aa-4, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+  {:aid 5, :source :m1-complete-job, :target :place-3, :name :aa-5, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 6, :source :place-3, :target :m2-start-job, :name :aa-6, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+  {:aid 7, :source :m2-start-job, :target :place-4, :name :aa-7, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 8, :source :place-4, :target :m2-complete-job, :name :aa-8, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+  {:aid 9, :source :m2-complete-job, :target :place-1, :name :aa-9, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 210, :source :m1-start-job, :target :place-4, :name :aa-210, :type :normal, :multiplicity 1, :priority 2}],
+ :rgraph
+ ({:M [1 0 0 0], :fire :m1-start-job, :Mp [0 1 0 0], :rate 1.0}
+  {:M [0 1 0 0], :fire :m1-complete-job, :Mp [0 0 1 0], :rate 1.0}
+  {:M [0 0 1 0], :fire :m2-start-job, :Mp [0 0 0 1], :rate 1.0}
+  {:M [0 0 0 1], :fire :m2-complete-job, :Mp [1 0 0 0], :rate 1.0}),
+ :msg-table {:m2-unstarved {}, :m1-unblocked {}, :m2-starved {}, :ordinary {}, :m1-blocked {}},
+ :marking-key [:place-1 :place-2 :place-3 :place-4],
+ :starting-links (),
+ :places
+ [{:name :place-1, :pid 0, :initial-tokens 1, :visible? true}
+  {:name :place-2, :pid 1, :initial-tokens 0, :visible? true}
+  {:name :place-3, :pid 2, :initial-tokens 0, :visible? true}
+  {:name :place-4, :pid 3, :initial-tokens 0, :visible? true}]})
+
+**** I'm now using "k-bounding" to truncate rgraphs in reach.clj.
+**** 30 iterations and nothing useful found
+**** No implementation of method: :sch-send!
+Once again (it was happening Oct 7, and Friday, among other times) I'm getting a error
+No implementation of method: :sch-send! of protocol: #'taoensso.sente.interfaces/IServerChan found for 
+class: org.httpkit.server.AsyncChannel
+
+Unlike Friday's episode, restarting the client is not helping. 
+However, restarting completely -- lein restart-repl -- did the trick. 
+Could it be that running -- diag-run -- before having the client up messes up the client? 
+
+*** Hopeful PN
+{:initial-marking [1 0 0 0 0],
+ :transitions
+ [{:name :m1-start-job,
+   :tid 38,
+   :type :exponential,
+   :rate 1.0,
+   :rep {:act :m1-start-job, :j 1991, :jt :jobType1, :ends 2356.5705647971827, :clk 2355.3103128463604, :line 1233, :mjpact :aj, :m :m1},
+   :visible? true}
+  {:name :m1-complete-job,
+   :tid 39,
+   :type :exponential,
+   :rate 1.0,
+   :rep {:act :m1-complete-job, :bf :b1, :j 1991, :n 1, :clk 2356.5705647971827, :line 1238, :mjpact :bj, :m :m1},
+   :visible? true}
+  {:name :m2-start-job,
+   :tid 40,
+   :type :exponential,
+   :rate 1.0,
+   :rep {:act :m2-start-job, :bf :b1, :j 1991, :n 3, :clk 2358.9070474961236, :line 1247, :mjpact :sm, :m :m2},
+   :visible? true}
+  {:name :m2-complete-job,
+   :tid 41,
+   :type :exponential,
+   :rate 1.0,
+   :rep {:act :m2-complete-job, :m :m2, :j 1991, :ent 2355.3103128463604, :clk 2360.0770474961237, :line 1248, :mjpact :ej},
+   :visible? true}],
+ :sigma 0.75,
+ :winners {},
+ :arcs
+ [{:aid 74, :source :place-1, :target :m2-start-job, :EDITED true :name :aa-74, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+  {:aid 75, :source :m1-start-job, :target :place-2, :name :aa-75, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 76, :source :place-2, :target :m1-complete-job, :name :aa-76, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+  {:aid 77, :source :m1-complete-job, :target :place-3, :name :aa-77, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 78, :source :place-3, :target :m1-start-job, :EDITED true :name :aa-78, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+  {:aid 79, :source :m2-start-job, :target :place-4, :name :aa-79, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 80, :source :place-4, :target :m2-complete-job, :name :aa-80, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+  {:aid 81, :source :m2-complete-job, :target :place-1, :name :aa-81, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 205, :source :m1-start-job, :target :Place-103, :name :aa-205, :type :normal, :multiplicity 1, :priority 2}
+  {:aid 206, :source :Place-103, :target :m2-start-job, :name :aa-206, :type :normal, :multiplicity 1}],
+ :rgraph
+ {:rgraph
+  [{:M [1 0 0 0 0], :fire :m1-start-job, :Mp [0 1 0 0 1], :rate 1.0}
+   {:M [0 1 0 0 1], :fire :m1-complete-job, :Mp [0 0 1 0 1], :rate 1.0}
+   {:M [0 0 1 0 1], :fire :m2-start-job, :Mp [0 0 0 1 0], :rate 1.0}
+   {:M [0 0 0 1 0], :fire :m2-complete-job, :Mp [1 0 0 0 0], :rate 1.0}],
+  :k-limited? false},
+ :msg-table {:m2-unstarved {}, :m1-unblocked {}, :m2-starved {}, :ordinary {}, :m1-blocked {}},
+ :k-limited? false,
+ :marking-key [:place-1 :place-2 :place-3 :place-4 :Place-103],
+ :starting-links (),
+ :places
+ [{:name :place-1, :pid 0, :initial-tokens 1, :visible? true}
+  {:name :place-2, :pid 1, :initial-tokens 0, :visible? true}
+  {:name :place-3, :pid 2, :initial-tokens 0, :visible? true}
+  {:name :place-4, :pid 3, :initial-tokens 0, :visible? true}
+  {:name :Place-103, :pid 4, :initial-tokens 0}]}
+
+** <2017-10-30 Mon>
+
+The hopeful PN produces this rgraph, which apparently is not sufficient to parse the log. 
+
+ {:rgraph
+  [{:M [1 0 0 0 0], :fire :m1-start-job, :Mp [0 1 0 0 1], :rate 1.0}
+   {:M [0 1 0 0 1], :fire :m1-complete-job, :Mp [0 0 1 0 1], :rate 1.0}
+   {:M [0 0 1 0 1], :fire :m2-start-job, :Mp [0 0 0 1 0], :rate 1.0}
+   {:M [0 0 0 1 0], :fire :m2-complete-job, :Mp [1 0 0 0 0], :rate 1.0}],
+
+The log looks like this:
+
+[{:act :m1-complete-job, :bf :b1, :j 1689, :n 0, :clk 1999.9234365080201, :line 0, :mjpact :bj, :m :m1}
+ {:act :m1-start-job, :j 1690, :jt :jobType1, :ends 2000.9234365080201, :clk 1999.9234365080201, :line 1, :mjpact :aj, :m :m1}
+ {:act :m2-complete-job, :m :m2, :j 1688, :ent 1996.9156570964649, :clk 2000.6492850612497, :line 2, :mjpact :ej}
+ {:act :m2-start-job, :bf :b1, :j 1689, :n 1, :clk 2000.6492850612497, :line 3, :mjpact :sm, :m :m2}
+ {:act :m1-complete-job, :bf :b1, :j 1690, :n 0, :clk 2000.9234365080201, :line 4, :mjpact :bj, :m :m1}
+ {:act :m1-start-job, :j 1691, :jt :jobType1, :ends 2001.9234365080201, :clk 2000.9234365080201, :line 5, :mjpact :aj, :m :m1}
+ {:act :m2-complete-job, :m :m2, :j 1689, :ent 1998.198793731718, :clk 2001.8192850612497, :line 6, :mjpact :ej}
+ {:act :m2-start-job, :bf :b1, :j 1690, :n 1, :clk 2001.8192850612497, :line 7, :mjpact :sm, :m :m2}
+ {:act :m1-complete-job, :bf :b1, :j 1691, :n 0, :clk 2001.9234365080201, :line 8, :mjpact :bj, :m :m1}
+ {:act :m1-start-job, :j 1692, :jt :jobType1, :ends 2002.9234365080201, :clk 2001.9234365080201, :line 9, :mjpact :aj, :m :m1}
+ {:act :m1-complete-job, :bf :b1, :j 1692, :n 1, :clk 2002.9234365080201, :line 10, :mjpact :bj, :m :m1}
+ {:act :m1-start-job, :j 1693, :jt :jobType1, :ends 2003.9234365080201, :clk 2002.9234365080201, :line 11, :mjpact :aj, :m :m1}
+ {:act :m2-complete-job, :m :m2, :j 1690, :ent 1999.9234365080201, :clk 2002.9892850612498, :line 12, :mjpact :ej}]
+
+The reason that it can't model the log is that it isn't looking at job-ids. 
+If instead of what I'm doing, I started with (like the log shows) m1-complete-job j 1689 on line 0,
+then I can jump down to :m2-start-job j 1689 on line 3. THIS is parsing the log!
+
+TUESDAY CLARIFICATION: Parsing the log must still means doing things in the order
+specified by the reachability graph! The problem MIGHT be different from what 
+I describe above. The reason it can't parse the log is that the argument PN has a buffer 
+of only 1, so it can't express the level of asynchronicity in the log??? (FALSE?).
+
+WHATEVER! First fix regression testing, then see what good the job assignments might provide.
+
+What I need is indeed, "next-ordinary-message-on-job" and I need to count what messages
+I parsed and remove them / associate them with the job. 
+When I'm done, I count what content I accounted for by each. 
+EASY PEASY. 
+
+<2017-10-31 Tue>
+
+Well, maybe not so easy. First, there is the matter that we need to keep moving ahead with
+new jobs in order to parse the entire log. Secondly, there is the technical problem of 
+where (in what object) do we keep notice of consumption of a message. 
+
+I'll try to create a map with the messages and other data and validate with the 
+N=3 pn... 
+  -rw-r--r--   1 pdenno  pdenno  334035 Oct 15 12:03 m2-j1-n3-block-mild-out.clj
+So I'll just attach the 334k log to every PN. Let's see how good the GC is!
+
+C-c C-t n has apparently been lying to me!
+** <2017-10-31 Tue>
+
+On the way to exploring the "more flexible" interpretation of the log, I found and
+fixed a bug in starting-links (the "distinct" thing). This might not have an effect
+on functionality. 
+
+I now pass in most information *including the log* through pn. The idea is to track
+which job is consuming which message, a relaxation of the log interpretation to account
+for a lack of (or insufficient) buffer. 
+** <2017-11-01 Wed>
+
+==> I believe that today's algorithm subsumes functionality of disorder-fitness. 
+
+
+(defn next-ordinary-on-job
+  "Return the next ordinary message, at index n or later."
+  [pn n jid]
+  (let [data (:log pn)
+        last-ix (:last-line pn)] ; POD put on pn
+    (loop [indx n]
+      (if (> indx last-ix)
+        nil
+        (if-let [msg (and (ordinary? (nth data indx))
+                          (== (:j (nth data indx)) jid))]
+          msg
+          (recur (inc indx)))))))
+
+[{:M [0 0 1 1 0], :fire :m1-complete-job, :Mp [0 1 0 1 0], :rate 0.9, :indx 0, :job 1689}
+ {:M [1 0 1 1 0], :fire :m1-complete-job, :Mp [1 1 0 1 0], :rate 0.9, :indx 0, :job 1689}]
+
+First one failed on 
+{:msg
+ {:act :m1-complete-job,
+  :bf :b1,
+  :j 1692,
+  :n 1,
+  :clk 2002.9234365080201,
+  :line 10,
+  :mjpact :bj,
+  :m :m1},
+ :interp-last
+ {:M [3 1 0 0 1],
+  :fire :m2-start-job,
+  :Mp [2 1 0 1 0],
+  :rate 1.0,
+  :job 1692,
+  :clk 2001.9234365080201,
+  :indx 9,
+  :relax? :add-job}}
+
+Even if second one succeeds, it is doing so only on buffer size, thus something needs adjustment. 
+Hmmm, maybe not; at :Mp buffer is 2. 
+
+{:msg
+ {:act :m2-complete-job,
+  :m :m2,
+  :j 1720,
+  :ent 2034.2910787732983,
+  :clk 2038.089285061252,
+  :line 130,
+  :mjpact :ej},
+ :interp-last
+ {:M [3 0 1 1 0],
+  :fire :m2-complete-job,
+  :Mp [3 0 1 0 1],
+  :rate 1.0,
+  :job 1720,
+  :clk 2036.919285061252,
+  :indx 129,              <------ Looks like this should be line 128
+  :relax? :active}}
+
+Second is really messed up! :m2-complete-job at 129, then it chooses :m2-complete-job ???
+
+Log looks like this:
+{:act :m2-complete-job, :m :m2, :j 1719, :ent 2033.0614667964674, :clk 2036.919285061252, :line 128, :mjpact :ej}
+{:act :m2-start-job, :bf :b1, :j 1720, :n 2, :clk 2036.919285061252, :line 129, :mjpact :sm, :m :m2}
+{:act :m2-complete-job, :m :m2, :j 1720, :ent 2034.2910787732983, :clk 2038.089285061252, :line 130, :mjpact :ej}
+
+So how did the last action become :indx 129 :m2-complete-job ???
+
+Should I update :graph-link on an :active ? I think so. I did. 
+Need to see the whole interp. Where is 128? 
+  {:M [2 1 0 1 0],
+   :fire :m1-start-job,
+   :Mp [3 0 1 1 0],
+   :rate 1.0,
+   :job 1719,
+   :clk 2036.919285061252,
+   :indx 128,                      <--------------------- 128 is :m2-complete-job
+   :relax? :active}
+  {:M [3 0 1 1 0],
+   :fire :m2-complete-job,
+   :Mp [3 0 1 0 1],
+   :rate 1.0,
+   :job 1720,
+   :clk 2036.919285061252,
+   :indx 129,
+   :relax? :active}]}
+
+(filter #(= (:Mp glink) (:M %)) (:rgraph pn))]
+
+Needs :fire like for normal messages. 
+Something is wrong with the way I'm thinking about this, because when I add the 
+extra condition, things stop after just a few lines.
+
+There is no question that the message condition has to be there -- that's the message!
+So it must be that I'm screwing up on :M / :Mp YEAH -- THOSE shouldn't be in the condition!
+
+8 seconds!!!
+
+(def pnpn (tryme)) ;; Then uncomment...
+(def lll (-> (app-info) :problem :scada-log))
+(time (def foo (interpret-scada pnpn lll (-> pnpn :starting-links first))))
+
+If still slow, try shorting out the call to the Djikstra thing.
+
+Something changed, because now it takes 1200 milliseconds. Acceptable, barely.
+
+Yeah, without Djikstra it finishes in 50 milliseconds and still goes all the way.
+What gives? 
+
+Without checking first: 2796.
+        Checking first: 2796
+
+*** This version of link-match  should not be necessary.
+(defn link-match [pn action llink msg]
+  (let [glink (:graph-link pn)]
+    (if-let [link (some #(when (and (= (:Mp llink) (:M %)) 
+                                    (= (:fire %) (:act msg)))
+                           %)
+                        (:rgraph pn))]
+      (link+msg link msg)
+      ;; This relaxes conformance to rgraph
+      ;; Use :graph-link to find which of the candidate states is nearest. 
+      (when-let [links (filter #(and (= (:fire %) (:act msg)))
+                               (:rgraph pn))]
+        (let [graph (:loom-graph pn)
+              from (:Mp glink)
+              dists (map
+                     (fn [l] {:link l
+                              :dist (count (alg/dijkstra-path
+                                            graph
+                                            from
+                                            (:M l)))})
+                     links)
+              best (-> (sort #(< (:dist %1) (:dist %2)) dists) first :link)]
+          (cl-format *out* "~%counts = ~{~A ~}" (map :dist dists))
+          (when best
+            (as-> (link+msg best msg) ?link
+              (if (= action :aj)
+                (assoc ?link :relax? :add-job)
+                (assoc ?link :relax? :active)))))))))
+*** Cleaning upt some PQN stuff
+;;; This is only called when there aren't many jobs. Typically, just one. 
+#_(defn qpn-typical-job-id
+  "Return log entry from (statistically) most typical jobs (a statistical analysis)."
+  [pn]
+  ;; Check variance across qpn-c-t-t; use it (and process pattern) to determine job types.
+  ;(NYI)
+  ;; Of the types, choose one (a safe one).
+  (let [tkn-id (max (Math/round (/ (-> pn :sim :max-tkn) 2.0)) 1)]
+    (vector ; POD current assume just one job type. 
+     (loop [log (qpn-gather-tkn (-> pn :sim :log) tkn-id) ; this collects just :acts
+            trace []]
+       (let [msg (first log)]
+         (cond (empty? log) trace, 
+               (some #(= (:act %) (:act msg)) trace) trace,
+               :else (recur (next log) (conj trace msg))))))))
+            
+
+*** Tomorrow
+So it only hits "ordinary" about 200 times!
+Why isn't new job ordinary? Why does that create a disconnect; it didn't 
+before I wrote this!
+(In fact, EVERYTHING worked without Djikstra on this test case!)
+** <2017-11-02 Thu>
+
+Force everything in this test case through the old method.
+If can't get it down to 100 msec, consider using FIRST interpretation. 
+Don't commit until this is figured out. 
+
+Get's through 565. Very odd. 
+Aha! Gets throug 565 for the *second* start link. Gets through all 3000 for the *first*!
+
+43 milliseconds!
+
+[{:M [0 0 1 1 0], :fire :m1-complete-job, :Mp [0 1 0 1 0], :rate 0.9, :indx 0, :job 1689}
+ {:M [1 0 1 1 0], :fire :m1-complete-job, :Mp [1 1 0 1 0], :rate 0.9, :indx 0, :job 1689}]
+
+The system is, in fact, in the situation of the first!
+{:act :m1-complete-job, :bf :b1, :j 1689, :n 0, :clk 1999.9234365080201, :line 0, :mjpact :bj, :m :m1}

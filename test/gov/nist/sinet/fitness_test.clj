@@ -76,7 +76,7 @@
 
 (deftest perfect-fitness-scores-zero
   (testing "That a PN matching the log scores zero."
-    (is (=* 0.0 (m2-inhib-bas-workflow-fit 200) 0.01))))
+    (is true (=* 0.0 (:disorder (m2-inhib-bas-workflow-fit 200)) 0.01))))
 
 ;;; POD Better than this would be to use the new MJPdes output directly. (Don't mess with app-info.)
 #_(defn problem-setting-fixture
@@ -128,9 +128,13 @@
     (as-> "data/PNs/m2-inhib-n3.xml" ?pn
       (pnml/read-pnml ?pn)
       (pnr/renumber-pids ?pn)
-      (assoc ?pn :rgraph (pnr/simple-reach ?pn))
-      (assoc ?pn :starting-links (fit/starting-links ?pn log 0))
-      (assoc ?pn :msg-table (fit/compute-msg-table ?pn log))
+      (assoc ?pn :log log)
+      (assoc ?pn :last-line (-> log last :line))
+      (assoc ?pn :rgraph (vec (pnr/simple-reach ?pn)))
+      (assoc ?pn :k-limited? (-> ?pn :rgraph :k-limited?))
+      (assoc ?pn :rgraph (-> ?pn :rgraph :rgraph vec))
+      (assoc ?pn :starting-links (fit/starting-links ?pn 0))
+      (assoc ?pn :msg-table (fit/compute-msg-table ?pn))
       (assoc ?pn :distance-fn pnn/euclid-dist2))))
 
 ;;; There are more state that this in the PN, but not all occurred in the 3000 msgs logged. That's okay. 
