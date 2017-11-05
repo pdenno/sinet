@@ -1,5 +1,5 @@
 (ns gov.nist.sinet.pnn
-  "Probabilistic neural nets (Bayesian nets)"
+  "Probabilistic neural nets (Specht, 1990)"
   (:require [clojure.spec.alpha :as s]))
 
 ;;; A PNN consists of several sub-networks, each of which is
@@ -24,7 +24,7 @@
   ([class data sigma dist-fn]
   (let [xdata (class data)
         size (count xdata)
-        sig2 (* 2 sigma sigma)]
+        sig2 (* 2 sigma sigma)] ; sig^2 is variance. 
     (fn [x]
       (* (/ 1 size)
          (reduce (fn [sum ix]

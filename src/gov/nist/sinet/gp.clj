@@ -178,30 +178,6 @@
           pn
           (->> pn :transitions (map :name))))
 
-(s/def ::clk number?)
-(s/def ::line number?)
-(s/def ::mjpact keyword?)
-(s/def ::act keyword?)
-(s/def ::rep (s/keys :req-un [::act ::mjpact ::line ::clk]))
-                     
-(s/def ::jtype keyword?)
-(s/def ::bind (s/keys :req-un [::jtype]))
-(s/def ::visible boolean?)
-(s/def ::place       (s/keys :req-un [::visible?]))
-(s/def ::transition  (s/keys :req-un [::rep ::visible?]))
-(s/def ::arc         (s/keys :req-un [::bind]))
-
-(s/def ::places      (s/and ::pnu/places      (s/coll-of ::place)))
-(s/def ::transitions (s/and ::pnu/transitions (s/coll-of ::transition)))
-(s/def ::arcs        (s/and ::pnu/arcs        (s/coll-of ::arc)))
-(s/def ::gppn (s/and ::pnu/pn
-                     (s/keys :req-un [::places ::transitions ::arcs])))
-
-(defn check-pn
-  "clojure.spec check the pn."
-  [pn]
-  (s/assert ::gppn pn))
-
 (defn initial-pn
   "Translate a SCADA job trace into a PN."
   [job-trace]
@@ -210,7 +186,7 @@
        eden-pn               ; complete skeletons and add :arcs, making a bipartite graph. 
        add-color-binding     ; add e.g. :bind {:jtype :blue} to :arcs for multi-job paths.
        add-flow-priorities   ; add info for deciding which tokens go where when multiple in/out on trans.
-       check-pn))
+       util/check-pn))
 
 (defn initial-pop
   "Create an initial population of size pop-size."

@@ -76,7 +76,9 @@
 
 ** TODO Need a way to get the world after a time out. 
 ** TODO Does the :pop really need to be on app-info?
+** TODO Every arc needs a :bind and :priority  <----------------------------SOON
 * Agenda for the next week:
+** Consider more forgiving simple-reach -- one which moves tokens around. (Maybe remove add-token remove-token from GP).
 ** Integrate exceptional fitness, try using it to place buffer limits.
     In addition to adding an inhibitor with multiplicity, may need to attach functions that
     will emit messages on exceptional events.
@@ -93,58 +95,6 @@
      (2) watching the execution times, maybe doing GPtips like regression.
 ** Add Causal
     This entails making the infinitessimal generator parametric.
-
-
-* Paper 
-** Problem Statement
-*** Production control objective, need for [what is essentially] situational awareness
-     It's for control (ISA levels 2 and 3) in an environment with ECs and changing goals 
-****  Lacunae of machine learning y=f(x) in sequencing problems, transient production
-****  Validated / Validatable Model 
-***** Validation through examination and behavior consistent with causal understanding
-
-** Outline
-*** Intro / Challenges addressed (as above)
-****  Remember to stay goal-oriented when discussing the problem and parts solved/unsolved.
-*** Related work 
-****  SI - modern method (Fu and Li paper)
-****  Process Mining (note no exceptional messages, flawed view of system, flawed simulation). 
-*** Solution Architecture (Intro and background for reading next section)
-****  ISA figure from ICMR
-****  Why GP/GA?
-*****    Why GP? (Why not completely GP/GA?)
-****  Introduce PN, GSPNs, CPN, QPNs in as far as page count permits.
-****  Why AQPNs rather than simulation (a la Satoshi)
-*****   Formal semantics agnostic to viewpoint (BBS vs BAS example, move part to down machine?)
-*****   Computationally efficient steady-state
-****  AQPN Design Space
-*****   GSPN goal -- steady state, parametric -> causal (figure from ICMR)
-*****   Colour, queueing and priority
-*** Solution Details
-****  GP Challenges: diversity and locality
-*****   Semantic GP operators 
-******    For exceptional messages
-******    For where arcs might be placed.
-******    Evolution is essential from job perspective to machine/topology perspective???
-*****   K-limited reachability graph. 
-*****   Initial population (job trace / machine op)
-*** Conclusion
-**** Restate goal
-**** Describe solved and unsolved aspects
-**** Future work: integration with sequencing algorithms, dampening, 
-
-
-** Points to make
-*** Locality and Diversity
-*** PNN Method for Exceptional Messages
-*** Parametric I Matrix and Causal Validation
-*** Role of priority / token balance
-
-** Parts of algorithm
- - Initial pop that models jobs (Initial pop that models machines?)
- - Preferring simpler solutions when scores are essentially the same. 
- - Method for exceptional messages
-
 
 * Discussion
 ** Rationale for PNN
@@ -236,6 +186,15 @@ What I really need are operators that combine the two viewpoints!!!
 Find the PN for this on Sunday 2017-10-29. 
 
 
+** GP Operators 
+*** Need better notion of locality!
+**** hopeful-pn with an initial-marking [1 0 0 0 0] (where first is place-1)
+     Doesn't even get a rgraph, yet it is SO CLOSE!
+*** Semantic operators
+**** Example failure is hopeful-pn with initial-marking token on place-1
+** [[https://www.datasciencecentral.com/profiles/blogs/artificial-intelligence-is-not-fake-intelligence][This]] neural net chart is pretty good.
+   Much better discussion of it [[http://www.asimovinstitute.org/neural-network-zoo/][here]].
+   23 Types of Regression, [[https://www.datasciencecentral.com/profiles/blogs/23-types-of-regression][here]].
 
 * Sinet Log *
 ** <2017-10-14 Sat>
@@ -1599,7 +1558,7 @@ Unlike Friday's episode, restarting the client is not helping.
 However, restarting completely -- lein restart-repl -- did the trick. 
 Could it be that running -- diag-run -- before having the client up messes up the client? 
 
-*** Hopeful PN
+*** Hopeful-pn
 {:initial-marking [1 0 0 0 0],
  :transitions
  [{:name :m1-start-job,
@@ -1902,3 +1861,211 @@ Aha! Gets throug 565 for the *second* start link. Gets through all 3000 for the 
 
 The system is, in fact, in the situation of the first!
 {:act :m1-complete-job, :bf :b1, :j 1689, :n 0, :clk 1999.9234365080201, :line 0, :mjpact :bj, :m :m1}
+
+OK, now we have lax-reach which on hopeful-pn is k-limited. It has this rgraph:
+ :rgraph
+ ({:M [0 1 0 0 0], :fire :m1-complete-job, :Mp [0 0 1 0 0], :rate 1.0}
+  {:M [0 0 1 0 0], :fire :m1-start-job,    :Mp [0 1 0 0 1], :rate 1.0}
+  {:M [0 1 0 0 1], :fire :m1-complete-job, :Mp [0 0 1 0 1], :rate 1.0}
+  {:M [0 0 1 0 1], :fire :m1-start-job,    :Mp [0 1 0 0 2], :rate 1.0}
+  {:M [0 1 0 0 2], :fire :m1-complete-job, :Mp [0 0 1 0 2], :rate 1.0}),
+
+place-103 is indeed what I intend to be a buffer.
+
+:marking-key [:place-1 :place-2 :place-3 :place-4 :Place-103],
+Note that there is no transition out of [0 0 1 0 2]. Can this be fixed? 
+
+Things are not going well with the repair. The lax idea is okay, but instead of
+one token on :m1, I should have 1 token on each machine. Exception will work 
+to specify the buffer sizes. 
+
+
+*** Old lax-reach
+(defn lax-reach
+  "Return a rgraph where possibly it is necessary to experiment with 
+   initial markings to make things go."
+  ([pn] (lax-reach pn 2))
+  ([pn max-k]
+   (if-let [rgraph (:rgraph (pnr/simple-reach pn max-k))]
+     rgraph  ; POD :m1 is entry machine??? (MJPdes notion)
+     (let [m1-starters (map :name (filter #(= :m1 (-> % :rep :m)) (:transitions pn)))
+           m1-places   (distinct
+                        (into (mapv :target (filter (fn [a] (some #(= % (:source a)) m1-starters)) (:arcs pn)))
+                              (mapv :source (filter (fn [a] (some #(= % (:target a)) m1-starters)) (:arcs pn)))))
+           mkey (:marking-key pn)
+           ;; Try markings that put tokens into :m1
+           imarks (mapv (fn [pname]
+                          (reduce (fn [mark ix]
+                                    (conj mark (if (= pname (nth mkey ix)) 1 0)))
+                                  []
+                                  (-> mkey count range)))
+                        m1-places)]
+       (some #(let [pn (pnu/set-marking pn %)
+                    reach (pnr/simple-reach pn max-k)]
+                (when (:rgraph reach)
+                  (-> pn
+                      (assoc :rgraph (:rgraph reach))
+                      (assoc :k-limited? (:k-limited? reach)))))
+             imarks)))))
+
+
+*** Look at all this shrapnel!
+                                           
+  (let [aset (get m-arcs m)]
+     (and (contains? aset (:source %))
+     (contains? aset (:target %))))
+      (:places pn)))))
+
+     {:machines machines
+      :m-t m-trans
+      :m-a m-arcs})))
+
+   m1-starters (map :name (filter #(= :m1 (-> % :rep :m)) (:transitions pn)))
+   m1-places   (filter (fn [p] (and (some #(= p (:source )) m1-starters)) (:places pn)))
+   (distinct
+      (into (mapv :target (filter (fn [a] (some #(= % (:source a)) m1-starters)) (:arcs pn)))
+            (mapv :source (filter (fn [a] (some #(= % (:target a)) m1-starters)) (:arcs pn)))))
+           mkey (:marking-key pn)
+           ;; Try markings that put tokens into :m1
+           imarks (mapv (fn [pname]
+                          (reduce (fn [mark ix]
+                                    (conj mark (if (= pname (nth mkey ix)) 1 0)))
+                                  []
+                                  (-> mkey count range)))
+                        m1-places)]
+       (some #(let [pn (pnu/set-marking pn %)
+                    reach (pnr/simple-reach pn max-k)]
+                (when (:rgraph reach)
+                  (-> pn
+                      (assoc :rgraph (:rgraph reach))
+                      (assoc :k-limited? (:k-limited? reach)))))
+             imarks)))))
+
+** <2017-11-03 Fri>
+
+*** I start with this version of lax-reach(defn lax-reach
+  "Return a rgraph where possibly it is necessary to experiment with 
+   initial markings to make things go."
+  ([pn] (lax-reach pn 2))
+  ([pn max-k]
+   ;(if-let [rgraph (:rgraph (pnr/simple-reach pn max-k))]  rgraph  :foo); POD :m1 is entry machine??? (MJPdes notion)
+   (let [machines (distinct (mapv #(-> % :rep :m)
+                                  (filter #(contains? % :rep) (:transitions pn))))
+         ;; map of transitions associated with a machine. Transition associate with messages, which associate to machines.
+         m-trans (zipmap machines
+                         (map (fn [m]
+                                (set (map :name (filter #(= m (-> % :rep :m))
+                                                        (:transitions pn)))))
+                              machines))
+         ;; map of arcs associated with a machine. Must have both ends on a transition related to the machine. 
+         m-arcs (zipmap machines
+                        (map (fn [m]
+                               (let [tset (get m-trans m)]
+                                 (set (map :name
+                                           (filter #(and (contains? tset (:source %))  ; <--- Not bipartite!
+                                                         (contains? tset (:target %)))
+                                                   (:arcs pn))))))
+                             machines))
+         ;; map of places associated with a machine. Must be between trans of the same machine. 
+         m-places (zipmap machines ; there is an arc that has this place as source and a m-trans machine as target
+                          (map (fn [m]  ; and an arc that has this place as target and a m-trans machine as source
+                                 (let [mset (get m-trans m)]
+                                   (set (map :name
+                                             (filter (fn [p] 
+                                                       (some #(or (and (contains? mset (:source %))
+                                                                       (= (:target %) (:name p)))
+                                                                  (and (contains? mset (:target %))
+                                                                       (= (:source %) (:name p))))
+                                                             (:arcs pn))) ; (get m-arcs m))) <---- When the above is fixed.
+                                                     (:places pn))))))
+                               machines))]
+          {:machines machines
+           :m-t m-trans
+           :m-a m-arcs
+           :starters m-places})))
+** <2017-11-04 Sat>
+
+I did paper until 4PM. I learned about Mahoney's approach finding a separate sigma for each measurement dimension. 
+Will I have time for all of this???
+
+*** Old tryme
+(defn tryme []
+  (let [log (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj")]
+    (as-> hopeful-pn ?pn
+      (assoc ?pn :last-line (-> log last :line))
+      (assoc ?pn :rgraph (pnr/simple-reach ?pn)) ; returns a map {:rgraph ... :k-limited...}
+      (assoc ?pn :k-limited? (-> ?pn :rgraph :k-limited?))
+      (assoc ?pn :rgraph (-> ?pn :rgraph :rgraph vec))
+      (assoc ?pn :loom-graph (rgraph2loom-graph (-> ?pn :rgraph)))
+      (assoc ?pn :starting-links (fit/starting-links ?pn log 0))
+      (assoc ?pn :msg-table (fit/compute-msg-table ?pn log))
+      (assoc ?pn :distance-fn pnn/euclid-dist2))))
+
+*** repair-reach; probably not going to use it
+;;; (def pnpn (lax-reach hopeful-pn))
+;;; [:place-1 :place-2 :place-3 :place-4 :Place-103]
+;;; m-mp : #{[0 1 0 0 0]} -- True, you'll never see this after starting with it. 
+;;; mp-m : #{[0 0 1 0 2]}
+(defn repair-reach
+  "If present, try to remove traps from a k-limited graph."
+  ([pn] (repair-reach pn 2))
+  ([pn max-k]
+   (let [m  (set (distinct (map #(:M %)  (:rgraph pn))))
+         mp (set (distinct (map #(:Mp %) (:rgraph pn))))
+         m-mp (clojure.set/difference m mp)
+         mp-m (clojure.set/difference mp m)
+         trans (map :name (:transitions pn))]
+     ;; m-mp: try to find a transition from any existing :M that yields Mp.
+     (let [seek-mp [0 1 0 0 0]
+           m-mp-fix (reduce (fn [answ1 trans]
+                              (into answ1
+                                    (vec (reduce (fn [answ2 mark]
+                                                   (into answ2
+                                                         (filterv #(= seek-mp (:Mp %))
+                                                                  (pnr/next-marks pn mark))))
+                                                 []
+                                                 m))))
+                            []
+                            trans)]
+       (if (empty? m-mp-fix)
+         (let [test-one (first m-mp)]
+           (filterv #(not= test-one (:M %)) (:rgraph pn)))
+         m-mp-fix)))))
+
+
+*** hopeful-pn (pnpn) fizzles out at line 594:
+
+{:M [0 1 0 1 0], :fire :m2-complete-job, :Mp [1 1 0 0 0], :rate 1.0, :job 1834, :clk 2173.361361140053, :indx 594}]
+
+{:act :m2-complete-job, :m :m2, :j 1834, :ent 2169.2631314350665, :clk 2173.361361140053, :line 594, :mjpact :ej}
+{:act :m2-start-job, :bf :b1, :j 1835, :n 1, :clk 2173.361361140053, :line 595, :mjpact :sm, :m :m2}
+{:act :m1-complete-job, :bf :b1, :j 1836, :n 0, :clk 2173.4862364331248, :line 596, :mjpact :bj, :m :m1}
+
+
+Let's see if the problem is that N=3 and lax is set to two. Maybe first I'll try lax set to 3. 
+YUP! That's an easy test! 
+
+*** Reasoning about how interpretation should really work:
+So I think I need the converse of lax-reach: lax-interp which will:
+  1) Allow "pushing to full buffers"  when no other transition (but only up to "max-buffer" = 10 to terminate early) 
+  2) Allow "pulling from  empty buffers" when no other transition. 
+
+To do this:
+ a) Must determine what places are buffers.
+ b) Must be able to determine which place is the problem, and whether it is 
+ c) There are two "when no other transition" conditions" -- I guess that isn't a problem though (zero or two tells you).
+
+Hmmm... Maybe the easiest way to implement this isn't to extend into a larger reachability set, but
+        rather just make jobs magically appear and disappear... UNFORTUNATELY, that will screw up 
+        job tracking. 
+
+**** Three alternatives then:
+ (1): Extend the k-max bound on-the-fly as you get into failure situations.
+ (2): Add jobs to deal with not having false starvation, remove jobs to deal with false blocking.
+ (3): Do what I just did: Run lax-reach again with a higher number. 
+
+(3) is by far the easiest, and I don't think it is computationally expensive either. 
+    I'm going to try (3)!!!
+
+This needs to wrap lax-reach and interp in a loop. Refactoring!
+

@@ -128,14 +128,36 @@
     (as-> "data/PNs/m2-inhib-n3.xml" ?pn
       (pnml/read-pnml ?pn)
       (pnr/renumber-pids ?pn)
-      (assoc ?pn :log log)
       (assoc ?pn :last-line (-> log last :line))
-      (assoc ?pn :rgraph (vec (pnr/simple-reach ?pn)))
+      (assoc ?pn :rgraph (pnr/simple-reach ?pn))
       (assoc ?pn :k-limited? (-> ?pn :rgraph :k-limited?))
       (assoc ?pn :rgraph (-> ?pn :rgraph :rgraph vec))
-      (assoc ?pn :starting-links (fit/starting-links ?pn 0))
-      (assoc ?pn :msg-table (fit/compute-msg-table ?pn))
+      (assoc ?pn :loom-graph (fit/rgraph2loom-graph (-> ?pn :rgraph)))
+      (assoc ?pn :starting-links (fit/starting-links ?pn log 0))
+      (assoc ?pn :msg-table (fit/compute-msg-table ?pn log))
       (assoc ?pn :distance-fn pnn/euclid-dist2))))
+
+(deftest msg-table-test
+  (testing "that the message table produced is correct"
+    (let [pn (test-pn)]
+      (is (= (:msg-table pn)
+             {:m1-blocked   {[3 0 1 1 0] 30}
+              :m1-unblocked {[2 1 0 1 0] 30},
+              :m2-starved   {[0 0 1 0 1] 14},
+              :m2-unstarved {[0 0 1 1 0] 14},
+              :ordinary
+              {[0 1 0 1 0] 203,
+               [2 0 1 1 0] 511,
+               [1 1 0 1 0] 263,
+               [3 0 1 0 1] 248,
+               [1 0 1 1 0] 466,
+               [0 1 0 0 1] 14,
+               [2 1 0 1 0] 248,
+               [3 0 1 1 0] 248,
+               [1 0 1 0 1] 217,
+               [0 0 1 1 0] 217,
+               [0 0 1 0 1] 14,
+               [2 0 1 0 1] 263}}))))),
 
 ;;; There are more state that this in the PN, but not all occurred in the 3000 msgs logged. That's okay. 
 (deftest pnn-for-msgs-1 
@@ -211,12 +233,61 @@
             [0 0 1 0 1] [:m2-starved 1.0],
             [2 0 1 0 1] [:ordinary 0.10642989332503937]})))))
 
+;;;(alias 'gp 'gov.nist.sinet.gp)
+;;;;(alias 'scada 'gov.nist.sinet.scada)
+;;; These are useful to understanding how things work. 
+;;; This one for an Eden INV:
+#_(def eee
+    (let [pn (->> (scada/random-job-trace)
+                  (gp/initial-individual-pn))]
+      (-> (gp/map->Inv {:pn pn})
+           gp/add-scada-report-fns
+           gp/add-color-binding
+          (update :pn
+                  (fn [pn]
+                    (reduce (fn [pn trans] (gp/assign-flow-priorities pn trans))
+                            pn
+                            (->> pn :transitions (map :name))))))))
 
+;;; This one to show it on the client: (not working; I don't know why.)
+#_(-> eee
+      gp/clean-inv-for-transmit
+      gp/diag-push-pn)
 
+;;; This one for a typical-job:
+;;;(def jjj (-> eee :pn (sim/simulate :max-steps 50) (fit/qpn-log-about 1) trunc-qpn-log-at-cycle))
+;;; ==> 
+;;;[{:tkns [{:jtype :blue, :id 1}], :rep {:name :m1-start-job, :act :aj, :m :m1}}
+;;; {:tkns [{:jtype :blue, :id 1}], :rep {:name :m1-complete-job, :act :bj, :m :m1, :bf :b1}}
+;;; {:tkns [{:jtype :blue, :id 1}], :rep {:name :m2-start-job, :act :sm, :m :m2, :bf :b1}}
+;;; {:tkns [{:jtype :blue, :id 1}], :rep {:name :m2-complete-job, :act :ej, :m :m2}}]
 
+;;; This one (finally!) to calculate job disorder:
+;;; (calc-process-disorder jjj (-> (util/app-info) :problem :scada-patterns))
+;;; ==> 0 (but of course it is going to get hit for not introducing a new token.
 
+#_(defn diag-one-that-runs
+  "Return the first PN that can generate at least modest amount of log!"
+  []
+  (some #(let [pn (sim/simulate (:pn %) :max-steps 100)]
+           (when (> (-> pn :sim :log count) 20) %))
+        (-> (util/app-info) :pop)))
 
+;;; POD NYI    
+#_(defn diag-process-disorder
+  "Report how messed up this PN is." 
+  [inv]
+  (let [patterns (-> (app-info) :problem :scada-patterns)
+        sim (-> inv :pn (sim/simulate :max-steps (* 50 (avg-scada-process-steps patterns))))]))
 
-
-
-
+;;; This needs to be commented out. (load order)
+#_(defn m2-inhib-bas
+  "Setup the m2-inhib-bas PN for a fitness test"
+  [steps]
+  (let [pn (-> "data/PNs/m2-inhib-bas.xml" 
+               gov.nist.spntools.core/run-ready
+               gp/add-color-binding
+               (gp/diag-force-priority [{:source :m1-start-job, :target :buffer :priority 2}])
+               #_(sim/simulate :max-steps steps))]
+    #_(workflow-fitness (util/map->Inv {:pn pn}))
+    pn))

@@ -2,6 +2,7 @@
   "General sorts of things needed in several places in the sinet project."
   {:author "Peter Denno"}
   (:require [clojure.pprint :refer (cl-format pprint pp)]
+            [clojure.spec.alpha :as s]
             [clojure.tools.namespace.repl :as nsp]
             [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp pn-ok-> as-pn-ok->)] ; POD TEMPORARY!
             [clojure.core.async :as async :refer [chan alts!! go timeout >!]]))
@@ -115,4 +116,88 @@
                       (let [dif (- x avg)]
                         (* dif dif)))
                     v)))))
+
+;;;========= These are PNs extended from spntools for use in sinet.  =========
+(s/def ::clk number?)
+(s/def ::line number?)
+(s/def ::mjpact keyword?)
+(s/def ::act keyword?)
+(s/def ::rep (s/keys :req-un [::act ::mjpact ::line ::clk]))
+
+;;; POD having a ::rep is equivalent to being :visible? Don't need :visible? on trans.
+(s/def ::jtype keyword?)
+(s/def ::bind (s/keys :req-un [::jtype]))
+(s/def ::visible boolean?)
+(s/def ::place       (s/keys :req-un [])) ; ::visible?
+(s/def ::transition  (s/keys :req-un [])) ; POD doesn't need a ::rep! ::visible?
+(s/def ::arc         (s/keys :req-un [::bind]))
+
+(s/def ::places      (s/and ::pnu/places      (s/coll-of ::place)))
+(s/def ::transitions (s/and ::pnu/transitions (s/coll-of ::transition)))
+(s/def ::arcs        (s/and ::pnu/arcs        (s/coll-of ::arc)))
+(s/def ::gppn (s/and ::pnu/pn
+                     (s/keys :req-un [::places ::transitions ::arcs])))
+
+(defn check-pn
+  "clojure.spec check the pn."
+  [pn]
+  (s/assert ::gppn pn))
+
+(defn machines-of
+  "Return collection of the machines used in the PN."
+  [pn]
+  ;(s/assert ::gppn pn) ; POD needs investigation
+  (distinct (mapv #(-> % :rep :m)
+                  (filter #(contains? % :rep) (:transitions pn)))))
+
+(defn related-trans
+  "Return a map where each key is machine name and each value is a set of 
+   transition names related to that machine. (These trace back to a message)."
+  [pn]
+  (let [machines (machines-of pn)]
+    (zipmap machines
+            (map (fn [m]
+                   (set (map :name (filter #(= m (-> % :rep :m))
+                                           (:transitions pn)))))
+                 machines))))
+
+(defn related-places
+   "Return a map where each key is machine names, and each value is a set of place names.
+    The places must be between transitions related to the machine."
+  [pn]
+  (let [machines (machines-of pn)
+        m-trans (related-trans pn)]
+    (zipmap machines ; there is an arc that has this place as source and a m-trans machine as target
+            (map (fn [m]  ; and an arc that has this place as target and a m-trans machine as source
+                   (let [mset (get m-trans m)]
+                     (set (map :name
+                               (filter (fn [p] 
+                                         (and (some #(and (contains? mset (:source %))
+                                                          (= (:target %) (:name p)))
+                                                    (:arcs pn))
+                                              (some #(and (contains? mset (:target %))
+                                                          (= (:source %) (:name p)))
+                                                    (:arcs pn)))) ; (get m-arcs m))) <---- When the above is fixed.
+                                       (:places pn))))))
+                 machines))))
+
+(defn related-arcs
+  "Return a map where the each key is a machine name and each value is a set of arc names.
+   Both ends of the arcs must be connected a related-place or related-transition."
+  [pn]
+  (let [machines (machines-of pn)
+        m-trans  (related-trans pn)
+        m-places (related-places pn)]
+    (zipmap machines
+            (map (fn [m]
+                   (let [tset (get m-trans m)
+                         mset (get m-places m)]
+                     (set (map :name
+                               (filter #(or (and (contains? tset (:source %))  
+                                                 (contains? mset (:target %)))
+                                            (and (contains? mset (:source %))  
+                                                 (contains? tset (:target %))))
+                                       (:arcs pn))))))
+                 machines))))
+
 

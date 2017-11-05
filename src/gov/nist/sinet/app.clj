@@ -36,6 +36,8 @@
     
     :debugging? true
     :pn-k-bounded 10 ; When to give up on computing the reachability graph.
+    :min-max-k  2    ; Minimum token count for max-k used in computing lax rgraph
+    :max-max-k  6    ; Maximum token count for max-k used in computing lax rgraph 
     :pn-max-rs 1000
     :crossover-to-mutation-ratio 0.5
     :select-pressure 4 ; POD not normalized to pop-size! Spector: 7/1000

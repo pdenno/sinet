@@ -2,6 +2,7 @@
   "Compute the fitness of an individual"
   (:require [clojure.pprint :refer (cl-format pprint)]
             [clojure.set :as set]
+            [clojure.spec.alpha :as s]
             [loom.alg :as alg]
             [loom.graph :as graph]
             [gov.nist.spntools.core :as pn :refer :all]
@@ -9,7 +10,7 @@
             [gov.nist.spntools.util.reach :as pnr :refer (reachability renumber-pids)]
             [gov.nist.spntools.util.pnml :as pnml :refer (read-pnml)] ; POD temporary
             [gov.nist.sinet.simulate :as sim :refer-only (simulate)]
-            [gov.nist.sinet.util :as util :refer (app-info reset)]
+            [gov.nist.sinet.util :as util :refer (app-info reset related-places)]
             [gov.nist.sinet.scada :as scada]
             [gov.nist.sinet.pnn :as pnn]))
 
@@ -125,7 +126,7 @@
                   best)]
       (cond (== this-score 0) {:score 0 :pattern-id (:id pat)}
             (empty? (next pats)) best
-            :else (recur (next pats) best)))))
+            true (recur (next pats) best)))))
 
 (defn trunc-qpn-log-at-cycle
   "Return a log that stops when it sees the same message a second time on the same job."
@@ -375,7 +376,7 @@
                   (assoc :matched link)
                   (assoc :graph-link link)))
             
-            :else (assoc ?pn :matched nil))                  ; (6)
+            true (assoc ?pn :matched nil))                  ; (6)
       (if (= :ej (:mjpact msg))
         (update ?pn :active-jobs (fn [aj] (filterv #(not= % job) aj)))
         ?pn))))
@@ -386,73 +387,109 @@
     - a link augmented with :line and :job (if an ordinary message is processed), or
     - a map naming an exceptional message (if an such a message is processed)."
   [pn log start-link]
-  (let [last-indx (-> log last :line)
-        job1 (:job start-link)]
-    (loop [pn (-> pn
-                  (assoc :active-jobs (vector (:job start-link)))
-                  (assoc :graph-link start-link))
-           lasti start-link
-           interp (transient (vector start-link))
-           msg (nth log (-> start-link :indx inc))]
-      (let [pn (next-match pn lasti msg job1)]
-        (cond (-> pn :matched not)
-              (persistent! interp)
-              (> (-> (:matched pn) :indx inc) last-indx)
-              (persistent! (conj! interp (:matched pn)))
-              :else
-              (let [lasti (:matched pn)]
-                (recur pn
-                       lasti
-                       (conj! interp lasti)
-                       (nth log (-> lasti :indx inc)))))))))
+  (when start-link
+    (let [last-indx (-> log last :line)
+          job1 (:job start-link)]
+      (loop [pn (-> pn
+                    (assoc :active-jobs (vector (:job start-link)))
+                    (assoc :graph-link start-link))
+             lasti start-link
+             interp (transient (vector start-link))
+             msg (nth log (-> start-link :indx inc))]
+        (let [pn (next-match pn lasti msg job1)]
+          (cond (-> pn :matched not)
+                (persistent! interp)
+                (> (-> (:matched pn) :indx inc) last-indx)
+                (persistent! (conj! interp (:matched pn)))
+                true
+                (let [lasti (:matched pn)]
+                  (recur pn
+                         lasti
+                         (conj! interp lasti)
+                         (nth log (-> lasti :indx inc))))))))))
 
-;;; POD this is probably the most time consuming part of the pnn process.
-;;; POD with new lax interpretation, will need to run every one since multiple
-;;;     might make it to the end. 
-(defn interpretations
-  "Add :interps and :fails to the pn describing what interpretations worked."
-  [pn]
-  (let [last-indx (:last-line pn)]
-    (reduce (fn [pn link]
-              (let [interp (interpret-scada pn link)]
-                (if (and (number? (-> interp last :indx))
-                         (== last-indx (-> interp last :indx)))
-                  (update pn :interps conj interp)
-                  (update pn :fails conj (last interp)))))
-            (-> pn
-                (assoc :interps [])
-                (assoc :fails []))
-            (:starting-links pn))))
+;;; POD For all combos, replace vals in r-places with index in marking, then choose one from each set (combinatorial)
+;;;     Replace those values with 1s, all other values in marking key are zeros.
+;;;     Using all possibilities, choose the rgraph that has most states.
+;;;     It will probably be sufficient to use the first one found, as I do below. No need for multiple i-marks.
+;;;     Should check for m-mp/mp-m errors (spec?)
+(defn lax-reach
+  "Set the marking-key such there is one token on each machine.
+   Return the rgraph associated with this marking." 
+  ([pn] (lax-reach pn 2))
+  ([pn max-k]
+   (let [r-places (atom (util/related-places pn))
+         imark (reduce (fn [mark place] ; this generates one of several possibilities. 
+                         (if-let [machine (some #(when (contains? (% @r-places) place) %)
+                                                (keys @r-places))]
+                           (do (swap! r-places dissoc machine)
+                               (conj mark 1))
+                           (conj mark 0)))
+                       []
+                       (:marking-key pn))]
+     (as-> pn ?pn
+         (pnu/set-marking ?pn imark)
+         (assoc ?pn :rgraph (pnr/simple-reach ?pn max-k))     ; packed
+         (assoc ?pn :k-limited? (-> ?pn :rgraph :k-limited?)) ; unpack
+         (assoc ?pn :rgraph (-> ?pn :rgraph :rgraph vec))     ; unpack 
+         (if (pnu/m-mp-mp-m-valid? ?pn)
+           ?pn
+           (throw (ex-info "PN fails lax-reach" {:pn pn})))))))
+
+(defn full-interp?
+  "Return true if the interpretation read the whole log."
+  [interp last-line]
+  (and (number? (-> interp last :indx))
+       (== last-line (-> interp last :indx))))
+
+(defn find-interpretation
+  "At increasing values of max-k, find new starting links and try to interpret
+   the entire log. Return the first complete interpretation found, if any below
+   max-max-k."
+  [pn log] ; POD (-> (app-info) :gp-params :min-max-k)
+  (let [last-line (-> log last :line)] ; POD remove pn's :last-line....
+    (loop [max-k 2]
+      (let [pn (lax-reach pn max-k)
+            good-interp (loop [starts (fit/starting-links pn log 0)]
+                          (let [interp (interpret-scada pn log (first starts))]
+                            (cond (empty? starts) nil,
+                                  (full-interp? interp last-line) interp,
+                                  true (recur (rest starts)))))]
+        (cond (not (empty? good-interp)) 
+              (assoc pn :interp)
+              (> max-k 6) nil ; POD (-> (app-info) :gp-params :max-max-k)
+              true (recur (inc max-k)))))))
 
 ;;; You can have the same marking associated with more than one class. The more times you have
 ;;; it associated with a class, the stronger the result will be for that class. To make
 ;;; the following efficient, I'll have to count the number of times each marking is associated
-;;; with each class. Then I'll use that as a factor in calculating the PDF. 
+;;; with each class. Then I'll use that as a factor in calculating the PDF.
+;;; POD Note that I throw away :interps and :fails here. Returning a msg-table, not the pn. 
 (defn compute-msg-table
   "Return a map indicating what markings are associated with what message types, 
    where message types are either ':ordinary' or some exceptional message type."
-  [pn]
-  (let [interp (interpretations pn)
-        msg-types (conj (-> (app-info) :problem :exceptional-msgs) :ordinary)
-        markings (map :M (:rgraph pn))
-        report (reduce (fn [sum msg] 
-                         (if (contains? msg :act)
-                           (update-in sum [(:act msg) (:Mp msg)] inc)
-                           (update-in sum [:ordinary (:M msg)] inc)))
-                       (zipmap msg-types
-                               (repeatedly (count msg-types)
-                                           #(zipmap markings (repeat (count markings) 0))))
-                       interp)]
-    ;; Outer map is indexed by msg-types; inner map in indexed by markings, values are count.
-    ;; Eliminate entries where the count is zero.
-    (reduce (fn [map key]
-              (update-in map [key]
-                         #(persistent!
-                           (reduce (fn [m k] (if (== 0 (get m k)) (dissoc! m k) m))
-                                   (transient %)
-                                   (keys %)))))
-            report
-            msg-types)))
+  [pn] 
+  (let [msg-types (conj (-> (app-info) :problem :exceptional-msgs) :ordinary)
+        markings (map :M (:rgraph pn))]
+    (when-let [interp (not-empty (:interps pn))]
+      (let [report (reduce (fn [sum msg] 
+                             (if (contains? msg :act)
+                               (update-in sum [(:act msg) (:Mp msg)] inc)
+                               (update-in sum [:ordinary (:M msg)] inc)))
+                           (zipmap msg-types
+                                   (repeatedly (count msg-types)
+                                               #(zipmap markings (repeat (count markings) 0))))
+                           interp)]
+        ;; Outer map is indexed by msg-types; inner map in indexed by markings, values are count.
+        ;; Eliminate entries where the count is zero.
+        (reduce (fn [map key]
+                  (update-in map [key]
+                             #(persistent!
+                               (reduce (fn [m k] (if (== 0 (get m k)) (dissoc! m k) m))
+                                       (transient %)
+                                       (keys %)))))
+                report
+                msg-types)))))
 
 (defn rgraph2loom-graph
   "Return a loom weighted-digraph for the argument simple reachability graph."
@@ -510,6 +547,7 @@
               {}
               marks))))
 
+
 ;;; We generate the reachability graph (including non-tangible states) and test the
 ;;; complete SCADA log against it. We aren't running the QPN, rather we are testing
 ;;; whether or not the SCADA log can be interpreted by it. For every message we successfully
@@ -524,9 +562,10 @@
         pn  (as-> (:pn inv) ?pn
               (pnr/renumber-pids ?pn)
               (assoc ?pn :last-line (-> ?pn :log last :line))
-              (assoc ?pn :rgraph (pnr/simple-reach ?pn 2))
-              (assoc ?pn :k-limited? (-> ?pn :rgraph :k-limited?))
-              (assoc ?pn :rgraph (-> ?pn :rgraph vec))
+              (lax-reach ?pn 2)
+              ;(assoc ?pn :rgraph (pnr/simple-reach ?pn 2))
+              ;(assoc ?pn :k-limited? (-> ?pn :rgraph :k-limited?))
+              ;(assoc ?pn :rgraph (-> ?pn :rgraph vec))
               (assoc ?pn :starting-links (starting-links ?pn log 0))
               (assoc ?pn :loom-graph (rgraph2loom-graph (-> ?pn :rgraph)))
               (assoc ?pn :msg-table (compute-msg-table ?pn))
@@ -541,76 +580,60 @@
         (assoc :except (if (not-empty (:winners pn)) 0 1))
         (assoc :pn pn))))
 
-;;; These are useful to understanding how things work. 
-;;; This one for an Eden INV:
-#_(def eee
-    (let [pn (->> (gov.nist.sinet.scada/random-job-trace)
-                  (gov.nist.sinet.gp/initial-individual-pn))]
-      (-> (gov.nist.sinet.gp/map->Inv {:pn pn})
-          gov.nist.sinet.gp/add-scada-report-fns
-          gov.nist.sinet.gp/add-color-binding
-          (update :pn
-                  (fn [pn]
-                    (reduce (fn [pn trans] (gov.nist.sinet.gp/assign-flow-priorities pn trans))
-                            pn
-                            (->> pn :transitions (map :name))))))))
-
-;;; This one to show it on the client: (not working; I don't know why.)
-#_(-> eee
-      gov.nist.sinet.gp/inv-geom
-      gov.nist.sinet.gp/clean-inv-for-transmit
-      gov.nist.sinet.gp/diag-push-pn)
-
-;;; This one for a typical-job:
-;;;(def jjj (-> eee :pn (sim/simulate :max-steps 50) (qpn-log-about 1) trunc-qpn-log-at-cycle))
-;;; ==> 
-;;;[{:tkns [{:jtype :blue, :id 1}], :rep {:name :m1-start-job, :act :aj, :m :m1}}
-;;; {:tkns [{:jtype :blue, :id 1}], :rep {:name :m1-complete-job, :act :bj, :m :m1, :bf :b1}}
-;;; {:tkns [{:jtype :blue, :id 1}], :rep {:name :m2-start-job, :act :sm, :m :m2, :bf :b1}}
-;;; {:tkns [{:jtype :blue, :id 1}], :rep {:name :m2-complete-job, :act :ej, :m :m2}}]
-
-;;; This one (finally!) to calculate job disorder:
-;;; (calc-process-disorder jjj (-> (util/app-info) :problem :scada-patterns))
-;;; ==> 0 (but of course it is going to get hit for not introducing a new token.
-
-(defn diag-one-that-runs
-  "Return the first PN that can generate at least modest amount of log!"
-  []
-  (some #(let [pn (sim/simulate (:pn %) :max-steps 100)]
-           (when (> (-> pn :sim :log count) 20) %))
-        (-> (util/app-info) :pop)))
-
-;;; POD NYI    
-#_(defn diag-process-disorder
-  "Report how messed up this PN is." 
-  [inv]
-  (let [patterns (-> (util/app-info) :problem :scada-patterns)
-        sim (-> inv :pn (sim/simulate :max-steps (* 50 (avg-scada-process-steps patterns))))]))
-
-;;; This needs to be commented out. (load order)
-#_(defn m2-inhib-bas
-  "Setup the m2-inhib-bas PN for a fitness test"
-  [steps]
-  (let [pn (-> "data/PNs/m2-inhib-bas.xml" 
-               gov.nist.spntools.core/run-ready
-               gov.nist.sinet.gp/add-color-binding
-               (gov.nist.sinet.gp/diag-force-priority [{:source :m1-start-job, :target :buffer :priority 2}])
-               #_(sim/simulate :max-steps steps))]
-    #_(workflow-fitness (util/map->Inv {:pn pn}))
-    pn))
+(def hopeful-pn
+  {:initial-marking [1 0 0 0 0], ; I changed this too! How do I fix this? GP operator? Try different ones in simple-reach? 
+   :transitions
+   [{:name :m1-start-job,
+     :tid 38,
+     :type :exponential,
+     :rate 1.0,
+     :rep {:act :m1-start-job, :j 1991, :jt :jobType1, :ends 2356.5705647971827, :clk 2355.3103128463604, :line 1233, :mjpact :aj, :m :m1},
+     :visible? true}
+    {:name :m1-complete-job,
+     :tid 39,
+     :type :exponential,
+     :rate 1.0,
+     :rep {:act :m1-complete-job, :bf :b1, :j 1991, :n 1, :clk 2356.5705647971827, :line 1238, :mjpact :bj, :m :m1},
+     :visible? true}
+    {:name :m2-start-job,
+     :tid 40,
+     :type :exponential,
+     :rate 1.0,
+     :rep {:act :m2-start-job, :bf :b1, :j 1991, :n 3, :clk 2358.9070474961236, :line 1247, :mjpact :sm, :m :m2},
+     :visible? true}
+    {:name :m2-complete-job,
+     :tid 41,
+     :type :exponential,
+     :rate 1.0,
+     :rep {:act :m2-complete-job, :m :m2, :j 1991, :ent 2355.3103128463604, :clk 2360.0770474961237, :line 1248, :mjpact :ej},
+     :visible? true}],
+   :arcs
+   [{:aid 74, :source :place-1, :target :m2-start-job, :EDITED true :name :aa-74, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+    {:aid 75, :source :m1-start-job, :target :place-2, :name :aa-75, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+    {:aid 76, :source :place-2, :target :m1-complete-job, :name :aa-76, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+    {:aid 77, :source :m1-complete-job, :target :place-3, :name :aa-77, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+    {:aid 78, :source :place-3, :target :m1-start-job, :EDITED true :name :aa-78, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+    {:aid 79, :source :m2-start-job, :target :place-4, :name :aa-79, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+    {:aid 80, :source :place-4, :target :m2-complete-job, :name :aa-80, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+    {:aid 81, :source :m2-complete-job, :target :place-1, :name :aa-81, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+    {:aid 205, :source :m1-start-job, :target :Place-103, :name :aa-205, :type :normal, :multiplicity 1, :bind {:jtype :blue} :priority 2}
+    {:aid 206, :source :Place-103, :target :m2-start-job, :name :aa-206, :type :normal, :multiplicity 1 :bind {:jtype :blue}, :priority 1}],
+   :marking-key [:place-1 :place-2 :place-3 :place-4 :Place-103],
+   :places
+   [{:name :place-1, :pid 0, :initial-tokens 1, :visible? true}
+    {:name :place-2, :pid 1, :initial-tokens 0, :visible? true}
+    {:name :place-3, :pid 2, :initial-tokens 0, :visible? true}
+    {:name :place-4, :pid 3, :initial-tokens 0, :visible? true}
+    {:name :Place-103, :pid 4, :initial-tokens 0}]})
 
 (defn tryme []
-  (let [log (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj")]
-    (as-> "data/PNs/m2-inhib-n3.xml" ?pn
-      (pnml/read-pnml ?pn)
-      (pnr/renumber-pids ?pn)
-      (assoc ?pn :last-line (-> log last :line))
-      (assoc ?pn :rgraph (pnr/simple-reach ?pn)) ; returns a map {:rgraph ... :k-limited...}
-      (assoc ?pn :k-limited? (-> ?pn :rgraph :k-limited?))
-      (assoc ?pn :rgraph (-> ?pn :rgraph :rgraph vec))
-      (assoc ?pn :starting-links (fit/starting-links ?pn log 0))
-      (assoc ?pn :loom-graph (rgraph2loom-graph (-> ?pn :rgraph)))
-      #_(assoc ?pn :msg-table (fit/compute-msg-table ?pn))
-      #_(assoc ?pn :distance-fn pnn/euclid-dist2)
-      #_(dissoc ?pn :log))))
+  (let [log (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj")
+        pn hopeful-pn]
+    (as-> (find-interpretation pn log) ?pn
+      (assoc ?pn :loom-graph (rgraph2loom-graph (:rgraph ?pn)))
+      (assoc ?pn :msg-table (fit/compute-msg-table ?pn))
+      (dissoc ?pn :interp)
+      (assoc ?pn :sigma (-> (app-info) :gp-params :exceptional-sigma))
+      (assoc ?pn :distance-fn (graph-distance-fn ?pn)))))
+
 

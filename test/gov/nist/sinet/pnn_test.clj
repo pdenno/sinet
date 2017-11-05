@@ -1,5 +1,5 @@
 (ns gov.nist.sinet.pnn-test
-  "Probabilistic neural nets (Bayesian nets)"
+  "Testing of probabilistic neural nets (Specht, 1990)"
   (:require [clojure.test :refer :all]
             [clojure.set :as set]
             [clojure.spec.alpha :as s]
@@ -16,7 +16,7 @@
 
 ;;; http://www.personal.reading.ac.uk/~sis01xh/teaching/CY2D2/Pattern3.pdf ...but that has a mistake!
 (deftest simple-pnn
-  (let [data {:class1 [[1.0 0.0], [0.0 1.0], [1.0 ,1.0]]
+  (let [data {:class1 [[ 1.0 0.0], [0.0   1.0], [1.0 ,1.0]]
               :class2 [[-1.0 0.0], [0.0, -1.0]]}
         parzen-fns (zipmap
                     (keys data)
