@@ -200,4 +200,50 @@
                                        (:arcs pn))))))
                  machines))))
 
+(defn buffers-between
+  "Return all (only one?) buffers between the argument machines 
+   which should be adjacent"
+  [pn m1 m2]
+  (let [places (related-places pn)
+        trans  (related-trans  pn)
+        m1-places (m1 places)
+        m2-places (m2 places)
+        m1-trans (m1 trans)
+        m2-trans (m2 trans)]
+    (filterv (fn [p] (and (not (contains? m1-places p))
+                          (not (contains? m2-places p))
+                          (some #(and (= (:target %) p)
+                                      (contains? m1-trans (:source %)))
+                                (:arcs pn))
+                          (some #(and (= (:source %) p)
+                                      (contains? m2-trans (:target %)))
+                                (:arcs pn))))
+             (map :name (:places pn)))))
+
+;;; POD assembly scenarios (name*S*) NYT
+;;; Find a place that is util/buffer-between and has an arc into a util/related-transition. 
+(defn pulls-from
+  "Return the place name(s) from which the argument machine pulls work."
+  [pn m]
+  (let [arcs (filter #(= (:type %) :normal) (:arcs pn))
+        candidate-machines (remove #(= % m) (machines-of pn))
+        bufs-between (zipmap
+                      candidate-machines
+                      (map #(buffers-between pn % m) candidate-machines))]
+    ;; Given that there is a buffer between m and a candidate machine (cmach),
+    ;; is there an (normal) arc from this buffer to related-trans
+    (reduce (fn [winners cmach]
+              (if-let [bufb (not-empty (cmach bufs-between))]
+                (into winners (vec (reduce (fn [win buf]
+                                             (if (some #(= buf (:target %)) arcs)
+                                               (conj win buf)
+                                               win))
+                                           []
+                                           bufb)))
+                winners))
+            []
+            candidate-machines)))
+
+                
+
 

@@ -45,7 +45,7 @@
     :no-new-jobs-penalty 1.00001
     :no-qpn-log-penalty  3.000003 ; This if, for example, one transition, one place and two arcs back and forth. 
     :crossover-keeps-parents? true ; NYI
-    :exceptional-sigma 0.75 ; sigma squared is variance of PDF around training point (exceptional message).
+    :exceptional-sigma 0.40 ; sigma squared is variance of PDF around training point (exceptional message). Was 0.75!
     :mutation-dist mutation-dist}))
 
 (def problem

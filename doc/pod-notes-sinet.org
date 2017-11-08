@@ -35,13 +35,16 @@
 
 **** Source Code C-c ' (open and close) #+BEGIN_SRC clojure ... #+END_SRC
 
+**** Footnotes [fn:1] is a reference.  Says it needs to start with "fn:" but it doesn't. 
+     The definition must begin in column 1. 
+* Miscellaneous loosly related
+** [[https://www.datasciencecentral.com/profiles/blogs/artificial-intelligence-is-not-fake-intelligence][This]] neural net chart is pretty good.
+   Much better discussion of it [[http://www.asimovinstitute.org/neural-network-zoo/][here]].
+   23 Types of Regression, [[https://www.datasciencecentral.com/profiles/blogs/23-types-of-regression][here]].
+   
 
-* Sinet TODOs
-** DONE Try a more mild blocking situation.
-   CLOSED: [2017-10-23 Mon 19:05]
-** DONE Fix bug in pnr/simple-reach. See bug <2017-10-15 Sun>
-   CLOSED: [2017-10-15 Sun 18:13]
-** TODO Consider the possibility/advantages of an 'abbreviated' reachability graph. 
+
+* Sinet Miscellaneous TODOs
 ** TODO Decide whether setting all transitions to timed makes sense for simple-reach. See discussion <2017-10-15 Sun>
 ** TODO Investigate possible bugs with MJPdes 'coordination' and create more 'deterministic' test cases.
 ** TODO Conceive of a strategy for using exceptional fitness
@@ -77,24 +80,48 @@
 ** TODO Need a way to get the world after a time out. 
 ** TODO Does the :pop really need to be on app-info?
 ** TODO Every arc needs a :bind and :priority  <----------------------------SOON
-* Agenda for the next week:
-** Consider more forgiving simple-reach -- one which moves tokens around. (Maybe remove add-token remove-token from GP).
-** Integrate exceptional fitness, try using it to place buffer limits.
+** TODO Perform experiments that will tell you what the value of exceptional messages is. 
+        I think one can learn the lower-bound on the buffer size just by witnessing how
+        many jobs one machine can get ahead of the next machine. However, you don't know 
+        the exact size of the buffer until the system "complains about a machine getting 
+        too far ahead." THESIS POINT, STAR
+
+** TODO [0 1 0 1 3] [:m1-unblocked 1.0] : Is that really the state I want associated (or state plus transition)? 
+
+* Agenda up to December 1:
+** DONE Fix bug in pnr/simple-reach. See bug <2017-10-15 Sun>
+   CLOSED: [2017-10-15 Sun 18:13]
+
+** DONE Try a more mild blocking situation.
+   CLOSED: [2017-10-23 Mon 19:05]
+
+** DONE Consider the possibility/advantages of an 'abbreviated' reachability graph. 
+   CLOSED: [2017-11-04 Sat 22:10]
+
+** DONE Consider more forgiving simple-reach 
+   CLOSED: [2017-11-04 Sat 22:13]
+        lax-reach is this. It is used with new find-interpretation. 
+        GP operators on tokens is a thing of the past. 
+** TODO How do I use graph distance with real-valued data (round???)
+** TODO Integrate exceptional fitness, try using it to place buffer limits.
     In addition to adding an inhibitor with multiplicity, may need to attach functions that
     will emit messages on exceptional events.
-** Add individuals that represent machine activity???
+** TODO Add individuals that represent machine activity???
    Add genetic operators that combine machine perspective with job perspective. STAR
    Add genetic operators that keep edits within a machine. STAR
    Thought: Evolution here is essential from job perspective to machine/topology perspective.
              - At least when there are parallel workcenters, this will be true. 
              - Also true about learning about buffers and accommodating other jobs.
              - Probably want a "ready-made structure" for insertion of parallel workstations. 
-** Add MJP 
+** TODO Add Causal
+    This entails making the infinitessimal generator parametric.
+
+** TODO Add MJP 
     This entails
      (1) having an operator for adding other colours -- Not a crossover operator ???
      (2) watching the execution times, maybe doing GPtips like regression.
-** Add Causal
-    This entails making the infinitessimal generator parametric.
+
+** TODO Add parallel workstations to MJPdes and see what happens here (enhance notion of priority?). 
 
 * Discussion
 ** Rationale for PNN
@@ -120,26 +147,27 @@ quantities of tokens in places. The PNN essentially shows the state changes whil
    - hypothesis testing (causal? comparison?)
    - [TODO] Consider "evolution in stages" where fitness changes when milestones are reached.
 ** IDEA: Maybe award fitness to PNs that represent exceptional messages.
-***       Award a little less to those who can at least cope with it with a NN. 
+***  Award a little less to those who can at least cope with it with a NN. 
 
-** Integrating exceptional fitness
+** Integrating exceptional fitness   
 No starting links because nothing can parse the log. Every individual is capable of only describing
 the path of a single job through the production resources. I think I have few options:
 
-*** 1) Hope for a population that gets it right.
+***  Obsolete?
+****  1) Hope for a population that gets it right.
    Use genetic operators to produce more varied individuals, including some that 
    might parse the log well enough to get an exceptional msg table with markings that
    can guide design.
 
-*** 2) Use a next-ordinary-on-job
+****  2) Use a next-ordinary-on-job
    Instead of next-ordinary, use next-ordinary-on-job. That will provide a parse
    and lead to the need for queues. 
 
    You could apply this to multiple jobs, but would that be helpful?
 
-*** 3) Give some more thought about how the reachability graph can do this. 
+****  3) Give some more thought about how the reachability graph can do this. 
 
-*** Summary (and msg-table)
+***  Summary (and msg-table)
 Preparation to do (1) and (2) is the same, I think: It must be possible to 
 use the msg table markings to update the PN. This is a "semantic genetic operator"
 
@@ -167,34 +195,34 @@ So what?
 But why doesn't an individual emerge from evolution that can do this?
 The winning individual came real close after just two iterations. 
 
-*** After 30 I still didn't get one. 
+***  After 30 generations I still didn't get one. 
+***  Struggle
 (You need 5 places and just the four transitions.) The only mistake
 was an arc from the buffer to m2-complete-job. That arc should have
 went to m2-start job. I think it may have stopped because success is <= 1 ??? Nope: we are looking for 0.1 or better.
 
-***** I'm following jobs, what if instead I followed machines? (Or did both?)
+***  Idea: I'm following jobs, what if instead I followed machines? (Or did both?)
 Essentially what is wrong with the algorithm now is that it doesn't look at what machines do.
 A Machine accepts/creates a part and starts work on it. It puts/destroys a part when done. 
 These are patterns I could inject into the initial population, similar to what I do for jobs. 
 What I really need are operators that combine the two viewpoints!!!
+**** I sort of fixed this with util/related-places etc used in setting the initial-marking
 
-*** I'm going to cut the pop down to 25 and cut out lots of operators. 
+***  Struggle
+   I'm going to cut the pop down to 25 and cut out lots of operators. 
    Not enough experimentation yet, but so far, that didn't work. 
 
-*** Let's force one close to this [[file:~/TwoDrive/OneDrive/Repo/mindmaps/images/close-to-correct-pn.jpg]]
-
+***  Let's force one close to this: [[file:~/TwoDrive/OneDrive/Repo/mindmaps/images/close-to-correct-pn.jpg][hopeful-pn]]
 Find the PN for this on Sunday 2017-10-29. 
-
-
 ** GP Operators 
 *** Need better notion of locality!
 **** hopeful-pn with an initial-marking [1 0 0 0 0] (where first is place-1)
-     Doesn't even get a rgraph, yet it is SO CLOSE!
+     Doesn't even get a rgraph, yet it is SO CLOSE! 
+***** The above before I thought about pnu/set-initial-mark related-machine, etc.
+***** Certainly more to say about locality, but that's it for now!
 *** Semantic operators
 **** Example failure is hopeful-pn with initial-marking token on place-1
-** [[https://www.datasciencecentral.com/profiles/blogs/artificial-intelligence-is-not-fake-intelligence][This]] neural net chart is pretty good.
-   Much better discussion of it [[http://www.asimovinstitute.org/neural-network-zoo/][here]].
-   23 Types of Regression, [[https://www.datasciencecentral.com/profiles/blogs/23-types-of-regression][here]].
+
 
 * Sinet Log *
 ** <2017-10-14 Sat>
@@ -2032,7 +2060,6 @@ Will I have time for all of this???
            (filterv #(not= test-one (:M %)) (:rgraph pn)))
          m-mp-fix)))))
 
-
 *** hopeful-pn (pnpn) fizzles out at line 594:
 
 {:M [0 1 0 1 0], :fire :m2-complete-job, :Mp [1 1 0 0 0], :rate 1.0, :job 1834, :clk 2173.361361140053, :indx 594}]
@@ -2045,7 +2072,7 @@ Will I have time for all of this???
 Let's see if the problem is that N=3 and lax is set to two. Maybe first I'll try lax set to 3. 
 YUP! That's an easy test! 
 
-*** Reasoning about how interpretation should really work:
+*** Thinking about how interpretation should really work:
 So I think I need the converse of lax-reach: lax-interp which will:
   1) Allow "pushing to full buffers"  when no other transition (but only up to "max-buffer" = 10 to terminate early) 
   2) Allow "pulling from  empty buffers" when no other transition. 
@@ -2068,4 +2095,542 @@ Hmmm... Maybe the easiest way to implement this isn't to extend into a larger re
     I'm going to try (3)!!!
 
 This needs to wrap lax-reach and interp in a loop. Refactoring!
+
+*** interpretations got factored out. 
+;;; POD this is probably the most time consuming part of the pnn process.
+;;; POD with new lax interpretation, will need to run every one since multiple
+;;;     might make it to the end. 
+(defn interpretations
+  "Add :interps and :fails to the pn describing what interpretations worked."
+  [pn log]
+  (let [last-indx (:last-line pn)]
+    (reduce (fn [pn link]
+              (let [interp (interpret-scada pn log link)]
+                (if (and (number? (-> interp last :indx))
+                         (== last-indx (-> interp last :indx)))
+                  (update pn :interps conj interp)
+                  (update pn :fails conj (last interp)))))
+            (-> pn
+                (assoc :interps [])
+                (assoc :fails []))
+            (:starting-links pn))))
+
+** <2017-11-05 Sun>
+
+8:46 - A few minutes to fix things before starting writing???
+9:29 - Will need to investigate a bug here: 
+{:m2-unstarved {[0 1 0 1 0] 10, 
+                [0 1 0 1 1] 4},  <---- wrong
+ :m1-blocked   {[0 1 0 1 3] 30}
+ :m1-unblocked {[0 0 1 1 2] 30},
+ :m2-starved   {[1 1 0 0 0] 10, 
+                [1 1 0 0 1] 4},  <---- wrong
+ :ordinary     {[0 0 1 1 1] 243,
+		[0 1 0 1 0] 155,
+		[1 1 0 0 2] 247,
+		[0 1 0 1 3] 326,
+		[1 1 0 0 3] 325,
+		[0 1 0 1 1] 393,
+		[1 1 0 0 0] 10,
+		[1 0 1 0 1] 4,    These are also different, and should include the above. (They might.)
+		[0 0 1 1 0] 145,
+		[0 0 1 1 2] 326,
+		[1 1 0 0 1] 160,
+		[0 1 0 1 2] 568,
+		[1 0 1 0 0] 10}}
+
+It is probably the case that the next-link stuff can be simplified, 
+use of Djikstra etc. removed. This is obviated by the max-k-used approach.
+
+** <2017-11-06 Mon>
+
+I'm going to let yesterday's bug slide, because I don't think it hurts anything. 
+I'm cleaning up all the mess from yesterday's conflict over whether the implementation
+in fact conforms to the math -- it does. The problem is in the "artifacts of 
+inaccessible formalisms" -- formalisms which get elided in the Parzen window 
+implementation. 
+
+** <2017-11-07 Tue>
+
+find-interpretation(2loops) --> lax-reach (:rgraph pn)
+(:interp pn)                --> interpret-scada (get an interpretation)
+(:max-k-used pn)
+(:rgraph pn)
+
+*** ??? The work to 1:20 was a waste! Somehow the calculation of :loom-graph ended up after :distance-fn
+
+--> Stuck in a call to the evaluation of marking against the parzen functions. 
+(which of each?) 
+[3 0 1 1 0] -- This data doesn't match Ugh!
+
+
+Problem ----> ((-> pnpn :pdf-fns :m1-unblocked) [3 0 1 1 0])
+It looks like it can't do the Djikstra graph search (no successors* for class nil)
+
+Indeed, we are again working with the markings in a different order!
+:loom-graph and :rgraph match up. msg-table DOES NOT.
+
+There could be problems with graphs (not ergodic, traps and siphons?) that make 
+the distance function fail???
+
+((-> pnpn :pdf-fns :m1-unblocked) [0 1 0 1 0])
+from =  [0 0 1 1 2]  to =  [0 1 0 1 0]
+
+----> It looks like it can't do the Djikstra graph search (no successors* for class nil)
+Even with the pnpn issue fixed I get this. The reason is that the GRAPH is nil. 
+
+
+
+Did those couple of wrong values do this much damage? It looks to be the case!
+
+{:m2-unstarved {[0 1 0 1 0] 10, [0 1 0 1 1] 4},
+ :m2-starved   {[1 1 0 0 0] 10, [1 1 0 0 1] 4},  
+
+
+{[0 0 1 1 1] [:ordinary 0.09854858103526418],  
+ [0 1 0 1 0] [:m2-unstarved 0.7341381289208004],  <-------------- makes sense
+ [1 1 0 0 2] [:ordinary 0.1019784166519701],
+ [0 1 0 1 3] [:m1-blocked 1.0],
+ [1 1 0 0 3] [:ordinary 0.12070348087608791],
+ [0 1 0 1 1] [:m2-unstarved 0.3353453223020011],  <-------------- unfortunate
+ [1 1 0 0 0] [:m2-starved 0.7341381289208004],    <-------------- makes sense
+ [1 0 1 0 1] [:m2-starved 0.00817822101068792],   <-------------- huh???
+ [0 0 1 1 0] [:ordinary 0.05712535334821984],
+ [0 0 1 1 2] [:m1-unblocked 1.0],
+ [1 1 0 0 1] [:m2-starved 0.3353453223020011],    <-------------- Unfortunate
+ [0 1 0 1 2] [:ordinary 0.21331334446723213],
+ [1 0 1 0 0] [:m2-starved 0.020410588875005395]}  <-------------- huh???
+
+Original msg-table results from today's implementation. Not what it was!
+
+{[0 0 1 1 1] [:ordinary 0.09854858103526418],
+ [1 1 0 0 2] [:ordinary 0.1019784166519701],
+ [1 1 0 0 3] [:ordinary 0.12070348087608791],
+ [0 1 0 1 1] [:ordinary 0.15297323906481347],      
+ [1 0 1 0 1] [:ordinary 0.005574471494601208],
+ [0 0 1 1 0] [:ordinary 0.05712535334821984],
+ [0 1 0 1 2] [:ordinary 0.21331334446723213],
+ [1 1 0 0 0] [:m2-starved 1.0],
+ [1 1 0 0 1] [:m2-starved 0.06948345122280154],
+ [1 0 1 0 0] [:m2-starved 0.028565500784550373]}
+ [0 1 0 1 0] [:m2-unstarved 1.0],                  
+ [0 1 0 1 3] [:m1-blocked 1.0],
+ [0 0 1 1 2] [:m1-unblocked 1.0],
+
+What is in fitness_test:
+
+           {[0 1 0 1 0] [:ordinary 0.07812345592321546],
+            [2 0 1 1 0] [:ordinary 0.19350798937548197],
+            [1 1 0 1 0] [:ordinary 0.10565451941946981],
+            [3 0 1 0 1] [:ordinary 0.09387730377891051],
+            [1 0 1 1 0] [:ordinary 0.1783054552497219],
+            [1 0 1 0 1] [:ordinary 0.08572916833008677],
+            [2 0 1 0 1] [:ordinary 0.10642989332503937]
+            [0 0 1 0 1] [:m2-starved 1.0],
+            [0 1 0 0 1] [:m2-starved 0.028565500784550373],
+            [2 1 0 1 0] [:m1-unblocked 1.0],
+            [3 0 1 1 0] [:m1-blocked 1.0],
+            [0 0 1 1 0] [:m2-unstarved 1.0],
+
+This is what I was getting on the 24th. It was also in the powerpoint. 
+gov.nist.sinet.fitness> (pprint (tryme 0.75))
+{[0 1 0 1 0] [:ordinary 0.07812345592321546],
+ [2 0 1 1 0] [:ordinary 0.19350798937548197],
+ [1 1 0 1 0] [:ordinary 0.10565451941946981],
+ [3 0 1 0 1] [:ordinary 0.09387730377891051],
+ [1 0 1 1 0] [:ordinary 0.1783054552497219],
+ [1 0 1 0 1] [:ordinary 0.08572916833008677],
+ [2 0 1 0 1] [:ordinary 0.10642989332503937]}
+ [0 0 1 0 1] [:m2-starved 1.0],                  <--------------
+ [0 1 0 0 1] [:m2-starved 0.028565500784550373], <-------------- Should be ordinary
+ [0 0 1 1 0] [:m2-unstarved 1.0],
+ [2 1 0 1 0] [:m1-unblocked 1.0],
+ [3 0 1 1 0] [:m1-blocked 1.0],
+
+
+There are 16 markings in the msg-table and 28 markings in the rgraph. 
+
+So it is a little bit worse today for some reason:
+
+Q: Is what I'm calling the original-msg-table also in the Powerpoint? 
+A: No, there is a discrepency due to moving things around for 10 4 vs 14. 
+And the marking-key has changed so, I'm not investigating. 
+
+---> Key problem: I need to look at alternative formulations, some as simple as changing sigma, 
+     but also straight (no Euclidean) and normalized. 
+
+I think a probabilistic one will be best. I could calculate the probability of 
+transition from each state to other state just by looking at the interpretation. 
+I don't think the formulation I have in mind is a Markov chain, because I'm not interested
+in the "no op" transition to self. 
+
+Ideally what I'd like is the probability of transition between two states
+where there are multiple paths between the states (sum of all the paths).
+But what does that mean? Some paths have cycles. It's not like I'm looking
+for some steady state kind of thing. 
+
+A simplification that I can understand is to find the shortest path and calculate
+the probability of that path. 
+
+*** Maybe better than the above is to put 1/probabilities on the transitions and make 
+it find the shortest path that way. DO THIS!
+
+Okay, First step is to continue to process the interpretation, producing transition 
+probabilities for every pair where there is a transition. 
+
+{:M [0 1 0 1 1], :fire :m1-complete-job, :Mp [0 0 1 1 1], :rate 1.0, :indx 0, :job 1689}
+
+It's easy, just a reduce that does the counting. 
+
+{[0 0 1 1 1] {[0 1 0 1 2] 243},
+ [0 1 0 1 0] {[0 0 1 1 0] 145, [1 1 0 0 0] 10},
+ [1 1 0 0 2] {[0 1 0 1 1] 247},
+ [0 1 0 1 3] {[1 1 0 0 3] 325, [0 0 1 1 3] 1},
+ [1 1 0 0 3] {[0 1 0 1 2] 325},
+ [0 1 0 1 1] {[0 0 1 1 1] 243, [1 1 0 0 1] 150},
+ [1 1 0 0 0] {[1 0 1 0 0] 10},
+ [1 0 1 0 1] {[1 1 0 0 2] 4},
+ [0 0 1 1 0] {[0 1 0 1 1] 145},
+ [0 0 1 1 2] {[0 1 0 1 3] 326},
+ [1 1 0 0 1] {[1 0 1 0 1] 4, [0 1 0 1 0] 156},
+ [0 1 0 1 2] {[1 1 0 0 2] 243, [0 0 1 1 2] 325},
+ [1 0 1 0 0] {[1 1 0 0 1] 10}}
+
+HMMM---> Now set the links in the loom graph to 1/P - 1, (e.g. if there is not alternative). 
+         If this looks too "harsh," try log(1/p).
+Yeah, I'll go with this. The alternative is to not use the costs in Djikstra and instead
+do product of 1/p for each link. 
+
+1/p - 1 looks pretty tough!
+{:nodeset
+ #{[0 0 1 1 1] [0 1 0 1 0] [1 1 0 0 2] [1 0 1 0 3] [0 1 0 1 3] [1 1 0 0 3] [0 1 0 1 1] [1 0 1 0 2] [1 1 0 0 0] [1 0 1 0 1] [0 0 1 1 0]
+   [0 0 1 1 2] [1 1 0 0 1] [0 1 0 1 2] [0 0 1 1 3] [1 0 1 0 0]},
+ :adj
+ {[0 0 1 1 1] {[0 1 0 1 2] 0.0, [1 0 1 0 1] 99998.99999999999},
+  [0 1 0 1 0] {[0 0 1 1 0] 0.06896551724137945, [1 1 0 0 0] 14.5},
+  [1 1 0 0 2] {[0 1 0 1 1] 0.0, [1 0 1 0 2] 99998.99999999999},
+  [1 0 1 0 3] {[0 0 1 1 2] 99998.99999999999},
+  [0 1 0 1 3] {[1 1 0 0 3] 0.003076923076922977, [0 0 1 1 3] 325.0},
+  [1 1 0 0 3] {[0 1 0 1 2] 0.0, [1 0 1 0 3] 99998.99999999999},
+  [0 1 0 1 1] {[1 1 0 0 1] 1.6199999999999997, [0 0 1 1 1] 0.6172839506172838},
+  [1 0 1 0 2] {[1 1 0 0 3] 99998.99999999999, [0 0 1 1 1] 99998.99999999999},
+  [1 1 0 0 0] {[1 0 1 0 0] 0.0},
+  [1 0 1 0 1] {[1 1 0 0 2] 0.0, [0 0 1 1 0] 99998.99999999999},
+  [0 0 1 1 0] {[0 1 0 1 1] 0.0, [1 0 1 0 0] 99998.99999999999},
+  [0 0 1 1 2] {[0 1 0 1 3] 0.0, [1 0 1 0 2] 99998.99999999999},
+  [1 1 0 0 1] {[0 1 0 1 0] 0.025641025641025772, [1 0 1 0 1] 39.0},
+  [0 1 0 1 2] {[0 0 1 1 2] 0.7476923076923079, [1 1 0 0 2] 1.337448559670782},
+  [0 0 1 1 3] {[1 0 1 0 3] 99998.99999999999},
+  [1 0 1 0 0] {[1 1 0 0 1] 0.0}},
+ :in
+ {[0 0 1 1 1] #{[0 1 0 1 1] [1 0 1 0 2]},
+  [0 1 0 1 0] #{[1 1 0 0 1]},
+  [1 1 0 0 2] #{[1 0 1 0 1] [0 1 0 1 2]},
+  [1 0 1 0 3] #{[1 1 0 0 3] [0 0 1 1 3]},
+  [0 1 0 1 3] #{[0 0 1 1 2]},
+  [1 1 0 0 3] #{[0 1 0 1 3] [1 0 1 0 2]},
+  [0 1 0 1 1] #{[1 1 0 0 2] [0 0 1 1 0]},
+  [1 0 1 0 2] #{[1 1 0 0 2] [0 0 1 1 2]},
+  [1 1 0 0 0] #{[0 1 0 1 0]},
+  [1 0 1 0 1] #{[0 0 1 1 1] [1 1 0 0 1]},
+  [0 0 1 1 0] #{[0 1 0 1 0] [1 0 1 0 1]},
+  [0 0 1 1 2] #{[1 0 1 0 3] [0 1 0 1 2]},
+  [1 1 0 0 1] #{[0 1 0 1 1] [1 0 1 0 0]},
+  [0 1 0 1 2] #{[0 0 1 1 1] [1 1 0 0 3]},
+  [0 0 1 1 3] #{[0 1 0 1 3]},
+  [1 0 1 0 0] #{[1 1 0 0 0] [0 0 1 1 0]}}}
+
+
+Not so hot! 1/p - 1 Not so hot. 
+{[0 0 1 1 1] [:m2-unstarved 0.5531657059250906],
+ [0 1 0 1 0] [:m2-starved 0.9774657532330877],
+ [1 1 0 0 2] [:ordinary 0.32433564829827793],
+ [0 1 0 1 3] [:m1-unblocked 1.0],
+ [1 1 0 0 3] [:m1-unblocked 0.997268694086773],
+ [0 1 0 1 1] [:m2-unstarved 0.9575275090117306],
+ [1 1 0 0 0] [:m2-starved 0.71428641972588],
+ [1 0 1 0 1] [:ordinary 0.0013736263736265335],
+ [0 0 1 1 0] [:m2-starved 0.9193441856793396],
+ [0 0 1 1 2] [:m1-unblocked 1.0],
+ [1 1 0 0 1] [:m2-starved 1.0],
+ [0 1 0 1 2] [:m1-unblocked 0.997268694086773],
+ [1 0 1 0 0] [:m2-starved 0.71428641972588]}
+
+Log(1/p) even worse! Something is wrong!
+{[0 0 1 1 1] [:m2-unstarved 0.6254312767723978],
+ [0 1 0 1 0] [:m2-starved 0.9777466239702579],
+ [1 1 0 0 2] [:m1-unblocked 0.46886011292787777],
+ [0 1 0 1 3] [:m1-unblocked 1.0],
+ [1 1 0 0 3] [:m1-unblocked 0.9972728817730363],
+ [0 1 0 1 1] [:m2-unstarved 0.9588869262560565],
+ [1 1 0 0 0] [:m2-starved 0.738724839703402],
+ [1 0 1 0 1] [:m2-starved 0.03766575475736669],
+ [0 0 1 1 0] [:m2-starved 0.9214691872944045],
+ [0 0 1 1 2] [:m1-unblocked 1.0],
+ [1 1 0 0 1] [:m2-starved 1.0],
+ [0 1 0 1 2] [:m1-unblocked 0.9972728817730363],
+ [1 0 1 0 0] [:m2-starved 0.738724839703402]}
+
+This looks good: It is a distance from the a m1-blocking to a m2-starving event
+(alg/dijkstra-path-dist (-> pnpn :loom-prob) [0 1 0 1 3] [0 0 1 1 0])
+[([0 1 0 1 3] [1 1 0 0 3] [0 1 0 1 2] [1 1 0 0 2] [0 1 0 1 1] [1 1 0 0 1] [0 1 0 1 0] [0 0 1 1 0]) 1.9073156746735405]
+
+This looks wrong:
+(alg/dijkstra-path-dist (-> pnpn :loom-prob) [0 0 1 1 0] [1 1 0 0 0])
+[([0 0 1 1 0] [0 1 0 1 1] [1 1 0 0 1] [0 1 0 1 0] [1 1 0 0 0]) 3.729332149682496]
+
+gov.nist.sinet.fitness> (ppprint (subvec iii 0 10))
+[{:M [0 1 0 1 1], :fire :m1-complete-job, :Mp [0 0 1 1 1], :rate 1.0, :indx 0, :job 1689}
+ {:M [0 0 1 1 1], :fire :m1-start-job, :Mp [0 1 0 1 2], :rate 1.0, :job 1690, :clk 1999.9234365080201, :indx 1}
+ {:M [0 1 0 1 2], :fire :m2-complete-job, :Mp [1 1 0 0 2], :rate 1.0, :job 1688, :clk 2000.6492850612497, :indx 2}
+ {:M [1 1 0 0 2], :fire :m2-start-job, :Mp [0 1 0 1 1], :rate 1.0, :job 1689, :clk 2000.6492850612497, :indx 3}
+ {:M [0 1 0 1 1], :fire :m1-complete-job, :Mp [0 0 1 1 1], :rate 1.0, :job 1690, :clk 2000.9234365080201, :indx 4}
+ {:M [0 0 1 1 1], :fire :m1-start-job, :Mp [0 1 0 1 2], :rate 1.0, :job 1691, :clk 2000.9234365080201, :indx 5}
+ {:M [0 1 0 1 2], :fire :m2-complete-job, :Mp [1 1 0 0 2], :rate 1.0, :job 1689, :clk 2001.8192850612497, :indx 6}
+ {:M [1 1 0 0 2], :fire :m2-start-job, :Mp [0 1 0 1 1], :rate 1.0, :job 1690, :clk 2001.8192850612497, :indx 7}
+ {:M [0 1 0 1 1], :fire :m1-complete-job, :Mp [0 0 1 1 1], :rate 1.0, :job 1691, :clk 2001.9234365080201, :indx 8}
+ {:M [0 0 1 1 1], :fire :m1-start-job, :Mp [0 1 0 1 2], :rate 1.0, :job 1692, :clk 2001.9234365080201, :indx 9}]
+
+THis is good (and same 1/p - 1 and log(1/p)
+(alg/dijkstra-path-dist (-> pnpn :loom-prob) [0 0 1 1 1] [0 1 0 1 2])
+***** [([0 0 1 1 1] [0 1 0 1 2]) 0.0]
+
+Setting sigma to 0.2 doesn't help, suggesting that it isn't centered correctly.
+
+***** {:mark [0 0 1 1 1], :class :ordinary, :score 0.39497228911318194}
+
+gov.nist.sinet.fitness> (ppprint (:winners (tryme)))
+{[0 0 1 1 1] [:ordinary 0.08358699988257319],
+ [0 1 0 1 0] [:m2-starved 0.7257767484189018],
+ [1 1 0 0 2] [:ordinary 0.08619508818420649],
+ [0 1 0 1 3] [:m1-unblocked 1.0],
+ [1 1 0 0 3] [:m1-unblocked 0.9622687143632584],
+ [0 1 0 1 1] [:m2-unstarved 0.5873481997390083],
+ [1 1 0 0 0] [:m2-starved 0.7142857142857142],
+ [1 0 1 0 1] [:ordinary 0.0013736263736263735],
+ [0 0 1 1 0] [:m2-starved 0.30648643386722174],
+***** [0 0 1 1 2] [:m1-unblocked 1.0],
+ [1 1 0 0 1] [:m2-starved 1.0],
+ [0 1 0 1 2] [:m1-unblocked 0.9622687143632584],
+ [1 0 1 0 0] [:m2-starved 0.7142857142857142]}
+
+***** 30  instances of unblocking at [0 0 1 1 2] 
+***** 326 instances of ordinary happening there. 
+
+{:M [0 0 1 1 1], :fire :m1-start-job, :Mp [0 1 0 1 2], :rate 1.0, :job 1692, :clk 2001.9234365080201, :indx 9}
+{:M [0 1 0 1 2], :fire :m1-complete-job, :Mp [0 0 1 1 2], :rate 1.0, :job 1692, :clk 2002.9234365080201, :indx 10}
+***** {:M [0 0 1 1 2], :fire :m1-start-job, :Mp [0 1 0 1 3], :rate 1.0, :job 1693, :clk 2002.9234365080201, :indx 11}
+{:M [0 1 0 1 3], :fire :m2-complete-job, :Mp [1 1 0 0 3], :rate 1.0, :job 1690, :clk 2002.9892850612498, :indx 12}
+
+
+({:mark [0 0 1 1 2], :class :m2-unstarved, :score 2.2849406843698177E-8}
+ {:mark [0 0 1 1 2], :class :m1-unblocked, :score 1.0}
+ {:mark [0 0 1 1 2], :class :m2-starved, :score 1.1923137284864743E-8}
+ {:mark [0 0 1 1 2], :class :ordinary, :score 0.11199402299201237}
+ {:mark [0 0 1 1 2], :class :m1-blocked, :score 8.400658371646288E-5})
+
+Lots of these:
+{:act :m2-unstarved, :prev-act :m2-start-job, :indx 2231, :Mp [0 1 0 1 0], :clk 2639.0818930886508, :job 2230}
+
+{:m2-unstarved {[0 1 0 1 0] 10, [0 1 0 1 1] 4},
+ :m1-unblocked {[0 0 1 1 2] 30}, <==================================== Huh
+ :m2-starved {[1 1 0 0 0] 10, [1 1 0 0 1] 4},
+ :ordinary
+ {[0 0 1 1 1] 243,
+  [0 1 0 1 0] 155,
+  [1 1 0 0 2] 247,
+  [0 1 0 1 3] 326,
+  [1 1 0 0 3] 325,
+  [0 1 0 1 1] 393,
+  [1 1 0 0 0] 10,
+  [1 0 1 0 1] 4,
+  [0 0 1 1 0] 145,
+  [0 0 1 1 2] 326, <----------------
+  [1 1 0 0 1] 160,
+  [0 1 0 1 2] 568,
+  [1 0 1 0 0] 10},
+ :m1-blocked {[0 1 0 1 3] 30}}
+
+There should be *AT MOST 6* winners that are not :ordinary. There are 10. 
+
+[0 1 0 1 1] Is a good example:
+
+  [0 1 0 1 1] [:m2-unstarved 0.5873481997390083], 4    :m2-unstarved
+  [0 1 0 1 1]                                     393  :ordinary
+
+({:mark [0 1 0 1 1], :class :m2-unstarved, :score 0.5873481997390083}  <-- winner
+ {:mark [0 1 0 1 1], :class :m1-unblocked, :score 5.280982762217078E-8}
+ {:mark [0 1 0 1 1], :class :m2-starved,   :score 0.30648643386722174} <-- WHY? 
+ {:mark [0 1 0 1 1], :class :ordinary,     :score 0.312370265870799}   <-- reasonable
+ {:mark [0 1 0 1 1], :class :m1-blocked,   :score 5.280982762217078E-8})
+
+** <2017-11-08 Wed>
+
+place-1 and place-4 are on m2, place-4 is busy. 
+                               place-2 is busy. 
+
+I'm continuing on with the WHY?
+Maybe it is syncing on :M and should be on :Mp ?
+[:place-1 :place-2 :place-3 :place-4 :Place-103]
+  0          1        0          1      1         (That really isn't m2-starving because it is busy!)
+                                                  (Busy and one in the buffer, it won't even transition to starving.)
+
+ [1] {:M [0 1 0 1 0], :fire :m1-complete-job, :Mp [0 0 1 1 0], :rate 1.0, :job 1836, :clk 2173.4862364331248, :indx 596}
+ [2] {:M [0 0 1 1 0], :fire :m1-start-job,    :Mp [0 1 0 1 1], :rate 1.0, :job 1837, :clk 2173.4862364331248, :indx 597}
+     {:M [0 1 0 1 1], :fire :m1-complete-job, :Mp [0 0 1 1 1], :rate 1.0, :job 1837, :clk 2174.4862364331248, :indx 598}
+
+
+{:act :m1-complete-job, :bf :b1, :j 1836, :n 0, :clk 2173.4862364331248, :line 596, :mjpact :bj, :m :m1}
+{:act :m1-start-job, :j 1837, :jt :jobType1, :ends 2174.4862364331248, :clk 2173.4862364331248, :line 597, :mjpact :aj, :m :m1}
+{:act :m1-complete-job, :bf :b1, :j 1837, :n 1, :clk 2174.4862364331248, :line 598, :mjpact :bj, :m :m1}
+
+[1] "wrong-iness" because it doesn't add to the buffer??? The transition is tecnically correct! 
+[2] Here it does add to the buffer. I think this is okay. To do otherwise is to invite problems.
+So I don't see a case for [0 1 0 1 1] being m2-starved in the log at all. Buffer has 1!
+
+Let's look at what is happening when m2 starves. Two situations, supposedly. 
+
+[3] {:M [0 1 0 1 1], :fire :m2-complete-job,       :Mp [1 1 0 0 1], :rate 1.0, :job 1744, :clk 2066.1692850612535, :indx 224}
+[4] {:act :m2-starved, :prev-act :m2-complete-job, :Mp [1 1 0 0 1], :clk 2066.1692850612535, :job 1744            :indx 225,}
+    {:M [1 0 1 0 1], :fire :m1-start-job,          :Mp [1 1 0 0 2], :rate 1.0, :job 1746, :clk 2067.08452126566, :indx 227}
+    {:M [1 1 0 0 2], :fire :m2-start-job,          :Mp [0 1 0 1 1], :rate 1.0, :job 1745, :clk 2067.08452126566, :indx 228}
+    {:act :m2-unstarved, :prev-act :m2-start-job, :indx 229, :Mp [0 1 0 1 1], :clk 2067.08452126566, :job 1745}
+
+     This [4] is *wrong*. There is one in the buffer. Should penalize an interpretation that matches
+     a starvation to having something in the buffer. In other respects it is "continuous." 
+     Either way, it doesn't explain the :m2-starved in PNN, but fix the interpretation first. 
+     Really need a look-ahead at [3] to see that [4] is starve. Going to have to work backwards
+     from starvations!. Also call it :state (not :Mp)
+
+
+starved? written.
+
+{:act :m2-complete-job, :m :m2, :j 1744, :ent 2062.4506743555485, :clk 2066.1692850612535, :line 224, :mjpact :ej}
+{:act :m2-starved, :m :m2, :clk 2066.1692850612535, :line 225, :mjpact :st}
+{:act :m1-complete-job, :bf :b1, :j 1745, :n 0, :clk 2067.08452126566, :line 226, :mjpact :bj, :m :m1}
+
+{:M [0 1 0 1 1], :fire :m2-complete-job, :Mp [1 1 0 0 1], :rate 1.0, :m :m2, :job 1744, :clk 2066.1692850612535, :indx 224}
+{:act :m2-starved, :prev-act :m2-complete-job, :Mp [1 1 0 0 1], :state [1 1 0 0 1], :clk 2066.1692850612535, :job 1744, :indx 225}
+{:M [1 1 0 0 1], :fire :m1-complete-job, :Mp [1 0 1 0 1], :rate 1.0, :m :m1, :job 1745, :clk 2067.08452126566, :indx 226}
+
+This should have failed starved? 
+
+I have a new (better) interpretation, but I'm not happy with what MJPdes is doing.
+It is putting :m2-start-job messages [5] before :unstarve messages, resulting in the 
+wrong state on exceptional [6] . 
+
+What sucks about this is that to fix it, I need a new log. 
+
+{:M [1 1 0 0 1], :fire :m2-start-job, :Mp [0 1 0 1 0], :rate 1.0, :m :m2, :job 1744, :clk 2064.9992850612534, :indx 223}
+{:M [0 1 0 1 0], :fire :m2-complete-job, :Mp [1 1 0 0 0], :rate 1.0, :m :m2, :job 1744, :clk 2066.1692850612535, :indx 224}
+{:act :m2-starved, :prev-act :m2-complete-job, :Mp [1 1 0 0 0], :state [1 1 0 0 0], :clk 2066.1692850612535, :job 1744, :indx 225}
+{:M [1 1 0 0 0], :fire :m1-complete-job, :Mp [1 0 1 0 0], :rate 1.0, :m :m1, :job 1745, :clk 2067.08452126566, :indx 226}
+{:M [1 0 1 0 0], :fire :m1-start-job, :Mp [1 1 0 0 1], :rate 1.0, :m :m1, :job 1746, :clk 2067.08452126566, :indx 227}
+[5] {:M [1 1 0 0 1], :fire :m2-start-job, :Mp [0 1 0 1 0], :rate 1.0, :m :m2, :job 1745, :clk 2067.08452126566, :indx 228}
+[6] {:act :m2-unstarved, :prev-act :m2-start-job, :Mp [0 1 0 1 0], :state [0 1 0 1 0], :clk 2067.08452126566, :job 1745, :indx 229}
+{:M [0 1 0 1 0], :fire :m1-complete-job, :Mp [0 0 1 1 0], :rate 1.0, :m :m1, :job 1746, :clk 2068.08452126566, :indx 230}
+
+...so essentially, I have more to do. 
+It may even be the case that I'll want to terminate interpretations where
+unstarve is happening but the buffer is empty. 
+
+Am I making progress on the winners? No. Still 10 exceptional winners, should only be 6
+
+{[0 0 1 1 1] [:ordinary 0.09034091305554764],
+ [0 1 0 1 0] [:m2-unstarved 1.0],
+ [1 1 0 0 2] [:ordinary 0.09031989717406354],
+ [0 1 0 1 3] [:m1-unblocked 1.0],
+ [1 1 0 0 3] [:m1-unblocked 1.0],
+ [0 1 0 1 1] [:m2-unstarved 0.42228747963461166],
+ [1 1 0 0 0] [:m2-starved 1.0],
+ [0 0 1 1 0] [:m2-unstarved 0.42228747963461166],
+ [0 0 1 1 2] [:m1-unblocked 1.0],
+ [1 1 0 0 1] [:m2-starved 1.0],
+ [0 1 0 1 2] [:m1-unblocked 1.0],
+ [1 0 1 0 0] [:m2-starved 1.0]}
+
+
+Actually, things should be MUCH better because the msg table is good: (AND THIS WITH SIGMA = 0.2 !)
+{:m2-starved   {[1 1 0 0 0] 14},
+ :m2-unstarved {[0 1 0 1 0] 14}, <------------------- Except that last here should be 1 not 0. 
+ :m1-blocked   {[0 1 0 1 3] 30}
+ :m1-unblocked {[0 0 1 1 2] 30},
+ :ordinary
+ {[0 0 1 1 1] 263,
+  [0 1 0 1 0] 217,
+  [1 1 0 0 2] 263,
+  [0 1 0 1 3] 248,
+  [1 1 0 0 3] 248,
+  [0 1 0 1 1] 466,
+  [1 1 0 0 0] 14,
+  [0 0 1 1 0] 203,
+  [0 0 1 1 2] 248,
+  [1 1 0 0 1] 217,
+  [0 1 0 1 2] 511,
+  [1 0 1 0 0] 14}}
+
+I'm going to investigate better winners before fixing MJPdes. 
+*** Just two ordinary with sigma=0.5
+{[0 0 1 1 1] [:ordinary 0.20215720349327004],
+ [0 1 0 1 0] [:m2-unstarved 1.0],
+ [1 1 0 0 2] [:ordinary 0.18131030070691884],
+ [0 1 0 1 3] [:m1-unblocked 1.0],
+ [1 1 0 0 3] [:m1-unblocked 1.0],
+ [0 1 0 1 1] [:m2-unstarved 0.8711587695892686],
+ [1 1 0 0 0] [:m2-starved 1.0],
+ [0 0 1 1 0] [:m2-unstarved 0.8711587695892686],
+ [0 0 1 1 2] [:m1-unblocked 1.0],
+ [1 1 0 0 1] [:m2-starved 1.0],
+ [0 1 0 1 2] [:m1-unblocked 1.0],
+ [1 0 1 0 0] [:m2-starved 1.0]}
+
+(log 1/p) gives zero
+
+*** Surprisingly! 5 with 1/p (rather than 1/p - 1). 
+ [0 0 1 1 1] [:ordinary 0.09562183669845968],
+
+ [1 1 0 0 0] [:m2-starved 1.0],
+ [1 0 1 0 0] [:m2-starved 0.1353352832366127]
+ [0 1 0 1 0] [:m2-unstarved 1.0],
+ [0 0 1 1 0] [:m2-unstarved 0.11789851882642269],
+
+ [0 1 0 1 3] [:m1-blocked 1.0],
+ [1 1 0 0 3] [:m1-blocked 0.1353352832366127],
+ [0 0 1 1 2] [:m1-unblocked 1.0],
+
+ [1 1 0 0 2] [:ordinary 0.09445592889074222],
+ [0 1 0 1 1] [:ordinary 0.1835947938879116],
+ [1 1 0 0 1] [:ordinary 0.07711819024458476],
+ [0 1 0 1 2] [:ordinary 0.20171648386436794]
+
+*** Perfect at 1/p and sigma=0.4. I'm going to live with that for a while at least.
+{[0 0 1 1 1] [:ordinary 0.0903244614282773],
+ [1 1 0 0 0] [:m2-starved 1.0],
+ [0 1 0 1 0] [:m2-unstarved 1.0],
+ [1 1 0 0 2] [:ordinary 0.09031954835912448],
+ [0 1 0 1 3] [:m1-blocked 1.0],
+ [0 0 1 1 2] [:m1-unblocked 1.0],
+ [1 1 0 0 3] [:ordinary 0.08549534846163118],
+ [0 1 0 1 1] [:ordinary 0.1606469021025419],
+ [0 0 1 1 0] [:ordinary 0.06990869038942338],
+ [1 1 0 0 1] [:ordinary 0.07453835356002238],
+ [0 1 0 1 2] [:ordinary 0.17616047457462952],
+ [1 0 1 0 0] [:ordinary 0.0048262784622090035]}
+*** I have in-lined dijkstra. I don't need these unless I want old graph-distance
+#_(defn old-graph-distance-fn
+  "Return a function that calculates graph distance for the PN.
+   BTW, In the Parzen use of this, the first argument is a training instance and 
+   the second argument is the value for which we want a score."
+  [pn]
+  (let [graph (-> pn :loom-graph)]
+    (when-not graph (throw (ex-info "Not graph in graph-distance-fn" {}))) ; POD temporary
+    (fn [from to] 
+      (let [graph-distance (count (alg/dijkstra-path graph from to))]
+        (* graph-distance ; POD I need to try straight graph distance ???
+           (reduce (fn [sum ix] (+ sum (Math/pow (- (nth from ix) (nth to ix)) 2)))
+                   0.0
+                   (range (count from))))))))
+
+
+
 

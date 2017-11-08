@@ -27,7 +27,7 @@
         sig2 (* 2 sigma sigma)] ; sig^2 is variance. 
     (fn [x]
       (* (/ 1 size)
-         (reduce (fn [sum ix]
+         (reduce (fn [sum ix] ; Specht is exp of sum, not sum of exps! (exponential activation)
                    (+ sum (Math/exp (- (/ (dist-fn (nth xdata ix) x) sig2)))))
                  0.0
                  (range size)))))))

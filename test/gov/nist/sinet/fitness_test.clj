@@ -1,8 +1,11 @@
 (ns gov.nist.sinet.fitness-test
   (:require [clojure.test :refer :all]
             [clojure.pprint :refer (cl-format pprint)]
+            [loom.alg :as alg]
+            [loom.graph :as graph]
             [gov.nist.spntools.core :as spn]
             [gov.nist.spntools.util.reach :as pnr]
+            [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp)]
             [gov.nist.spntools.util.pnml :as pnml]
             [gov.nist.spntools.core :as pn]
             [gov.nist.sinet.util :as util :refer (map->Inv app-info reset big-reset)]
@@ -64,6 +67,52 @@
                {:act :aj, :tkns [{:type :a, :id 23} {:type :a, :id 22}]}
                {:act :sm, :tkns [{:type :a, :id 22}]}]))))))
 
+(def hopeful-pn
+  {:initial-marking [1 0 0 0 0], ; I changed this too! How do I fix this? GP operator? Try different ones in simple-reach? 
+   :transitions
+   [{:name :m1-start-job,
+     :tid 38,
+     :type :exponential,
+     :rate 1.0,
+     :rep {:act :m1-start-job, :j 1991, :jt :jobType1, :ends 2356.5705647971827, :clk 2355.3103128463604, :line 1233, :mjpact :aj, :m :m1},
+     :visible? true}
+    {:name :m1-complete-job,
+     :tid 39,
+     :type :exponential,
+     :rate 1.0,
+     :rep {:act :m1-complete-job, :bf :b1, :j 1991, :n 1, :clk 2356.5705647971827, :line 1238, :mjpact :bj, :m :m1},
+     :visible? true}
+    {:name :m2-start-job,
+     :tid 40,
+     :type :exponential,
+     :rate 1.0,
+     :rep {:act :m2-start-job, :bf :b1, :j 1991, :n 3, :clk 2358.9070474961236, :line 1247, :mjpact :sm, :m :m2},
+     :visible? true}
+    {:name :m2-complete-job,
+     :tid 41,
+     :type :exponential,
+     :rate 1.0,
+     :rep {:act :m2-complete-job, :m :m2, :j 1991, :ent 2355.3103128463604, :clk 2360.0770474961237, :line 1248, :mjpact :ej},
+     :visible? true}],
+   :arcs
+   [{:aid 74, :source :place-1, :target :m2-start-job, :EDITED true :name :aa-74, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+    {:aid 75, :source :m1-start-job, :target :place-2, :name :aa-75, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+    {:aid 76, :source :place-2, :target :m1-complete-job, :name :aa-76, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+    {:aid 77, :source :m1-complete-job, :target :place-3, :name :aa-77, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+    {:aid 78, :source :place-3, :target :m1-start-job, :EDITED true :name :aa-78, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+    {:aid 79, :source :m2-start-job, :target :place-4, :name :aa-79, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+    {:aid 80, :source :place-4, :target :m2-complete-job, :name :aa-80, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+    {:aid 81, :source :m2-complete-job, :target :place-1, :name :aa-81, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+    {:aid 205, :source :m1-start-job, :target :Place-103, :name :aa-205, :type :normal, :multiplicity 1, :bind {:jtype :blue} :priority 2}
+    {:aid 206, :source :Place-103, :target :m2-start-job, :name :aa-206, :type :normal, :multiplicity 1 :bind {:jtype :blue}, :priority 1}],
+   :marking-key [:place-1 :place-2 :place-3 :place-4 :Place-103],
+   :places
+   [{:name :place-1, :pid 0, :initial-tokens 1, :visible? true}
+    {:name :place-2, :pid 1, :initial-tokens 0, :visible? true}
+    {:name :place-3, :pid 2, :initial-tokens 0, :visible? true}
+    {:name :place-4, :pid 3, :initial-tokens 0, :visible? true}
+    {:name :Place-103, :pid 4, :initial-tokens 0}]})
+
 (defn m2-inhib-bas-workflow-fit
   "Setup the m2-inhib-bas PN for a fitness test"
   [steps]    
@@ -90,27 +139,18 @@
     (util/big-reset)))
 
 #_(use-fixtures :once problem-setting-fixture)
+(deftest starving-is-ok
+  (testing "that the starved? predicate works."
+    (is (not (fit/starved?
+              {:M [0 1 0 1 1], :fire :m2-complete-job, :Mp [1 1 0 0 1], :m :m2, :indx 224}
+              {:act :m2-starved, :prev-act :m2-complete-job, :Mp [1 1 0 0 1], :state [1 1 0 0 1], :indx 225}
+              hopeful-pn)))
+    (is (fit/starved? 
+         {:M [0 1 0 1 0], :fire :m2-complete-job, :Mp [1 1 0 0 0] :m :m2, :indx 224}
+         {:act :m2-starved, :m :m2, :line 225, :mjpact :st}
+         hopeful-pn))))
 
-(def example-msgs
-  {:m2-unstarved {[0 0 1 1 0] 14},
-   :m1-unblocked {[2 1 0 1 0] 30},
-   :m2-starved   {[0 0 1 0 1] 14},
-   :m1-blocked   {[3 0 1 1 0] 30},
-   :ordinary
-   {[0 1 0 1 0] 203,
-    [2 0 1 1 0] 511,
-    [1 1 0 1 0] 263,
-    [3 0 1 0 1] 248,
-    [1 0 1 1 0] 466,
-    [0 1 0 0 1] 14,
-    [2 1 0 1 0] 248,
-    [3 0 1 1 0] 248,
-    [1 0 1 0 1] 217,
-    [0 0 1 1 0] 217,
-    [0 0 1 0 1] 14,
-    [2 0 1 0 1] 263}})
-
-(defn pnn-all-ok?
+(defn winners-ok?
   "Returns true if calculated are as expected."
   [calculated expected]
   (every? (fn [[mark [msg value]]]
@@ -118,58 +158,102 @@
                  (=* value (-> (get expected mark) second) 0.00001)))
           calculated))
 
-;;; POD *THIS* (and not problem-setting-feature if you can help it) is how to code these.
-;;;     Here I am loading scada directly, not counting on app.clj
-;;; defn rather than def so that I don't get dragged into fixing a bug every time I load this. 
-(defn test-pn
-  "Partiallly complete PN for PNN testing."
-  []
-  (let [log (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj")]
-    (as-> "data/PNs/m2-inhib-n3.xml" ?pn
-      (pnml/read-pnml ?pn)
-      (pnr/renumber-pids ?pn)
-      (assoc ?pn :last-line (-> log last :line))
-      (assoc ?pn :rgraph (pnr/simple-reach ?pn))
-      (assoc ?pn :k-limited? (-> ?pn :rgraph :k-limited?))
-      (assoc ?pn :rgraph (-> ?pn :rgraph :rgraph vec))
-      (assoc ?pn :loom-graph (fit/rgraph2loom-graph (-> ?pn :rgraph)))
-      (assoc ?pn :starting-links (fit/starting-links ?pn log 0))
-      (assoc ?pn :msg-table (fit/compute-msg-table ?pn log))
-      (assoc ?pn :distance-fn pnn/euclid-dist2))))
+(def rgraph
+  [{:M [1 1 0 0 2], :fire :m2-start-job, :Mp [0 1 0 1 1], :rate 1.0}
+   {:M [0 0 1 1 3], :fire :m2-complete-job, :Mp [1 0 1 0 3], :rate 1.0}
+   {:M [0 1 0 1 1], :fire :m2-complete-job, :Mp [1 1 0 0 1], :rate 1.0}
+   {:M [1 1 0 0 1], :fire :m2-start-job, :Mp [0 1 0 1 0], :rate 1.0}
+   {:M [0 0 1 1 1], :fire :m1-start-job, :Mp [0 1 0 1 2], :rate 1.0}
+   {:M [0 1 0 1 3], :fire :m2-complete-job, :Mp [1 1 0 0 3], :rate 1.0}
+   {:M [1 0 1 0 1], :fire :m1-start-job, :Mp [1 1 0 0 2], :rate 1.0}
+   {:M [0 1 0 1 2], :fire :m1-complete-job, :Mp [0 0 1 1 2], :rate 1.0}
+   {:M [1 0 1 0 2], :fire :m1-start-job, :Mp [1 1 0 0 3], :rate 1.0}
+   {:M [1 1 0 0 3], :fire :m2-start-job, :Mp [0 1 0 1 2], :rate 1.0}
+   {:M [1 1 0 0 0], :fire :m1-complete-job, :Mp [1 0 1 0 0], :rate 1.0}
+   {:M [0 0 1 1 2], :fire :m1-start-job, :Mp [0 1 0 1 3], :rate 1.0}
+   {:M [1 0 1 0 3], :fire :m2-start-job, :Mp [0 0 1 1 2], :rate 1.0}
+   {:M [0 0 1 1 0], :fire :m1-start-job, :Mp [0 1 0 1 1], :rate 1.0}
+   {:M [1 1 0 0 1], :fire :m1-complete-job, :Mp [1 0 1 0 1], :rate 1.0}
+   {:M [0 1 0 1 1], :fire :m1-complete-job, :Mp [0 0 1 1 1], :rate 1.0}
+   {:M [1 0 1 0 1], :fire :m2-start-job, :Mp [0 0 1 1 0], :rate 1.0}
+   {:M [1 1 0 0 3], :fire :m1-complete-job, :Mp [1 0 1 0 3], :rate 1.0}
+   {:M [0 0 1 1 1], :fire :m2-complete-job, :Mp [1 0 1 0 1], :rate 1.0}
+   {:M [0 1 0 1 0], :fire :m1-complete-job, :Mp [0 0 1 1 0], :rate 1.0}
+   {:M [1 0 1 0 2], :fire :m2-start-job, :Mp [0 0 1 1 1], :rate 1.0}
+   {:M [0 1 0 1 3], :fire :m1-complete-job, :Mp [0 0 1 1 3], :rate 1.0}
+   {:M [1 0 1 0 0], :fire :m1-start-job, :Mp [1 1 0 0 1], :rate 1.0}
+   {:M [0 1 0 1 0], :fire :m2-complete-job, :Mp [1 1 0 0 0], :rate 1.0}
+   {:M [0 0 1 1 0], :fire :m2-complete-job, :Mp [1 0 1 0 0], :rate 1.0}
+   {:M [1 1 0 0 2], :fire :m1-complete-job, :Mp [1 0 1 0 2], :rate 1.0}
+   {:M [0 0 1 1 2], :fire :m2-complete-job, :Mp [1 0 1 0 2], :rate 1.0}
+   {:M [0 1 0 1 2], :fire :m2-complete-job, :Mp [1 1 0 0 2], :rate 1.0}])
 
+(def msg-table
+  {:m2-starved   {[1 1 0 0 0] 14},
+   :m2-unstarved {[0 1 0 1 0] 14},
+   :m1-blocked   {[0 1 0 1 3] 30},
+   :m1-unblocked {[0 0 1 1 2] 30},
+   :ordinary     {[0 0 1 1 1] 263,
+                  [0 1 0 1 0] 217,
+                  [1 1 0 0 2] 263,
+                  [0 1 0 1 3] 248,
+                  [1 1 0 0 3] 248,
+                  [0 1 0 1 1] 466,
+                  [1 1 0 0 0] 14,
+                  [0 0 1 1 0] 203,
+                  [0 0 1 1 2] 248,
+                  [1 1 0 0 1] 217,
+                  [0 1 0 1 2] 511,
+                  [1 0 1 0 0] 14}})
+                                        ;
 (deftest msg-table-test
-  (testing "that the message table produced is correct"
-    (let [pn (test-pn)]
-      (is (= (:msg-table pn)
-             {:m1-blocked   {[3 0 1 1 0] 30}
-              :m1-unblocked {[2 1 0 1 0] 30},
-              :m2-starved   {[0 0 1 0 1] 14},
-              :m2-unstarved {[0 0 1 1 0] 14},
-              :ordinary
-              {[0 1 0 1 0] 203,
-               [2 0 1 1 0] 511,
-               [1 1 0 1 0] 263,
-               [3 0 1 0 1] 248,
-               [1 0 1 1 0] 466,
-               [0 1 0 0 1] 14,
-               [2 1 0 1 0] 248,
-               [3 0 1 1 0] 248,
-               [1 0 1 0 1] 217,
-               [0 0 1 1 0] 217,
-               [0 0 1 0 1] 14,
-               [2 0 1 0 1] 263}}))))),
+  (testing "that the message table looks good"
+    (is (= msg-table
+           (let [log (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj")]
+             (as-> (fit/find-interpretation hopeful-pn log) ?pn
+               (fit/compute-msg-table ?pn)))))))
+
+(deftest full-winner-process 
+  (let [log (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj")
+        pn (as-> (fit/find-interpretation hopeful-pn log) ?pn
+             (assoc  ?pn :msg-table (fit/compute-msg-table ?pn)) 
+             (assoc  ?pn :trans-counts (fit/trans-counts (:interp ?pn)))
+             (dissoc ?pn :interp)
+             (assoc  ?pn :sigma 0.40)
+             (assoc  ?pn :loom-prob (fit/rgraph2loom-probability (:rgraph ?pn) (:trans-counts ?pn)))
+             (assoc  ?pn :distance-fn #(second (alg/dijkstra-path-dist (:loom-prob ?pn) %1 %2)))
+             (assoc  ?pn :pdf-fns
+                     (zipmap (-> ?pn :msg-table keys)
+                             (map #(fit/parzen-pdf-msg ?pn %)
+                                  (-> ?pn :msg-table keys)))))]
+    (is (= (fit/choose-winners pn)
+           {[0 0 1 1 1] [:ordinary 0.0903244614282773],
+            [0 1 0 1 0] [:m2-unstarved 1.0],
+            [1 1 0 0 2] [:ordinary 0.09031954835912448],
+            [0 1 0 1 3] [:m1-blocked 1.0],
+            [1 1 0 0 3] [:ordinary 0.08549534846163118],
+            [0 1 0 1 1] [:ordinary 0.1606469021025419],
+            [1 1 0 0 0] [:m2-starved 1.0],
+            [0 0 1 1 0] [:ordinary 0.06990869038942338],
+            [0 0 1 1 2] [:m1-unblocked 1.0],
+            [1 1 0 0 1] [:ordinary 0.07453835356002238],
+            [0 1 0 1 2] [:ordinary 0.17616047457462952],
+            [1 0 1 0 0] [:ordinary 0.0048262784622090035]}))))
 
 ;;; There are more state that this in the PN, but not all occurred in the 3000 msgs logged. That's okay. 
 (deftest pnn-for-msgs-1 
   (testing "PNN-based classification using Euclidean/sigma=0.2"
-    (let [pn (as-> (test-pn) ?pn
-               (assoc ?pn :sigma 0.2)  ; sigma = 0.2
+    (let [pn (as-> {} ?pn
+               (assoc ?pn :sigma 0.2)
+               (assoc ?pn :rgraph rgraph)
+               (assoc ?pn :distance-fn pnn/euclid-dist2)
+               (assoc ?pn :msg-table msg-table)
                (assoc ?pn :pdf-fns
-                      (zipmap (-> ?pn :msg-table keys)
+                      (zipmap (keys msg-table) 
                               (map #(fit/parzen-pdf-msg ?pn %)
                                    (-> ?pn :msg-table keys)))))]
       ;; Good values, but the sigma is so tight that it won't generalize well. 
-      (is (pnn-all-ok?
+      (is (winners-ok?
            (fit/choose-winners pn)
            {[0 1 0 1 0] [:ordinary 0.06971187503880233],
             [2 0 1 1 0] [:ordinary 0.17548168297989752],
@@ -186,14 +270,17 @@
 
 (deftest pnn-for-msgs-2
   (testing "PNN-based classification using Euclidean/sigma=0.75"
-    (let [pn (as-> (test-pn) ?pn
-                 (assoc ?pn :sigma 0.75)
-                 (assoc ?pn :pdf-fns
-                        (zipmap (-> ?pn :msg-table keys)
-                                (map #(fit/parzen-pdf-msg ?pn %)
-                                     (-> ?pn :msg-table keys)))))]
+    (let [pn (as-> {} ?pn
+               (assoc ?pn :sigma 0.75)
+               (assoc ?pn :rgraph rgraph)
+               (assoc ?pn :msg-table msg-table)
+               (assoc ?pn :distance-fn pnn/euclid-dist2)
+               (assoc ?pn :pdf-fns
+                      (zipmap (-> ?pn :msg-table keys)
+                              (map #(fit/parzen-pdf-msg ?pn %)
+                                   (-> ?pn :msg-table keys)))))]
       ;; Much larger sigma, but bad performance.
-      (is (pnn-all-ok?
+      (is (winners-ok?
            (fit/choose-winners pn)
            {[0 1 0 1 0] [:m2-unstarved 0.1690133154060661],
             [2 0 1 1 0] [:m1-blocked 0.41111229050718745],
@@ -212,13 +299,13 @@
   (testing "PNN-based classification using graph-distance/sigma=0.75"
     (let [pn (as-> (test-pn) ?pn
                (assoc ?pn :sigma 0.75)
-               (assoc ?pn :distance-fn (fit/graph-distance-fn ?pn))
+               (assoc ?pn :distance-fn #(second (alg/dijkstra-path-dist (:loom-prob ?pn) %1 %2)))
                (assoc ?pn :pdf-fns
                       (zipmap (-> ?pn :msg-table keys)
                               (map #(fit/parzen-pdf-msg ?pn %)
                                    (-> ?pn :msg-table keys)))))]
       ;; graph-distance scaling gives good results at wide sigma. 
-      (is (pnn-all-ok?
+      (is (winners-ok?
            (fit/choose-winners pn)
            {[0 1 0 1 0] [:ordinary 0.07812345592321546],
             [2 0 1 1 0] [:ordinary 0.19350798937548197],
@@ -232,6 +319,7 @@
             [0 0 1 1 0] [:m2-unstarved 1.0],
             [0 0 1 0 1] [:m2-starved 1.0],
             [2 0 1 0 1] [:ordinary 0.10642989332503937]})))))
+
 
 ;;;(alias 'gp 'gov.nist.sinet.gp)
 ;;;;(alias 'scada 'gov.nist.sinet.scada)

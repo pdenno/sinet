@@ -1,6 +1,6 @@
 (ns gov.nist.sinet.fitness
   "Compute the fitness of an individual"
-  (:require [clojure.pprint :refer (cl-format pprint)]
+  (:require [clojure.pprint :refer (cl-format pprint print-table)]
             [clojure.set :as set]
             [clojure.spec.alpha :as s]
             [loom.alg :as alg]
@@ -16,13 +16,12 @@
 
 (alias 'fit 'gov.nist.sinet.fitness)
 
-;;; ToDo: Currently fitness only concerns violation of partial orders it should
-;;;       additionally include:
-;;;         0) Checking for work flows that are not reflected in the log. 
-;;;         1) Dynamic response (from Q matrix or simulation)
-;;;         2) Association to being blocked/unblocked starved/unstarved.
-;;;            If the individual scores better without the PNN, then just consider that
-;;;            its best score. 
+;;; ToDo: 
+;;;         1) Create inhibitors from information learned from PNN.
+;;;         2) Causal / Dynamic response (from Q matrix or simulation)
+;;;         3) Colour/MJP fitness. 
+;;;         4) Perhaps do the workflow analysis after I do the SCADA analysis
+;;;            (and maybe reconceive its implementation to exploit lax interpretation work. 
 
 (def ^:private diag (atom nil))
 ;;;===========================================
@@ -44,9 +43,10 @@
 (declare act2trans)
 ;;; POD Because I'm focusing on jobs here (qpn-gather-job), at some point I'm going to have to account for
 ;;; lines in the log that were not addressed by qpn-gather-job (and the things in-between it).
-(defn qpn-act-is-intro? [pn act]
+(defn qpn-act-is-intro? 
   "Return true if the named transition has an arc exiting it that 
    introduces a token."
+  [pn act]
   (let [trans (act2trans pn act)]
     (some #(= :intro (-> % :bind :act))
           (filter #(= (:source %) trans) (:arcs pn)))))
@@ -81,11 +81,6 @@
   [pn act]
   (some #(when (= act (-> % :rep :act)) (:name %))
         (:transitions pn)))
-
-#_(defn diag-describe-pn-transition-binding
-  [pn]
-  (zipmap (map :name (:transitions pn))
-          (map #((:fn %) :job-x) (:transitions pn))))
 
 (defn violates?
   "Return true if the qpn-job violates the argument relation."
@@ -221,15 +216,6 @@
 ;;;====================================================================================
 ;;; Exceptional Fitness
 ;;;====================================================================================
-;;; POD reachability graph is apt to be too sensitive to initial marking???
-;;; There is a loose end in this design concerning the PN's marking determining its rgraph. 
-;;; Some markings may not necessarily enable the best interpretation of the sdata.
-;;; I am probably going to have write some code to select a good initial marking
-;;; before I generate the rgraph. Thus messing with tokens would no longer part of GP!
-;;; Also, I would perhaps do the workflow analysis after I do the SCADA analysis
-;;; (and maybe reconceive its implementation to exploit the SCADA analysis work).
-
-
 ;;; Idea: This (excep-starting-mark) could force an initial-marking on the PN.
 ;;;       That might be a good thing!
 ;;;       But what gets hard here is choosing a marking that will guess correctly
@@ -246,7 +232,7 @@
 (defn next-ordinary
   "Return the next ordinary message, at index n or later."
   [pn log n]
-  (let [last-ix (:last-line pn)]
+  (let [last-ix (-> log last :line)]
     (loop [indx n]
       (if (> indx last-ix)
         nil
@@ -254,7 +240,6 @@
           msg
           (recur (inc indx)))))))
 
-;;; POD this is a candidate enhancement to use an ARG (Abbreviated Reachability Graph).
 (defn next-paths
   "Extend or eliminate paths depending on the PN's reachability graph."
   [pn log paths msg-indx]
@@ -263,8 +248,6 @@
         all-steps  (filter #(= (:M %) from) (:rgraph pn))
         good-steps (filter #(= (:fire %) (:act next-msg)) all-steps)   ; matches a msg
         good-steps (map #(assoc % :indx (:line next-msg)) good-steps)] ; track where you found it.
-    ;(println "good-steps=" good-steps)
-    ;(println "paths=" paths)
     (if (empty? good-steps) ; This path is a dead end. 
       (rest paths)
       (into (mapv #(conj (first paths) %) good-steps) (rest paths))))) ; depth-first
@@ -295,12 +278,15 @@
 
 (defn link+msg [link msg]
   (-> link
+      (assoc :m    (:m msg))
       (assoc :job  (:j msg))
       (assoc :clk  (:clk msg))
       (assoc :indx (:line msg))))
 
 ;;; POD multimethod, except spec...
-(defn link-match [pn action llink msg]
+(defn link-match
+  "Return the link which follows from the current link and log msg."
+  [pn action llink msg]
   (let [glink (:graph-link pn)]
     (cond (= action :link) ; graph-link = llink? (use spec)
           (when-let [link (some #(when (and (= (:Mp llink) (:M %)) 
@@ -315,7 +301,7 @@
           (when-let [links (filter #(and #_(= (:Mp glink) (:M %))
                                          (= (:fire %) (:act msg)))
                                    (:rgraph pn))]
-            (let [graph (:loom-graph pn)
+            (let [graph (:loom-steps pn)
                   from (:Mp glink)
                   dists (map
                          (fn [l] {:link l
@@ -325,37 +311,55 @@
                                                 (:M l)))})
                          links)
                   best (-> (sort #(< (:dist %1) (:dist %2)) dists) first :link)]
-              (cl-format *out* "~%counts = ~{~A ~}" (map :dist dists))
               (when best
                 (as-> (link+msg best msg) ?link
                   (if (= action :aj)
                     (assoc ?link :relax? :add-job)
                     (assoc ?link :relax? :active)))))))))
 
-;;; Process msgs in log-order without exception:
-;;; (1) If the msg is not ordinary, no problem.
-;;; (2) If the job = current job and rgraph matches no problem.
-;;; (3) If job is new and rgraph matches no problem, update :active-jobs
+;;; {:M [0 1 0 1 1], :fire :m2-complete-job,       :Mp [1 1 0 0 1], :rate 1.0, :job 1744, :clk 2066.1692850612535, :indx 224}
+;;; {:act :m2-starved, :prev-act :m2-complete-job, :Mp [1 1 0 0 1], :clk 2066.1692850612535, :job 1744            :indx 225,}
+;;; [:place-1 :place-2 :place-3 :place-4 :Place-103]
+(defn starved?
+  "Return true if the argument machine (in msg) is starved."
+  [llink msg pn]
+  (let [^clojure.lang.PersistentVector mkey (:marking-key pn)]
+    (if (= (:m llink) (:m msg))
+      (let [bufs (util/pulls-from pn (:m msg))]
+        (if (= 0 (nth (:Mp llink)
+                      (.indexOf mkey (first bufs))))
+          true
+          false))
+      false)))
+
+;;; Process msgs in strict log-order:
+;;; (1) If the msg is not ordinary...
+;;;   (1.1) If starvation and not consistent, interpretation fails.
+;;;   (1.2) If not starvation, no problem.
+;;; (2) If the rgraph step matches no problem.
+;;; (3) If job is new and rgraph step matches no problem, update :active-jobs
 ;;; (4) If job not= current job but prior to first job, ignore message.
 ;;; (5) If job not= current job but on :active-jobs and rgraph matches on that history,
 ;;;     no problem (add to interp with a note).
 ;;; (6) Otherwise interpretation failed.  (return nil)
 (defn next-match
-  "If the argument msg is not ordinary, return its act and the state it enters (Mp). 
-   If the argument msg can advance the rgraph, return *the* corresponding link.
-   otherwise return nil."
+  "If the argument msg is not ordinary, return information about it and the llink. 
+   If the argument msg can advance the rgraph (i.e. ordinary), return *the* 
+   corresponding link. Otherwise return nil."
   [pn llink msg job1] 
   (let [job (:j msg)
         old-job (:job llink)
         slink (atom nil)]
-    (reset! diag {:msg msg :interp-last llink :glink (:graph-link pn)})
     (as-> pn ?pn
-      (cond (not (ordinary? msg))                            ; (1) 
-            (assoc ?pn :matched
-                   {:act (:act msg) :prev-act (:fire llink) :indx (:line msg)
-                    :Mp (:Mp llink) :clk (:clk msg) :job old-job}),
+      (cond (not (ordinary? msg))                            ; (1)
+            (if (and (= (:mjpact msg) :st)
+                     (not (starved? llink msg ?pn)))
+              nil
+              (assoc ?pn :matched ; POD remove :Mp from exceptional
+                     {:act (:act msg) :prev-act (:fire llink) :Mp (:Mp llink) :state (:Mp llink)
+                      :clk (:clk msg) :job old-job :indx (:line msg)})),
             
-            (reset! slink (link-match pn :link llink msg)) ;(== old-job job) ; (2) or (6)
+            (reset! slink (link-match pn :link llink msg))   ; (2) or (6)
             (-> ?pn                                          ; (2)
                 (assoc :matched @slink)
                 (assoc :graph-link @slink)),  ; g-l tracks rgraph state change
@@ -376,11 +380,12 @@
                   (assoc :matched link)
                   (assoc :graph-link link)))
             
-            true (assoc ?pn :matched nil))                  ; (6)
+            true (assoc ?pn :matched nil))                   ; (6)
       (if (= :ej (:mjpact msg))
         (update ?pn :active-jobs (fn [aj] (filterv #(not= % job) aj)))
         ?pn))))
 
+(declare rgraph2loom-steps)
 (defn interpret-scada
   "Describe how the message stream could be accounted for by this PN. 
    Return a sequence where an element is:
@@ -390,9 +395,10 @@
   (when start-link
     (let [last-indx (-> log last :line)
           job1 (:job start-link)]
-      (loop [pn (-> pn
-                    (assoc :active-jobs (vector (:job start-link)))
-                    (assoc :graph-link start-link))
+      (loop [pn (as-> pn ?pn
+                    (assoc ?pn :active-jobs (vector (:job start-link)))
+                    (assoc ?pn :graph-link start-link)
+                    (assoc ?pn :loom-steps (rgraph2loom-steps (:rgraph ?pn)))) ; POD huh?
              lasti start-link
              interp (transient (vector start-link))
              msg (nth log (-> start-link :indx inc))]
@@ -415,7 +421,7 @@
 ;;;     Should check for m-mp/mp-m errors (spec?)
 (defn lax-reach
   "Set the marking-key such there is one token on each machine.
-   Return the rgraph associated with this marking." 
+   Return the pn with an :rgraph associated with this marking." 
   ([pn] (lax-reach pn 2))
   ([pn max-k]
    (let [r-places (atom (util/related-places pn))
@@ -447,16 +453,18 @@
    the entire log. Return the first complete interpretation found, if any below
    max-max-k."
   [pn log] ; POD (-> (app-info) :gp-params :min-max-k)
-  (let [last-line (-> log last :line)] ; POD remove pn's :last-line....
+  (let [last-line (-> log last :line)]
     (loop [max-k 2]
-      (let [pn (lax-reach pn max-k)
+      (let [pn (lax-reach pn max-k) ; sets :rgraph, :k-limited
             good-interp (loop [starts (fit/starting-links pn log 0)]
                           (let [interp (interpret-scada pn log (first starts))]
                             (cond (empty? starts) nil,
                                   (full-interp? interp last-line) interp,
                                   true (recur (rest starts)))))]
-        (cond (not (empty? good-interp)) 
-              (assoc pn :interp)
+        (cond (not (empty? good-interp))
+              (-> pn
+                  (assoc :interp good-interp)
+                  (assoc :max-k-used max-k))
               (> max-k 6) nil ; POD (-> (app-info) :gp-params :max-max-k)
               true (recur (inc max-k)))))))
 
@@ -471,7 +479,7 @@
   [pn] 
   (let [msg-types (conj (-> (app-info) :problem :exceptional-msgs) :ordinary)
         markings (map :M (:rgraph pn))]
-    (when-let [interp (not-empty (:interps pn))]
+    (when-let [interp (not-empty (:interp pn))]
       (let [report (reduce (fn [sum msg] 
                              (if (contains? msg :act)
                                (update-in sum [(:act msg) (:Mp msg)] inc)
@@ -491,27 +499,64 @@
                 report
                 msg-types)))))
 
-(defn rgraph2loom-graph
-  "Return a loom weighted-digraph for the argument simple reachability graph."
+(defn trans-prob
+  "Calculate the probability of the transition from 
+   log interpretation statistics." 
+  [m mp trans-cnt]
+  (if-let [entry (get trans-cnt m)]
+    (if-let [to-mp (get entry mp)]
+      (double(/ to-mp (apply + (vals entry))))
+      0.00001) ; There are transitions in the rgraph that might not have been exercised in the log
+    0.00001))
+
+(defn rgraph2loom-probability 
+  "Return a loom weighted-digraph where costs are based on probability."
+  [rgraph trans-cnt]
+  (apply graph/weighted-digraph
+         (map #(let [m  (:M %)
+                     mp (:Mp %)
+                     p (trans-prob m mp trans-cnt)]
+                 (vector m mp (/ 1 p))
+                 #_(vector m mp (- (/ 1 p) 1))
+                 #_(vector m mp (Math/log (/ 1 p)))) ; POD consider also (Math/log 1/p)
+              rgraph)))
+
+(defn rgraph2loom-steps
+  "Return a loom weighted-digraph that simply counts steps."
   [rgraph]
   (apply graph/weighted-digraph
          (map #(vector (:M %) (:Mp %) 1) rgraph)))
 
-(defn graph-distance-fn
-  "Return a function that calculates graph distance for the PN."
-  [pn]
-  (let [graph (-> pn :loom-graph)]
-    (fn [from to]
-      (let [graph-distance (count (alg/dijkstra-path graph from to))]
-        (* graph-distance 
-           (reduce (fn [sum ix] (+ sum (Math/pow (- (nth from ix) (nth to ix)) 2)))
-                   0.0
-                   (range (count from))))))))
+(defn trans-counts
+  "Create a table indexed by :M and counts the number of transitions to :Mp
+   in the argument interpretation. "
+  [interp]
+  (let [no-excepts (filter #(contains? % :M) interp)
+        mkeys (distinct (map :M no-excepts))
+        tcounts (zipmap mkeys (repeat (count mkeys) {}))]
+    (reduce (fn [tcnt link]
+              (update-in tcnt [(:M link)]
+                         #(if (contains? % (:Mp link))
+                            (update-in % [(:Mp link)] inc)
+                            (assoc % (:Mp link) 1))))
+            tcounts
+            no-excepts)))
 
+;;; Pattern layer: computes the Euclidean distance of the test case from the neuron’s center point
+;;; and then applies the radial basis function kernel function using the sigma values. (Rama: "A
+;;; hidden node has a spread factor s_i which determines the size of the respective field.")
+
+;;; https://www.cs.utah.edu/~suyash/Dissertation_html/node11.html
+;;; "A Parzen window essentially superimposes kernel function places at each observation or datum....
+;;; There is another way to look at the estimation process, and this is where it derives its name from.
+;;; Suppose that we want to estimate the value of the PDF P(X) at point x. Then, we can place a
+;;; window function at x and determine how many observations x_i fall within our window or, rather, what
+;;; is the contribution of each observation x_i to this window. The PDF value P(x) is then the sum total
+;;; of the contributions from the observations to this window. 
 (defn parzen-pdf-msg
-  "Return the parzen-pdf function for the argument class using message counts."
+  "Return the parzen-pdf function for the argument class using message counts.
+   Notes that I don't divide by 1/sqrt(* 2 pi sigma sigma), thus it won't integrate to 1."
   [pn class]
-  (reset! diag pn)
   (let [msg-table (class (:msg-table pn))
         sigma (:sigma pn)
         dist-fn (:distance-fn pn)
@@ -524,29 +569,39 @@
                  0.0
                  msg-table)))))
 
+(defn pnn-classification-table
+  "Return a table of the pnn scores for each class on each marking"
+  [pn]
+  (let [pdf-fns    (:pdf-fns pn)
+        msg-table  (:msg-table pn)
+        classes    (keys msg-table)
+        marks  (distinct (mapcat keys (vals msg-table)))]
+    (reduce (fn [table mark]
+              (reduce (fn [table class]
+                        (conj table {:mark mark :class class
+                                     :score ((class pdf-fns) mark)}))
+                      table classes))
+            []
+            marks)))
+
 (defn choose-winners
   "Map of the winners for each marking."
   [pn]
-  (when (not-empty (:pdf-fns pn))
-    (let [pdf-fns    (:pdf-fns pn)
-          msg-table  (:msg-table pn)
-          classes    (keys msg-table)
-          dist-fn    (:distance-fn pn)
-          sigma      (:sigma pn)
-          marks (distinct
-                 (mapcat keys (map #(get msg-table %) classes)))]
-      (reduce (fn [results mark]
-                (let [result (reduce (fn [[best-class best-score] class]
-                                       (let [my-score ((class pdf-fns) mark)]
-                                         (if (> my-score best-score)
-                                           [class  my-score]
-                                           [best-class best-score])))
-                                     [nil 0]
-                                     classes)]
-                  (assoc results mark result)))
-              {}
-              marks))))
-
+  (let [pdf-fns    (:pdf-fns pn)
+        msg-table  (:msg-table pn)
+        classes    (keys msg-table)
+        marks (distinct (mapcat keys (vals msg-table)))]
+    (reduce (fn [results mark]
+              (let [result (reduce (fn [[best-class best-score] class]
+                                     (let [my-score ((class pdf-fns) mark)]
+                                       (if (> my-score best-score)
+                                         [class  my-score]
+                                         [best-class best-score])))
+                                   [nil 0]
+                                   classes)]
+                (assoc results mark result)))
+            {}
+            marks)))
 
 ;;; We generate the reachability graph (including non-tangible states) and test the
 ;;; complete SCADA log against it. We aren't running the QPN, rather we are testing
@@ -559,81 +614,18 @@
    exceptional circumstances (blocking and starvation)."
   [inv]
   (let [log (-> (app-info) :problem :scada-log)
-        pn  (as-> (:pn inv) ?pn
-              (pnr/renumber-pids ?pn)
-              (assoc ?pn :last-line (-> ?pn :log last :line))
-              (lax-reach ?pn 2)
-              ;(assoc ?pn :rgraph (pnr/simple-reach ?pn 2))
-              ;(assoc ?pn :k-limited? (-> ?pn :rgraph :k-limited?))
-              ;(assoc ?pn :rgraph (-> ?pn :rgraph vec))
-              (assoc ?pn :starting-links (starting-links ?pn log 0))
-              (assoc ?pn :loom-graph (rgraph2loom-graph (-> ?pn :rgraph)))
-              (assoc ?pn :msg-table (compute-msg-table ?pn))
-              (assoc ?pn :sigma (-> (app-info) :gp-params :exceptional-sigma))
-              (assoc ?pn :distance-fn (graph-distance-fn ?pn))
-              (assoc ?pn :pdf-fns
-                     (zipmap (-> ?pn :msg-table keys)
-                             (map #(parzen-pdf-msg ?pn %)
-                                  (-> ?pn :msg-table keys))))
-              (assoc ?pn :winners (choose-winners ?pn)))]
+        pn  (as-> (find-interpretation pn log) ?pn
+              (assoc  ?pn :msg-table (fit/compute-msg-table ?pn)) ; original-msg-table
+              (assoc  ?pn :trans-counts (trans-counts (:interp ?pn)))
+              (dissoc ?pn :interp)
+              (assoc  ?pn :sigma (-> (app-info) :gp-params :exceptional-sigma))
+              (assoc  ?pn :loom-prob (rgraph2loom-probability (:rgraph ?pn) (:trans-counts ?pn)))
+              (assoc  ?pn :distance-fn #(second (alg/dijkstra-path-dist (:loom-prob ?pn) %1 %2)))
+              (assoc  ?pn :pdf-fns
+                      (zipmap (-> ?pn :msg-table keys)
+                              (map #(parzen-pdf-msg ?pn %)
+                                   (-> ?pn :msg-table keys))))
+              (assoc ?pn :winners (choose-winners ?pn))))
     (-> inv ; POD both of these are temporary.
         (assoc :except (if (not-empty (:winners pn)) 0 1))
         (assoc :pn pn))))
-
-(def hopeful-pn
-  {:initial-marking [1 0 0 0 0], ; I changed this too! How do I fix this? GP operator? Try different ones in simple-reach? 
-   :transitions
-   [{:name :m1-start-job,
-     :tid 38,
-     :type :exponential,
-     :rate 1.0,
-     :rep {:act :m1-start-job, :j 1991, :jt :jobType1, :ends 2356.5705647971827, :clk 2355.3103128463604, :line 1233, :mjpact :aj, :m :m1},
-     :visible? true}
-    {:name :m1-complete-job,
-     :tid 39,
-     :type :exponential,
-     :rate 1.0,
-     :rep {:act :m1-complete-job, :bf :b1, :j 1991, :n 1, :clk 2356.5705647971827, :line 1238, :mjpact :bj, :m :m1},
-     :visible? true}
-    {:name :m2-start-job,
-     :tid 40,
-     :type :exponential,
-     :rate 1.0,
-     :rep {:act :m2-start-job, :bf :b1, :j 1991, :n 3, :clk 2358.9070474961236, :line 1247, :mjpact :sm, :m :m2},
-     :visible? true}
-    {:name :m2-complete-job,
-     :tid 41,
-     :type :exponential,
-     :rate 1.0,
-     :rep {:act :m2-complete-job, :m :m2, :j 1991, :ent 2355.3103128463604, :clk 2360.0770474961237, :line 1248, :mjpact :ej},
-     :visible? true}],
-   :arcs
-   [{:aid 74, :source :place-1, :target :m2-start-job, :EDITED true :name :aa-74, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
-    {:aid 75, :source :m1-start-job, :target :place-2, :name :aa-75, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
-    {:aid 76, :source :place-2, :target :m1-complete-job, :name :aa-76, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
-    {:aid 77, :source :m1-complete-job, :target :place-3, :name :aa-77, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
-    {:aid 78, :source :place-3, :target :m1-start-job, :EDITED true :name :aa-78, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
-    {:aid 79, :source :m2-start-job, :target :place-4, :name :aa-79, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
-    {:aid 80, :source :place-4, :target :m2-complete-job, :name :aa-80, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
-    {:aid 81, :source :m2-complete-job, :target :place-1, :name :aa-81, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
-    {:aid 205, :source :m1-start-job, :target :Place-103, :name :aa-205, :type :normal, :multiplicity 1, :bind {:jtype :blue} :priority 2}
-    {:aid 206, :source :Place-103, :target :m2-start-job, :name :aa-206, :type :normal, :multiplicity 1 :bind {:jtype :blue}, :priority 1}],
-   :marking-key [:place-1 :place-2 :place-3 :place-4 :Place-103],
-   :places
-   [{:name :place-1, :pid 0, :initial-tokens 1, :visible? true}
-    {:name :place-2, :pid 1, :initial-tokens 0, :visible? true}
-    {:name :place-3, :pid 2, :initial-tokens 0, :visible? true}
-    {:name :place-4, :pid 3, :initial-tokens 0, :visible? true}
-    {:name :Place-103, :pid 4, :initial-tokens 0}]})
-
-(defn tryme []
-  (let [log (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj")
-        pn hopeful-pn]
-    (as-> (find-interpretation pn log) ?pn
-      (assoc ?pn :loom-graph (rgraph2loom-graph (:rgraph ?pn)))
-      (assoc ?pn :msg-table (fit/compute-msg-table ?pn))
-      (dissoc ?pn :interp)
-      (assoc ?pn :sigma (-> (app-info) :gp-params :exceptional-sigma))
-      (assoc ?pn :distance-fn (graph-distance-fn ?pn)))))
-
-
