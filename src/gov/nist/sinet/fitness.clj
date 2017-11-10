@@ -614,8 +614,8 @@
    exceptional circumstances (blocking and starvation)."
   [inv]
   (let [log (-> (app-info) :problem :scada-log)
-        pn  (as-> (find-interpretation pn log) ?pn
-              (assoc  ?pn :msg-table (fit/compute-msg-table ?pn)) ; original-msg-table
+        pn  (as-> (find-interpretation (:pn inv) log) ?pn
+              (assoc  ?pn :msg-table (fit/compute-msg-table ?pn))
               (assoc  ?pn :trans-counts (trans-counts (:interp ?pn)))
               (dissoc ?pn :interp)
               (assoc  ?pn :sigma (-> (app-info) :gp-params :exceptional-sigma))
@@ -625,7 +625,142 @@
                       (zipmap (-> ?pn :msg-table keys)
                               (map #(parzen-pdf-msg ?pn %)
                                    (-> ?pn :msg-table keys))))
-              (assoc ?pn :winners (choose-winners ?pn))))
+              (assoc ?pn :winners (choose-winners ?pn)))]
     (-> inv ; POD both of these are temporary.
         (assoc :except (if (not-empty (:winners pn)) 0 1))
         (assoc :pn pn))))
+
+
+(defn exper-dist-fn-1
+  "Measure distance as the PRODUCT of probability along the 1/p path." 
+  [rgraph trans-cnts loom-prob from to]
+  (let [path (alg/dijkstra-path loom-prob from to)
+        adj-table (:adj loom-prob)]
+    (reduce (fn [probs ix]
+              (let [f (nth path ix)
+                    t (nth path (inc ix))]
+                (* probs (/ 1 (get (get adj-table f) t)))))
+            1
+            (range (-> path count dec)))))
+
+(defn exper-dist-fn-2
+  [rgraph trans-cnts from to]
+  "Measure distance as the product of probability along a '1 per step' cost path." 
+  (let [loom-steps (rgraph2loom-steps rgraph)
+        path (alg/dijkstra-path loom-steps from to)]
+    (reduce (fn [probs ix]
+              (let [f (nth path ix)
+                    t (nth path (inc ix))]
+                (* probs (trans-prob f t trans-cnts))))
+            1
+            (range (-> path count dec)))))
+
+(defn exper-dist-fn-3
+  [rgraph trans-cnts from to]
+  "Original steps * euclid-dist2." 
+  (let [loom-steps (rgraph2loom-steps rgraph)
+        path (alg/dijkstra-path loom-steps from to)]
+    (* (count path) (pnn/euclid-dist2 from to))))
+
+(defn exper-dist-fn-4
+  [rgraph trans-cnts norm-factors from to]
+  "Original steps * euclid-dist2 normalized." 
+  (let [loom-steps (rgraph2loom-steps rgraph)
+        path (alg/dijkstra-path loom-steps from to)
+        from (mapv * norm-factors from)
+        to   (mapv * norm-factors to)]
+    (* (count path) (pnn/euclid-dist2 from to))))
+
+(defn exper-dist-fn-5
+  "Measure distance as the sum of 1/p steps along shortest path." 
+  [loom-prob from to]
+  (second (alg/dijkstra-path-dist loom-prob from to)))
+
+(defn exper-dist-fn-6
+  "Measure distance as the sum of 1/p steps along shortest path times 
+   normalized Euclidean distance." 
+  [loom-prob norm-factors from to]
+  (let [step-cost (second (alg/dijkstra-path-dist loom-prob from to))
+        from (mapv * norm-factors from)
+        to   (mapv * norm-factors to)]
+    (* step-cost (pnn/euclid-dist2 from to))))
+
+(defn normalize-marking-factors
+  "Compute normalizing factors for each component of the marking."
+  [rgraph]
+  (let [highs (reduce (fn [highs mark]
+                        (map max highs mark))
+                      (repeat (-> rgraph first :M count) 0)
+                      (map :M rgraph))]
+    ;; zero? implies a bad PN, BTW. 
+    (mapv #(if (zero? %) 0 (/ 1 %)) highs)))
+
+(declare hopeful-pn)
+(defn tryme
+  []
+  (let [log (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out-2.clj")
+        pn (as-> (find-interpretation hopeful-pn log) ?pn
+             (assoc  ?pn :msg-table (compute-msg-table ?pn))
+             (assoc  ?pn :norm-factors (normalize-marking-factors (:rgraph ?pn)))
+             (assoc  ?pn :trans-counts (trans-counts (:interp ?pn)))
+             (dissoc ?pn :interp)
+             (assoc  ?pn :sigma 0.25)
+             (assoc  ?pn :loom-prob (rgraph2loom-probability (:rgraph ?pn) (:trans-counts ?pn)))
+             (assoc  ?pn :distance-fn #(exper-dist-fn-6 (:loom-prob ?pn) (:norm-factors ?pn) %1 %2))
+             #_(assoc  ?pn :distance-fn #(exper-dist-fn-4 (:rgraph ?pn) (:trans-counts ?pn) %1 %2))
+             (assoc  ?pn :pdf-fns
+                     (zipmap (-> ?pn :msg-table keys)
+                             (map #(fit/parzen-pdf-msg ?pn %)
+                                  (-> ?pn :msg-table keys))))
+             (assoc ?pn :winners (choose-winners ?pn)))]
+    pn))
+
+(defn tryme-count []
+  (count (filter #(= :ordinary (first %)) (-> (tryme) :winners vals))))
+
+
+(def hopeful-pn
+  {:initial-marking [1 0 0 0 0], ; I changed this too! How do I fix this? GP operator? Try different ones in simple-reach? 
+   :transitions
+   [{:name :m1-start-job,
+     :tid 38,
+     :type :exponential,
+     :rate 1.0,
+     :rep {:act :m1-start-job, :j 1991, :jt :jobType1, :ends 2356.5705647971827, :clk 2355.3103128463604, :line 1233, :mjpact :aj, :m :m1},
+     :visible? true}
+    {:name :m1-complete-job,
+     :tid 39,
+     :type :exponential,
+     :rate 1.0,
+     :rep {:act :m1-complete-job, :bf :b1, :j 1991, :n 1, :clk 2356.5705647971827, :line 1238, :mjpact :bj, :m :m1},
+     :visible? true}
+    {:name :m2-start-job,
+     :tid 40,
+     :type :exponential,
+     :rate 1.0,
+     :rep {:act :m2-start-job, :bf :b1, :j 1991, :n 3, :clk 2358.9070474961236, :line 1247, :mjpact :sm, :m :m2},
+     :visible? true}
+    {:name :m2-complete-job,
+     :tid 41,
+     :type :exponential,
+     :rate 1.0,
+     :rep {:act :m2-complete-job, :m :m2, :j 1991, :ent 2355.3103128463604, :clk 2360.0770474961237, :line 1248, :mjpact :ej},
+     :visible? true}],
+   :arcs
+   [{:aid 74, :source :place-1, :target :m2-start-job, :EDITED true :name :aa-74, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+    {:aid 75, :source :m1-start-job, :target :place-2, :name :aa-75, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+    {:aid 76, :source :place-2, :target :m1-complete-job, :name :aa-76, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+    {:aid 77, :source :m1-complete-job, :target :place-3, :name :aa-77, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+    {:aid 78, :source :place-3, :target :m1-start-job, :EDITED true :name :aa-78, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+    {:aid 79, :source :m2-start-job, :target :place-4, :name :aa-79, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+    {:aid 80, :source :place-4, :target :m2-complete-job, :name :aa-80, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+    {:aid 81, :source :m2-complete-job, :target :place-1, :name :aa-81, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+    {:aid 205, :source :m1-start-job, :target :Place-103, :name :aa-205, :type :normal, :multiplicity 1, :bind {:jtype :blue} :priority 2}
+    {:aid 206, :source :Place-103, :target :m2-start-job, :name :aa-206, :type :normal, :multiplicity 1 :bind {:jtype :blue}, :priority 1}],
+   :marking-key [:place-1 :place-2 :place-3 :place-4 :Place-103],
+   :places
+   [{:name :place-1, :pid 0, :initial-tokens 1, :visible? true}
+    {:name :place-2, :pid 1, :initial-tokens 0, :visible? true}
+    {:name :place-3, :pid 2, :initial-tokens 0, :visible? true}
+    {:name :place-4, :pid 3, :initial-tokens 0, :visible? true}
+    {:name :Place-103, :pid 4, :initial-tokens 0}]})

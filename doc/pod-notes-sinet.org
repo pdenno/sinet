@@ -2466,6 +2466,7 @@ There should be *AT MOST 6* winners that are not :ordinary. There are 10.
 
 ** <2017-11-08 Wed>
 
+*** false negatives
 place-1 and place-4 are on m2, place-4 is busy. 
                                place-2 is busy. 
 
@@ -2486,8 +2487,9 @@ Maybe it is syncing on :M and should be on :Mp ?
 
 [1] "wrong-iness" because it doesn't add to the buffer??? The transition is tecnically correct! 
 [2] Here it does add to the buffer. I think this is okay. To do otherwise is to invite problems.
-So I don't see a case for [0 1 0 1 1] being m2-starved in the log at all. Buffer has 1!
 
+*** Leading to definition of starved? 
+So I don't see a case for [0 1 0 1 1] being m2-starved in the log at all. Buffer has 1!
 Let's look at what is happening when m2 starves. Two situations, supposedly. 
 
 [3] {:M [0 1 0 1 1], :fire :m2-complete-job,       :Mp [1 1 0 0 1], :rate 1.0, :job 1744, :clk 2066.1692850612535, :indx 224}
@@ -2502,8 +2504,7 @@ Let's look at what is happening when m2 starves. Two situations, supposedly.
      Really need a look-ahead at [3] to see that [4] is starve. Going to have to work backwards
      from starvations!. Also call it :state (not :Mp)
 
-
-starved? written.
+====> starved? written.
 
 {:act :m2-complete-job, :m :m2, :j 1744, :ent 2062.4506743555485, :clk 2066.1692850612535, :line 224, :mjpact :ej}
 {:act :m2-starved, :m :m2, :clk 2066.1692850612535, :line 225, :mjpact :st}
@@ -2515,7 +2516,8 @@ starved? written.
 
 This should have failed starved? 
 
-I have a new (better) interpretation, but I'm not happy with what MJPdes is doing.
+*** Bug in MJPdes
+====> I have a new (better) interpretation now, but I'm not happy with what MJPdes is doing.
 It is putting :m2-start-job messages [5] before :unstarve messages, resulting in the 
 wrong state on exceptional [6] . 
 
@@ -2534,6 +2536,8 @@ What sucks about this is that to fix it, I need a new log.
 It may even be the case that I'll want to terminate interpretations where
 unstarve is happening but the buffer is empty. 
 
+*** Progress on winners?
+
 Am I making progress on the winners? No. Still 10 exceptional winners, should only be 6
 
 {[0 0 1 1 1] [:ordinary 0.09034091305554764],
@@ -2548,7 +2552,6 @@ Am I making progress on the winners? No. Still 10 exceptional winners, should on
  [1 1 0 0 1] [:m2-starved 1.0],
  [0 1 0 1 2] [:m1-unblocked 1.0],
  [1 0 1 0 0] [:m2-starved 1.0]}
-
 
 Actually, things should be MUCH better because the msg table is good: (AND THIS WITH SIGMA = 0.2 !)
 {:m2-starved   {[1 1 0 0 0] 14},
@@ -2630,6 +2633,221 @@ I'm going to investigate better winners before fixing MJPdes.
            (reduce (fn [sum ix] (+ sum (Math/pow (- (nth from ix) (nth to ix)) 2)))
                    0.0
                    (range (count from))))))))
+
+
+
+** <2017-11-09 Thu>
+
+ I didn't do much on the program OR the paper today. Instead I reviewed Liang's proposal and
+ handled some odds and ends. 
+** <2017-11-10 Fri>
+
+*** starved? is established and I got all the test cases in fitness_test.clj working. 
+ Internet is down.
+*** I'm looking at an alternative PNN measure: product of probabilities
+This would be perfect were Loom to provide all (or a reasonable subset of) paths between nodes. 
+But I don't think it can do that. Checking... Nothing. 
+
+Q: What if I got a first graph and then tried to get subgraphs? 
+A: I don't think it would give me anything new unless I changed the costs. 
+Q: Then why not change costs on this entire path and see what it can do? 
+A: Maybe.
+Q: What if I keep the path I have but recalculate the distance as a product?
+A: This should be easy...
+
+*** Quick check of a side issue
+In the graph, not in the interp. 
+  [1 0 1 0 3] {[0 0 1 1 2] 99999.99999999999},    
+
+It is in the graph:
+[:place-1 :place-2 :place-3 :place-4 :Place-103]
+ {:M [1 0 1 0 3], :fire :m2-start-job, :Mp [0 0 1 1 2], :rate 1.0}
+It could be that this never happens because 1 0 1 0 3 is both machines waiting. 
+Yup. Not in the log. 
+
+[[[[file:~/TwoDrive/OneDrive/Repo/mindmaps/images/Screen Shot 2017-11-10 at 11.46.55 AM.jpg]]][PN]]
+ 
+Baseline with sigma=0.75 --> 4 ordinary. 
+  (count (filter #(= :ordinary (first %)) (-> (tryme) vals)))
+
+*** exper-dist-fn-1 and -2 suck
+(defn exper-dist-fn-1
+  "Measure distance as the product of probability along the 1/p path." 
+  [rgraph trans-cnts from to]
+  (let [loom-prob (rgraph2loom-probability rgraph trans-cnts)
+        path (alg/dijkstra-path loom-prob from to)
+        adj-table (:adj loom-prob)]
+    (reduce (fn [probs ix]
+              (let [f (nth path ix)
+                    t (nth path (inc ix))]
+                (* probs (/ 1 (get (get adj-table f) t)))))
+            1
+            (range (-> path count dec)))))
+
+(defn exper-dist-fn-2
+  [rgraph trans-cnts from to]
+  "Measure distance as the product of probability along a '1 per step' cost path." 
+  (let [loom-steps (rgraph2loom-steps rgraph)
+        path (alg/dijkstra-path loom-steps from to)]
+    (reduce (fn [probs ix]
+              (let [f (nth path ix)
+                    t (nth path (inc ix))]
+                (* probs (trans-prob f t trans-cnts))))
+            1
+            (range (-> path count dec)))))
+
+(defn tryme
+  []
+  (let [log (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj")
+        pn (as-> (find-interpretation hopeful-pn log) ?pn
+             (assoc  ?pn :msg-table (compute-msg-table ?pn)) 
+             (assoc  ?pn :trans-counts (trans-counts (:interp ?pn)))
+             (dissoc ?pn :interp)
+             (assoc  ?pn :sigma 0.40)
+             (assoc  ?pn :loom-prob (rgraph2loom-probability (:rgraph ?pn) (:trans-counts ?pn)))
+             (assoc  ?pn :distance-fn #(second (alg/dijkstra-path-dist (:loom-prob ?pn) %1 %2)))
+             #_(assoc  ?pn :distance-fn #(exper-dist-fn-1 (:rgraph ?pn) (:trans-counts ?pn) %1 %2))
+             (assoc  ?pn :pdf-fns
+                     (zipmap (-> ?pn :msg-table keys)
+                             (map #(fit/parzen-pdf-msg ?pn %)
+                                  (-> ?pn :msg-table keys))))
+             (assoc ?pn :winners (choose-winners ?pn)))]
+    pn))
+
+Terrible:
+{[0 0 1 1 1] [:m1-unblocked 0.7724426022951624],
+ [0 1 0 1 0] [:m1-unblocked 0.8193096491007966],
+ [1 1 0 0 2] [:m2-unstarved 0.7854176486427293],
+ [0 1 0 1 3] [:m2-unstarved 0.7963124543204168],
+ [1 1 0 0 3] [:m2-unstarved 0.7963124543204168],
+ [0 1 0 1 1] [:m1-unblocked 0.6328696774369557],
+ [1 1 0 0 0] [:m1-unblocked 0.9872246813101748],
+ [0 0 1 1 0] [:m1-unblocked 0.8299120398949777],
+ [0 0 1 1 2] [:m2-unstarved 0.7963124543204168],
+ [1 1 0 0 1] [:m1-unblocked 0.8193096491007966],
+ [0 1 0 1 2] [:m2-unstarved 0.6254378554572626],
+ [1 0 1 0 0] [:m1-unblocked 0.9872246813101748]}
+
+*** Better than all of these was simple distance???
+
+Yeah, but since I cannot explain why that would be, I'm going to ignore it! 
+And BTW, what I mean by simple distance is steps*euclidean distance. 
+I'm going with 1/p and sigma=0.4. 
+
+Maybe I should review euclidean distance times steps. See if the I can get
+back to the values (of a few weeks ago!) and maybe normalize it and claim success. 
+
+*** steps * euclid-dist2 at sigma=0.75 still really good. 
+
+{[0 0 1 1 1] [:ordinary 0.10565451941946982],
+ [0 1 0 1 0] [:m2-unstarved 1.0],
+ [1 1 0 0 2] [:ordinary 0.10642989332503937],
+ [0 1 0 1 3] [:m1-blocked 1.0],
+ [1 1 0 0 3] [:ordinary 0.09387730377891053],
+ [0 1 0 1 1] [:ordinary 0.1783054552497219],
+ [1 1 0 0 0] [:m2-starved 1.0],
+ [0 0 1 1 0] [:ordinary 0.07812345592321546],
+ [0 0 1 1 2] [:m1-unblocked 1.0],
+ [1 1 0 0 1] [:ordinary 0.08572916833008677],
+ [0 1 0 1 2] [:ordinary 0.1935079893754819],
+ [1 0 1 0 0] [:m2-starved 0.028565500784550373]}
+
+What would it be like with the markings normalized. 
+(That just means dividing the last component by 3)
+
+*** Normalized not nearly as good (at sigma=0.75). Damn! 
+{[0 0 1 1 1] [:m1-unblocked 0.7435670792059064],
+ [0 1 0 1 0] [:m2-unstarved 1.0],
+ [1 1 0 0 2] [:ordinary 0.21486867525000083],
+ [0 1 0 1 3] [:m1-blocked 1.0],
+ [1 1 0 0 3] [:ordinary 0.1651985882002166],
+ [0 1 0 1 1] [:m2-unstarved 0.7435670792059064],
+ [1 1 0 0 0] [:m2-starved 1.0],
+ [0 0 1 1 0] [:ordinary 0.15090367155243273],
+ [0 0 1 1 2] [:m1-unblocked 1.0],
+ [1 1 0 0 1] [:m2-starved 0.7435670792059064],
+ [0 1 0 1 2] [:m1-blocked 0.7435670792059063],
+ [1 0 1 0 0] [:m2-starved 0.028565500784550373]}
+
+Sigma=0.4 not much help.
+{[0 0 1 1 1] [:m1-unblocked 0.352866081458849],
+ [0 1 0 1 0] [:m2-unstarved 1.0],
+ [1 1 0 0 2] [:ordinary 0.14666831313900044],
+ [0 1 0 1 3] [:m1-blocked 1.0],
+ [1 1 0 0 3] [:ordinary 0.11710641702346947],
+ [0 1 0 1 1] [:m2-unstarved 0.35286608145884896],
+ [1 1 0 0 0] [:m2-starved 1.0],
+ [0 0 1 1 0] [:ordinary 0.1016633427504141],
+ [0 0 1 1 2] [:m1-unblocked 1.0],
+ [1 1 0 0 1] [:m2-starved 0.35286608145884896],
+ [0 1 0 1 2] [:m1-blocked 0.35286608145884896],
+ [1 0 1 0 0] [:ordinary 0.00480797001559086]}
+
+
+*** This all means that 1/p wins. Which I guess is a good thing, except...
+Except that it only works on integer values. 
+Q: How would it do with an added normalized Euclidean factor?
+
+Baseline (simple 1/p) at sigma=0.4,  exper-dist-fn-5
+{[0 0 1 1 1] [:ordinary 0.09097436581837509],
+ [0 1 0 1 0] [:m2-unstarved 1.0],
+ [1 1 0 0 2] [:ordinary 0.09073903307292706],
+ [0 1 0 1 3] [:m1-blocked 1.0],
+ [1 1 0 0 3] [:ordinary 0.08907167734269653],
+ [0 1 0 1 1] [:ordinary 0.16719825182833473],
+ [1 1 0 0 0] [:m2-starved 1.0],
+ [0 0 1 1 0] [:ordinary 0.07246741235005642],
+ [0 0 1 1 2] [:m1-unblocked 1.0],
+ [1 1 0 0 1] [:ordinary 0.0748679045133488],
+ [0 1 0 1 2] [:ordinary 0.18339141280578564],
+ [1 0 1 0 0] [:m2-starved 0.04393693362340743]} <---- wrong!
+
+A: at sigma=0.25 Actually, a little better! exper-dist-fn-6
+{[0 0 1 1 1] [:ordinary 0.0963382250561357],
+ [0 1 0 1 0] [:m2-unstarved 1.0],
+ [1 1 0 0 2] [:ordinary 0.09661490913580296],
+ [0 1 0 1 3] [:m1-blocked 1.0],
+ [1 1 0 0 3] [:ordinary 0.08525038465184905],
+ [0 1 0 1 1] [:ordinary 0.1847004189542513],
+ [1 1 0 0 0] [:m2-starved 1.0],
+ [0 0 1 1 0] [:ordinary 0.06976761268904322],
+ [0 0 1 1 2] [:m1-unblocked 1.0],
+ [1 1 0 0 1] [:m2-starved 0.1690133154060661], <--- different
+ [0 1 0 1 2] [:ordinary 0.20349378870019016],
+ [1 0 1 0 0] [:ordinary 0.004807692848726801]} <--- right
+
+{:m2-unstarved {[0 1 0 1 0] 14},
+ :m1-unblocked {[0 0 1 1 2] 30},
+ :m2-starved {[1 1 0 0 0] 14},
+ :ordinary
+ {[0 0 1 1 1] 263,
+  [0 1 0 1 0] 217,
+  [1 1 0 0 2] 263,
+  [0 1 0 1 3] 248,
+  [1 1 0 0 3] 248,
+  [0 1 0 1 1] 466,
+  [1 1 0 0 0] 14,
+  [0 0 1 1 0] 203,
+  [0 0 1 1 2] 248,
+  [1 1 0 0 1] 217,
+  [0 1 0 1 2] 511,
+  [1 0 1 0 0] 14},
+ :m1-blocked {[0 1 0 1 3] 30}}
+
+A: sigma=0.4 Not as good. (sigh) exper-dist-fn-6
+{[0 0 1 1 1] [:ordinary 0.1227915012397023],
+ [0 1 0 1 0] [:m2-unstarved 1.0],
+ [1 1 0 0 2] [:ordinary 0.1259642872042334],
+ [0 1 0 1 3] [:m1-blocked 1.0],
+ [1 1 0 0 3] [:ordinary 0.09128145042037937],
+ [0 1 0 1 1] [:m2-unstarved 0.4875361660153877], <-- wrong
+ [1 1 0 0 0] [:m2-starved 1.0],
+ [0 0 1 1 0] [:ordinary 0.07485193189373177],
+ [0 0 1 1 2] [:m1-unblocked 1.0],
+ [1 1 0 0 1] [:m2-starved 0.4993517885992762],   <--- wrong
+ [0 1 0 1 2] [:m1-blocked 0.4993517885992762],   <--- wrong
+ [1 0 1 0 0] [:ordinary 0.004816973337193402]}
+
 
 
 
