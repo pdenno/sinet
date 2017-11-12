@@ -9,10 +9,9 @@
 
 (def ^:private diag (atom nil))
 
-;;; The function for pretty-fying is in scada_test.clj
-(defn load-scada [filename]
-  "Read a SCADA log, a vector of messages pretty-fied from 
-   their original MJPdes form."
+;;; Get error "Method code too large!" If I just do load-file here.
+(defn load-scada [filename] 
+  "Read a SCADA log."
   (let [in (java.io.PushbackReader. (clojure.java.io/reader filename))]
     (edn/read in)))
 

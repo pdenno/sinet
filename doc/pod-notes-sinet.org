@@ -43,6 +43,7 @@
    23 Types of Regression, [[https://www.datasciencecentral.com/profiles/blogs/23-types-of-regression][here]].
    
 
+** Clojure.core is one file of about 8000 lines. Worth a read! Includes futures, etc. 
 
 * Sinet Miscellaneous TODOs
 ** TODO Decide whether setting all transitions to timed makes sense for simple-reach. See discussion <2017-10-15 Sun>
@@ -2783,7 +2784,6 @@ Sigma=0.4 not much help.
  [0 1 0 1 2] [:m1-blocked 0.35286608145884896],
  [1 0 1 0 0] [:ordinary 0.00480797001559086]}
 
-
 *** This all means that 1/p wins. Which I guess is a good thing, except...
 Except that it only works on integer values. 
 Q: How would it do with an added normalized Euclidean factor?
@@ -2848,7 +2848,473 @@ A: sigma=0.4 Not as good. (sigh) exper-dist-fn-6
  [0 1 0 1 2] [:m1-blocked 0.4993517885992762],   <--- wrong
  [1 0 1 0 0] [:ordinary 0.004816973337193402]}
 
+*** MJPdes was doing things correctly -- I was using old output.
+The new one [[file:~/Documents/git/sinet/data/SCADA-logs/m2-j1-n3-block-mild-out-2.clj][new file]] is *much* easier to read.  Oh, but it doesn't work. 
+It fails interpretation. 
+
+*** bad start, it IS a tree search
+;;; POD better than keeping these long paths would just be to count them.
+(defn starting-links
+  "Return all links (containing reference scada log line) that interpret 
+   the SCADA log well from start-indx (usually 0)."
+  [pn log start-indx & {:keys [diag-path]}]
+  (let [rgraph (:rgraph pn)
+        starts  (filter #(= (:act (next-ordinary pn log start-indx))
+                            (:fire %))
+                        rgraph)]
+    (reduce (fn [winners start]
+              (let [win? (loop [next-link start
+                                cnt 0]
+                           (cond (> cnt 0) start
+                                 (not next-link) nil
+                                 true (recur 
+    
 
 
 
+It dies here
+matched =  {:M [0 1 0 1 1], :fire :m2-move-off, :Mp [1 1 0 0 1], :rate 1.0, :m :m2, :job 1723, :clk 2053.4484, :indx 182}
+{:clk 2053.4484 :act :m2-move-off :m :m2 :ent 2049.6847 :mjpact :ej :j 1723 :line 182}
+{:clk 2053.4484 :act :m2-starved :m :m2 :mjpact :st :line 183}
+{:clk 2053.7211 :act :m2-unstarved :m :m2 :mjpact :us :line 184}
+Which happens to be the first starvation!
 
+llink, msg. 
+{:M [0 1 0 1 1], :fire :m2-move-off, :Mp [1 1 0 0 1], :rate 1.0, :m :m2, :job 1723, :clk 2053.4484, :indx 182}
+{:clk 2053.4484, :act :m2-starved, :m :m2, :mjpact :st, :line 183}
+
+:place-1 = m2 waiting
+:place-2 = m1 busy
+:place-3 = m1 waiting
+:place-4 = m2 busy
+
+[:place-1 :place-2 :place-3 :place-4 :Place-103]
+It fails on starved? because indeed the :Mp here isn't starved. 
+
+So we go from (m1-busy, m2-busy, 1 in buffer) to (m1-busy m2-waiting) but there is still one in the 
+buffer, so yeah, this is supposed to fail. 
+
+This isn't the winning initial-marking. Do I try other buffer settings? 
+It should start with 1 in buffer because:
+{:clk 1999.6284 :act :m2-move-off :m :m2 :ent 1996.918 :mjpact :ej :j 1677 :line 0}
+{:clk 1999.6284 :act :m2-start-job :m :m2 :bf :b1 :n 1 :mjpact :sm :j 1678 :line 1}
+{:clk 2000.0641 :act :m1-move-off :m :m1 :bf :b1 :n 0 :mjpact :bj :j 1679 :line 2}
+
+*** MJPdes log problem
+IT IS starting with one in the buffer. What gives? .... Wait there are lots of starts here. I might not be synched-up. 
+matched =  {:M [1 1 0 0 1], :fire :m2-start-job, :Mp [0 1 0 1 0], :rate 1.0, :m :m2, :job 1678, :clk 1999.6284, :indx 1}
+matched =  {:M [0 1 0 1 0], :fire :m1-move-off, :Mp [0 0 1 1 0], :rate 1.0, :m :m1, :job 1679, :clk 2000.0641, :indx 2}
+matched =  {:M [0 0 1 1 0], :fire :m1-start-job, :Mp [0 1 0 1 1], :rate 1.0, :m :m1, :job 1680, :clk 2000.0641, :indx 3}
+
+;;; Okay, The log looks like it is messed up. Goes from m2-starved to m2-unstarved without anything between!
+matched =  {:M [0 1 0 1 0], :fire :m2-move-off, :Mp [1 1 0 0 0], :rate 1.0, :m :m2, :job 1723, :clk 2053.4484, :indx 182}
+matched =  {:act :m2-starved, :prev-act :m2-move-off, :Mp [1 1 0 0 0], :state [1 1 0 0 0], :clk 2053.4484, :job 1723, :indx 183}
+matched =  {:act :m2-unstarved, :prev-act nil, :Mp [1 1 0 0 0], :state [1 1 0 0 0], :clk 2053.7211, :job 1723, :indx 184}
+
+Yup. Log problem:
+{:clk 2053.4484 :act :m2-starved :m :m2 :mjpact :st :line 183}
+
+[4] {:clk 2053.7211 :act :m2-unstarved :m :m2 :mjpact :us :line 184}
+[3] {:clk 2053.7211 :act :m2-start-job :m :m2 :bf :b1 :n 1 :mjpact :sm :j 1724 :line 185}
+[1] {:clk 2053.7211 :act :m1-move-off :m :m1 :bf :b1 :n 0 :mjpact :bj :j 1724 :line 186}
+[2] {:clk 2053.7211 :act :m1-start-job :jt :jobType1 :m :m1 :ends 2054.7211 :mjpact :aj :j 1725 :line 187}
+
+ [1] has to be before [3] and [4] Is the upstream? thing not working? 
+
+These four together makes a great test!
+
+*** Man! What a bear!
+(defn msg-before?
+  "Returns true if msg1 should be reported before msg2."
+  [model msg1 msg2]
+  (let [ep1 (or (:m msg1) (:bf msg1))
+        ep2 (or (:m msg2) (:bf msg2)) ; model below for easier testing.
+        up? (and model ep1 ep2 (upstream? model ep1 ep2))
+        same? (= ep1 ep2)
+        down? (and (not up?) (not same?))
+        act1 (:mjpact msg1)
+        act2 (:mjpact msg2)
+        clk1 (:clk msg1)
+        clk2 (:clk msg2)]
+    (cond (and clk1 clk2 (< clk1 clk2)) true, 
+          (and clk1 clk2 (> clk1 clk2)) false,
+
+          ;; Do downtream stuff before unblocking.
+          (and down? (or (= act1 :ej) (= act1 :sm)) (= act2 :ub)) true,
+          (and down? (or (= act2 :ej) (= act2 :sm)) (= act1 :ub)) false,
+          ;; Do upstream stuff before unstarving.
+          (and up?   (or (= act1 :bj) (= act1 :aj)) (= act2 :us)) true,
+          (and up?   (or (= act2 :bj) (= act2 :aj)) (= act1 :us)) false,
+          ;; If neither of them are exceptional, do upstream first
+          (and up?   (not (exception? act1)) (not (exception? act2))) true,
+          (and down? (not (exception? act1)) (not (exception? act2))) false,
+          ;; unblock before starting
+          (and same? (= act1 :ub) (or (= act2 :sm) (= act2 :aj))) true,
+          ;; unstarve before starting
+          (and same? (= act1 :us) (= act2 :sm)) true,
+          :else false)))
+
+*** This works for blocking but not starvation:
+
+(defn msg-before?
+  "Returns true if msg1 should be reported before msg2."
+  [model msg1 msg2]
+  (let [ep1 (or (:m msg1) (:bf msg1))
+        ep2 (or (:m msg2) (:bf msg2)) ; model below for easier testing.
+        up? (and model ep1 ep2 (upstream? model ep1 ep2))
+        same? (= ep1 ep2)
+        down? (and (not up?) (not same?))
+        act1 (:mjpact msg1)
+        act2 (:mjpact msg2)
+        clk1 (:clk msg1)
+        clk2 (:clk msg2)]
+    (cond (< clk1 clk2) true, 
+          (> clk1 clk2) false,
+          ;; Do downtream before unblocking.
+          (and down? (or (= act1 :ej) (= act1 :sm)) (= act2 :ub)) true,
+          (and   up? (or (= act2 :ej) (= act2 :sm)) (= act1 :ub)) false,
+          ;; Do upstream before unstarving.
+          (and up?   (or (= act1 :bj) (= act1 :aj)) (= act2 :us)) true,
+          ;; If neither of them are exceptional, do downstream first
+          ;; POD I wonder if this is going to be different for starvation?!?!
+          (and down? (not (exception? act1)) (not (exception? act2))) true,
+          (and   up? (not (exception? act1)) (not (exception? act2))) false,
+          ;; unblock before starting or moving off 
+          (and same? (= act1 :ub) (or (= act2 :sm) (= act2 :aj) (= act2 :bj))) true,
+          ;; unstarve before starting 
+          (and same? (= act1 :us) (= act2 :sm)) true,
+          ;; move-off before starting
+          (and same? (= act1 :bj) (or (= act2 :sm) (= act2 :aj))) true,
+          :else false)))
+
+Maybe it would be work to move the "if neither is exceptional" to the bottom.
+
+I left things for the evening with the following not true: 
+
+(=
+   [{:clk 2053.7211, :act :m1-move-off, :m :m1, :bf :b1, :n 0, :mjpact :bj, :j 1724, :line 186}
+    {:clk 2053.7211, :act :m1-start-job, :jt :jobType1, :m :m1, :ends 2054.7211, :mjpact :aj, :j 1725, :line 187}
+    {:clk 2053.7211, :act :m2-unstarved, :m :m2, :mjpact :us, :line 184}
+    {:clk 2053.7211, :act :m2-start-job, :m :m2, :bf :b1, :n 1, :mjpact :sm, :j 1724, :line 185}]
+    (vec (sort
+      #(log/msg-before? test-model %1 %2)
+        [{:clk 2053.7211 :act :m2-unstarved :m :m2 :mjpact :us :line 184}
+	{:clk 2053.7211 :act :m2-start-job :m :m2 :bf :b1 :n 1 :mjpact :sm :j 1724 :line 185}
+	{:clk 2053.7211 :act :m1-move-off :m :m1 :bf :b1 :n 0 :mjpact :bj :j 1724 :line 186}
+	{:clk 2053.7211 :act :m1-start-job :jt :jobType1 :m :m1 :ends 2054.7211 :mjpact :aj :j 1725 :line 187}]))))))
+** <2017-11-11 Sat>
+*** I played around a bit with utils4pmap and eventually gave up.
+  See comments in the code. Contrary to what I had believed before, it *does not* pass the
+  busy-fn test. That, at least, is a positive, since I can now test it without sinet. 
+  Further, I have a diagnostic atom on the memberes that shows that, in the case of busy-fn, 
+  the catch for interrupts never gets invoked. 
+  The only way forward is to find a way to get the interrupt handled by run-away code. 
+*** My writing goal for today is to get yesterday's pnn stuff written. 
+  Then back to ordering messages in MJPdes. 
+I'm using exper-dist-fn-6
+****  The problem remains that these results really do suck! :
+           {[0 0 1 1 1] [:ordinary 0.0963382250561357],
+            [0 1 0 1 0] [:m2-unstarved 1.0],
+            [1 1 0 0 2] [:ordinary 0.09661490913580298],
+            [0 1 0 1 3] [:m1-blocked 1.0],
+            [1 1 0 0 3] [:ordinary 0.08525038465184905],
+            [0 1 0 1 1] [:ordinary 0.1847004189542513],
+            [1 1 0 0 0] [:m2-starved 1.0],
+            [0 0 1 1 0] [:ordinary 0.06976761268904322],
+            [0 0 1 1 2] [:m1-unblocked 1.0],
+            [1 1 0 0 1] [:m2-starved 0.1690133154060661],
+            [0 1 0 1 2] [:ordinary 0.20349378870019016],
+            [1 0 1 0 0] [:ordinary 0.004807692848726801]}
+The ordinary are all miniscule and the exceptional are all 1.0. Anything broader than
+sigma=0.25 wanders away from the correct answers. 
+
+I'm lost neither changing msg-table nor trans-cnts causes a difference in winners.
+ [1 1 0 0 1] [:m2-starved 0.16901331540606607],
+ [1 1 0 0 1] [:m2-starved 0.1690133154060661],  (Maybe just rounding???)
+
+**** Something is wrong? Values don't matter.
+Values for msg-table and trans-cnt for 1 1 0 0 1 / :m2-starved between 1 and 1000 don't change the result!
+
+((:m2-starved (:pdf-fns pnpn)) [1 1 0 0 1]) ===> 0.1690133154060661
+((:ordinary   (:pdf-fns pnpn)) [1 1 0 0 1]) ===> 0.08015732928344184
+
+***** I could see where the values wouldn't matter were there no alternative labels for the marking. 
+However, there is an alternative:
+
+{:m2-starved {[1 1 0 0 0] 1001},
+ :m2-unstarved {[0 1 0 1 0] 14},
+ :m1-blocked {[0 1 0 1 3] 30},
+ :m1-unblocked {[0 0 1 1 2] 30},
+ :ordinary
+ {[0 0 1 1 1] 263,
+  [0 1 0 1 0] 217,
+  [1 1 0 0 2] 263,
+  [0 1 0 1 3] 248, <===== This is marking for blocked. I think it is moving out of it during the same clock tick???
+  [1 1 0 0 3] 248,
+  [0 1 0 1 1] 466,
+  [1 1 0 0 0] 14,  <===== Alternative
+  [0 0 1 1 0] 203,
+  [0 0 1 1 2] 248,
+  [1 1 0 0 1] 217,
+  [0 1 0 1 2] 511,
+  [1 0 1 0 0] 14}}
+
+{[0 0 1 1 1] {[0 1 0 1 2] 263},
+ [0 1 0 1 0] {[0 0 1 1 0] 203, [1 1 0 0 0] 1020},
+ [1 1 0 0 2] {[0 1 0 1 1] 263},
+ [0 1 0 1 3] {[1 1 0 0 3] 248},
+ [1 1 0 0 3] {[0 1 0 1 2] 248},
+ [0 1 0 1 1] {[1 1 0 0 1] 203, [0 0 1 1 1] 263},
+ [1 1 0 0 0] {[1 0 1 0 0] 14},
+ [0 0 1 1 0] {[0 1 0 1 1] 203},
+ [0 0 1 1 2] {[0 1 0 1 3] 248},
+ [1 1 0 0 1] {[0 1 0 1 0] 217},
+ [0 1 0 1 2] {[1 1 0 0 2] 263, [0 0 1 1 2] 248},
+ [1 0 1 0 0] {[1 1 0 0 1] 14}}
+
+***** It uses the data associated with the label, as you'd expect. 
+
+((:m2-starved (:pdf-fns pnpn)) [1 1 0 0 1])
+ mark =  [1 1 0 0 0]  cnt =  1001  x =  [1 1 0 0 1] <--- Meaning that the data on :m2-starved I have is 1001 points at [1 1 0 0 0]
+0.1690133154060661
+
+((:m2-starved (:pdf-fns pnpn)) [1 1 0 0 1])
+ mark =  [1 1 0 0 0]  cnt =  1001  x =  [1 1 0 0 1]  dist =  0.22222 <--- 1001 points at [1 1 0 0 0], but [1 1 0 0 0] is close.
+0.1690133154060661
+
+It must be that the distance is small. 
+
+Likewise for :ordinary. There are 12 data points for ordinary. 
+((:ordinary (:pdf-fns pnpn)) [1 1 0 0 1])
+((:ordinary (:pdf-fns pnpn)) [1 1 0 0 1])
+ mark =  [0 0 1 1 1]  cnt =  263  x =  [1 1 0 0 1]  dist =  24.95412912772294
+ mark =  [0 1 0 1 0]  cnt =  217  x =  [1 1 0 0 1]  dist =  6.753485838779957
+ mark =  [1 1 0 0 2]  cnt =  263  x =  [1 1 0 0 1]  dist =  0.36617405582922824
+ mark =  [0 1 0 1 3]  cnt =  248  x =  [1 1 0 0 1]  dist =  17.694190022497352
+ mark =  [1 1 0 0 3]  cnt =  248  x =  [1 1 0 0 1]  dist =  2.772681014191438
+ mark =  [0 1 0 1 1]  cnt =  466  x =  [1 1 0 0 1]  dist =  4.5911330049261085
+ mark =  [1 1 0 0 0]  cnt =  14   x =  [1 1 0 0 1]  dist =  0.2222222222222222 <--- Again. Good.
+ mark =  [0 0 1 1 0]  cnt =  203  x =  [1 1 0 0 1]  dist =  13.548440065681444
+ mark =  [0 0 1 1 2]  cnt =  248  x =  [1 1 0 0 1]  dist =  33.86952160349301
+ mark =  [1 1 0 0 1]  cnt =  217  x =  [1 1 0 0 1]  dist =  0.0
+ mark =  [0 1 0 1 2]  cnt =  511  x =  [1 1 0 0 1]  dist =  11.059123706298218
+ mark =  [1 0 1 0 0]  cnt =  14   x =  [1 1 0 0 1]  dist =  2.111111111111111
+
+**** The original question: A: Because there is only one value ???
+((:m2-starved (:pdf-fns pnpn)) [1 1 0 0 1])
+ mark =  [1 1 0 0 0]  cnt =  1001  x =  [1 1 0 0 1] <--- Meaning that the data on :m2-starved I have is 1001 points at [1 1 0 0 0]
+0.1690133154060661
+
+A: --> It sums 1001 of these and then divides by 1001. 
+
+**** Next question: But does the change to :original counts matter? 
+---> Switching to 1020 gave a difference distance for something (verify)
+
+ mark =  [0 0 1 1 1]  cnt =  263  x =  [1 1 0 0 1]  dist =  24.95412912772294
+ mark =  [0 1 0 1 0]  cnt =  217  x =  [1 1 0 0 1]  dist =  9.21401204159825    <---- changed as expected.
+ mark =  [1 1 0 0 2]  cnt =  263  x =  [1 1 0 0 1]  dist =  0.36617405582922824
+ mark =  [0 1 0 1 3]  cnt =  248  x =  [1 1 0 0 1]  dist =  17.694190022497352
+ mark =  [1 1 0 0 3]  cnt =  248  x =  [1 1 0 0 1]  dist =  2.772681014191438
+ mark =  [0 1 0 1 1]  cnt =  466  x =  [1 1 0 0 1]  dist =  4.5911330049261085
+ mark =  [1 1 0 0 0]  cnt =  14   x =  [1 1 0 0 1]  dist =  0.2222222222222222
+ mark =  [0 0 1 1 0]  cnt =  203  x =  [1 1 0 0 1]  dist =  13.548440065681444
+ mark =  [0 0 1 1 2]  cnt =  248  x =  [1 1 0 0 1]  dist =  33.86952160349301
+ mark =  [1 1 0 0 1]  cnt =  217  x =  [1 1 0 0 1]  dist =  0.0                 <------ e^0 --- it is e^(-distance)
+ mark =  [0 1 0 1 2]  cnt =  511  x =  [1 1 0 0 1]  dist =  11.059123706298218
+ mark =  [1 0 1 0 0]  cnt =  14   x =  [1 1 0 0 1]  dist =  2.111111111111111
+
+I changed the distance from [0 1 0 1 0] to [1 1 0 0 1] Correct?
+Correct. In the latter output, I commented out this line, which should have increased the distance:
+(assoc-in ?pn [:trans-counts [0 1 0 1 0] [1 1 0 0 0]] 1020)
+Correct. Distance went from 6.75 to 9.21. 
+(Math/exp -9.2)   ==> 0.00010103940183709342
+(Math/exp -6.75)  ==> 0.0011708796207911744
+So the transition is 10 times more significant at 6.76 than 9.2. 
+The problem is that these aren't very significant relative to 1.0 at distance 0. 
+
+This should have made the score for :original better. Did it? 
+Without 1020: 0.08015732928344184
+With    1020: 0.08015732928344184
+With/ou 1001: 0.08015732928344184
+
+Okay, maybe that doesn't make sense. 
+There is enough information above to calculate the values deliberately and see what we get. 
+
+***** Back to the point (again): It works as intended. What about it could be improved?
+
+Here is why it doesn't make any difference:
+term =  2.046191895297324E-62
+term =  2.5611416543021165E-45
+term =  217.0
+
+0.083432 with Sqrt
+0.083430
+
+((:ordinary   (:pdf-fns pnpn)) [1 1 0 0 1]) ==> 0.09338080837745166
+((:m2-starved (:pdf-fns pnpn)) [1 1 0 0 1]) ==> 0.26359713811572677
+
+Why would sqrt make the difference larger?
+
+((:ordinary (:pdf-fns pnpn)) [1 1 0 0 1])   ==> 0.07534353911645686
+((:m2-starved (:pdf-fns pnpn)) [1 1 0 0 1]) ==> 0.02302358470854968
+
+***** With sqrt, :ordinary wins!
+Extra values stil don't matter. 
+
+Here are values with sqrt:
+{[0 0 1 1 1] [:ordinary 0.0911902348920777],
+ [0 1 0 1 0] [:m2-unstarved 1.0],
+ [1 1 0 0 2] [:ordinary 0.09123773910722094],
+ [0 1 0 1 3] [:m1-blocked 1.0],
+ [1 1 0 0 3] [:ordinary 0.0852177124857642],
+ [0 1 0 1 1] [:ordinary 0.1634472113464046],
+ [1 1 0 0 0] [:m2-starved 1.0],
+ [0 0 1 1 0] [:ordinary 0.06975363285687722],
+ [0 0 1 1 2] [:m1-unblocked 1.0],
+ [1 1 0 0 1] [:ordinary 0.07534353911645686],
+ [0 1 0 1 2] [:ordinary 0.17933195862071463],
+ [1 0 1 0 0] [:ordinary 0.00480775098301599]}
+
+sigma=0.4 sucks:
+{[0 0 1 1 1] [:ordinary 0.1078079178518772],
+ [0 1 0 1 0] [:m2-unstarved 1.0],
+ [1 1 0 0 2] [:ordinary 0.1090513700432496],
+ [0 1 0 1 3] [:m1-blocked 1.0],
+ [1 1 0 0 3] [:ordinary 0.09122078912256719],
+ [0 1 0 1 1] [:m2-unstarved 0.2235047042298315],
+ [1 1 0 0 0] [:m2-starved 1.0],
+ [0 0 1 1 0] [:ordinary 0.0750987408784251],
+ [0 0 1 1 2] [:m1-unblocked 1.0],
+ [1 1 0 0 1] [:m2-starved 0.22920485145201186],
+ [0 1 0 1 2] [:m1-blocked 0.22920485145201186],
+ [1 0 1 0 0] [:m2-starved 0.012041245682929913]}
+
+Sigma=0.3 is good
+{[0 0 1 1 1] [:ordinary 0.09401147855597124],
+ [0 1 0 1 0] [:m2-unstarved 1.0],
+ [1 1 0 0 2] [:ordinary 0.09429688963376698],
+ [0 1 0 1 3] [:m1-blocked 1.0],
+ [1 1 0 0 3] [:ordinary 0.08570542928116535],
+ [0 1 0 1 1] [:ordinary 0.17261382865151273],
+ [1 1 0 0 0] [:m2-starved 1.0],
+ [0 0 1 1 0] [:ordinary 0.0701684527692359],
+ [0 0 1 1 2] [:m1-unblocked 1.0],
+ [1 1 0 0 1] [:ordinary 0.07801191238010818],
+ [0 1 0 1 2] [:ordinary 0.18909594090862963],
+ [1 0 1 0 0] [:ordinary 0.004809553524488202]}
+
+
+
+Something is still screwed up in that these aren't the values I get by running by-hand. 
+And the stuff above was contradictory at times. 
+
+***** (But why aren't the numbers as expected?)
+((:ordinary (:pdf-fns pnpn)) [1 1 0 0 1])
+sigma =  0.3
+ mark =  [0 0 1 1 1]  cnt =  263  x =  [1 1 0 0 1]  dist =  24.95412912772294
+ mark =  [0 1 0 1 0]  cnt =  217  x =  [1 1 0 0 1]  dist =  9.21401204159825
+ mark =  [1 1 0 0 2]  cnt =  263  x =  [1 1 0 0 1]  dist =  0.36617405582922824
+ mark =  [0 1 0 1 3]  cnt =  248  x =  [1 1 0 0 1]  dist =  17.694190022497352
+ mark =  [1 1 0 0 3]  cnt =  248  x =  [1 1 0 0 1]  dist =  2.772681014191438
+ mark =  [0 1 0 1 1]  cnt =  466  x =  [1 1 0 0 1]  dist =  4.5911330049261085
+ mark =  [1 1 0 0 0]  cnt =  14  x =  [1 1 0 0 1]  dist =  0.2222222222222222
+ mark =  [0 0 1 1 0]  cnt =  203  x =  [1 1 0 0 1]  dist =  13.548440065681444
+ mark =  [0 0 1 1 2]  cnt =  248  x =  [1 1 0 0 1]  dist =  33.86952160349301
+ mark =  [1 1 0 0 1]  cnt =  217  x =  [1 1 0 0 1]  dist =  0.0
+ mark =  [0 1 0 1 2]  cnt =  511  x =  [1 1 0 0 1]  dist =  11.059123706298218
+ mark =  [1 0 1 0 0]  cnt =  14  x =  [1 1 0 0 1]  dist =  2.111111111111111
+0.07801191238010818
+0.07801191238010818
+0.07465334847815873
+
+All the summands are different. 
+sum =  2.0636196635986696E-22
+sum =  2.3296608584222083E-10
+****** Total waste of time. (* 2.0 sigma sigma)
+(defn by-hand [data]
+  (let [size (apply + (map first data))
+        sig2 (* 2 0.30 0.30)]
+    (println "size = " size)
+    (* (/ 1 size)
+       (reduce (fn [sum [cnt dist]]
+                 (println "term = "     (* cnt (Math/exp (- (/ (Math/sqrt dist) sig2)))))
+                 (println "dist = " dist " cnt = " cnt)
+                 ;(println "sum = " (+ sum (* cnt (Math/exp (- (/ (Math/sqrt dist) sig2))))))
+                 (+ sum (* cnt (Math/exp (- (/ (Math/sqrt dist) sig2))))))
+               0.0
+               data))))
+
+
+(def data-3 [[263    24.95412912772294]
+             [217    9.21401204159825]
+             [263    0.36617405582922824]
+             [248    17.694190022497352]
+             [248    2.772681014191438]
+             [466    4.5911330049261085]
+             [14     0.2222222222222222]
+             [203    13.548440065681444]
+             [248    33.86952160349301]
+             [217    0.0]
+             [511    11.059123706298218]
+             [14     2.111111111111111]])
+
+(def data-1
+  [[217    9.21401204159825]    
+   [263    24.95412912772294]
+   [263    0.36617405582922824]
+   [248    17.694190022497352]
+   [248    2.772681014191438]
+   [466    4.5911330049261085]
+   [14     0.2222222222222222]
+   [203    13.548440065681444]
+   [248    33.86952160349301]
+   [217    0.0              ]   
+   [511    11.059123706298218]
+   [14     2.111111111111111]])
+
+(def data-2
+  [[217    6.753485838779957]    ;;----
+   [263    24.95412912772294]
+   [263    0.36617405582922824]
+   [248    17.694190022497352]
+   [248    2.772681014191438]
+   [466    4.5911330049261085]
+   [14     0.2222222222222222]
+   [203    13.548440065681444]
+   [248    33.86952160349301]
+   [217    0.0              ]   
+   [511    11.059123706298218]
+   [14     2.111111111111111]])
+
+
+
+**** Results are good with  sigma=0.3 and sqrt on fn-6. Some of the others? 
+
+*** I'm back on the problem with MJPdes ordering of data.
+1) Fix this
+2) Generate a good log
+3) Redo all the tests
+4) Check alternative formulations for pnn function. 
+5) Write it down. 
+
+(=
+   [{:clk 2053.7211, :act :m1-move-off, :m :m1, :bf :b1, :n 0, :mjpact :bj, :j 1724, :line 186}
+    {:clk 2053.7211, :act :m1-start-job, :jt :jobType1, :m :m1, :ends 2054.7211, :mjpact :aj, :j 1725, :line 187}
+    {:clk 2053.7211, :act :m2-unstarved, :m :m2, :mjpact :us, :line 184}
+    {:clk 2053.7211, :act :m2-start-job, :m :m2, :bf :b1, :n 1, :mjpact :sm, :j 1724, :line 185}]
+    (vec (sort
+      #(log/msg-before? test-model %1 %2)
+        [{:clk 2053.7211 :act :m2-unstarved :m :m2 :mjpact :us :line 184}
+	{:clk 2053.7211 :act :m2-start-job :m :m2 :bf :b1 :n 1 :mjpact :sm :j 1724 :line 185}
+	{:clk 2053.7211 :act :m1-move-off :m :m1 :bf :b1 :n 0 :mjpact :bj :j 1724 :line 186}
+	{:clk 2053.7211 :act :m1-start-job :jt :jobType1 :m :m1 :ends 2054.7211 :mjpact :aj :j 1725 :line 187}]))))))
+
+
+This can't be write because if I swap them around, this test will pass and the other will fail. 
+          ;; If neither of them are exceptional, do downstream first
+          (and down? (not (exception? act1)) (not (exception? act2))) true,
+          (and   up? (not (exception? act1)) (not (exception? act2))) false,
+
+The problem is that I'm only looking at two at a time ???
+
+---> Once you've got things working correctly, write "mix-up" (use all permutations)

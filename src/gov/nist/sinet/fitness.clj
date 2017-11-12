@@ -216,11 +216,6 @@
 ;;;====================================================================================
 ;;; Exceptional Fitness
 ;;;====================================================================================
-;;; Idea: This (excep-starting-mark) could force an initial-marking on the PN.
-;;;       That might be a good thing!
-;;;       But what gets hard here is choosing a marking that will guess correctly
-;;;       what is flowing through the PN/system. Maybe this isn't that hard, since we CAN
-;;;       know the number of jobs in the queue.
 (defn ordinary?
   "Returns msg if the message isn't exceptional otherwise false."
   [msg]
@@ -267,14 +262,14 @@
                                   (:fire %))
                               rgraph))))]
       (let [new-paths (if (> (-> paths first count) 50)
-                        (do 
-                          (swap! winners #(conj  % (-> paths first first)))
+                        (do
+                          (swap! winners #(conj % (-> paths first first)))
                           (rest paths))
                         paths)]
         (when (not-empty new-paths) 
           (recur (next-paths pn log new-paths (-> new-paths first last :indx inc))))))
     (let [job (:j (nth log start-indx))]
-      (mapv #(assoc % :job job)  @winners))))
+      (mapv #(assoc % :job job) @winners))))
 
 (defn link+msg [link msg]
   (-> link
@@ -398,11 +393,13 @@
       (loop [pn (as-> pn ?pn
                     (assoc ?pn :active-jobs (vector (:job start-link)))
                     (assoc ?pn :graph-link start-link)
-                    (assoc ?pn :loom-steps (rgraph2loom-steps (:rgraph ?pn)))) ; POD huh?
+                    (assoc ?pn :loom-steps (rgraph2loom-steps (:rgraph ?pn))))
              lasti start-link
              interp (transient (vector start-link))
              msg (nth log (-> start-link :indx inc))]
+        (reset! diag {:lasti lasti :msg msg :job1 job1 :pn pn})
         (let [pn (next-match pn lasti msg job1)]
+          (println "matched = " (:matched pn))
           (cond (-> pn :matched not)
                 (persistent! interp)
                 (> (-> (:matched pn) :indx inc) last-indx)
@@ -433,8 +430,8 @@
                            (conj mark 0)))
                        []
                        (:marking-key pn))]
-     (as-> pn ?pn
-         (pnu/set-marking ?pn imark)
+     (as-> pn ?pn 
+         (pnu/set-marking ?pn imark) ; POD better would be to keep it this way!
          (assoc ?pn :rgraph (pnr/simple-reach ?pn max-k))     ; packed
          (assoc ?pn :k-limited? (-> ?pn :rgraph :k-limited?)) ; unpack
          (assoc ?pn :rgraph (-> ?pn :rgraph :rgraph vec))     ; unpack 
@@ -452,11 +449,12 @@
   "At increasing values of max-k, find new starting links and try to interpret
    the entire log. Return the first complete interpretation found, if any below
    max-max-k."
-  [pn log] ; POD (-> (app-info) :gp-params :min-max-k)
-  (let [last-line (-> log last :line)]
-    (loop [max-k 2]
+  [pn log]
+  (let [last-line (-> log last :line)
+        max-max-k (-> (app-info) :gp-params :max-max-k)]
+    (loop [max-k  (-> (app-info) :gp-params :min-max-k)]
       (let [pn (lax-reach pn max-k) ; sets :rgraph, :k-limited
-            good-interp (loop [starts (fit/starting-links pn log 0)]
+            good-interp (loop [starts (starting-links pn log 0)]
                           (let [interp (interpret-scada pn log (first starts))]
                             (cond (empty? starts) nil,
                                   (full-interp? interp last-line) interp,
@@ -465,7 +463,7 @@
               (-> pn
                   (assoc :interp good-interp)
                   (assoc :max-k-used max-k))
-              (> max-k 6) nil ; POD (-> (app-info) :gp-params :max-max-k)
+              (> max-k max-max-k) nil 
               true (recur (inc max-k)))))))
 
 ;;; You can have the same marking associated with more than one class. The more times you have
@@ -565,7 +563,7 @@
     (fn [x]
       (* (/ 1 size)
          (reduce (fn [sum [mark cnt]] ; cnt the number of messages with this marking
-                   (+ sum (* cnt (Math/exp (- (/ (dist-fn mark x) sig2))))))
+                   (+ sum (* cnt (Math/exp (- (/ (Math/sqrt (dist-fn mark x)) sig2))))))
                  0.0
                  msg-table)))))
 
@@ -615,7 +613,7 @@
   [inv]
   (let [log (-> (app-info) :problem :scada-log)
         pn  (as-> (find-interpretation (:pn inv) log) ?pn
-              (assoc  ?pn :msg-table (fit/compute-msg-table ?pn))
+              (assoc  ?pn :msg-table (compute-msg-table ?pn))
               (assoc  ?pn :trans-counts (trans-counts (:interp ?pn)))
               (dissoc ?pn :interp)
               (assoc  ?pn :sigma (-> (app-info) :gp-params :exceptional-sigma))
@@ -629,7 +627,6 @@
     (-> inv ; POD both of these are temporary.
         (assoc :except (if (not-empty (:winners pn)) 0 1))
         (assoc :pn pn))))
-
 
 (defn exper-dist-fn-1
   "Measure distance as the PRODUCT of probability along the 1/p path." 
@@ -677,10 +674,12 @@
   (second (alg/dijkstra-path-dist loom-prob from to)))
 
 (defn exper-dist-fn-6
-  "Measure distance as the sum of 1/p steps along shortest path times 
-   normalized Euclidean distance." 
+  "Measure distance as the sum of 1/p steps along shortest path 
+   multiplied by normalized Euclidean distance." 
   [loom-prob norm-factors from to]
-  (let [step-cost (second (alg/dijkstra-path-dist loom-prob from to))
+  (let [ifrom (mapv #(-> % double Math/round) from)
+        ito   (mapv #(-> % double Math/round) to)
+        step-cost (second (alg/dijkstra-path-dist loom-prob ifrom ito))
         from (mapv * norm-factors from)
         to   (mapv * norm-factors to)]
     (* step-cost (pnn/euclid-dist2 from to))))
@@ -695,7 +694,8 @@
     ;; zero? implies a bad PN, BTW. 
     (mapv #(if (zero? %) 0 (/ 1 %)) highs)))
 
-(declare hopeful-pn)
+(def hopeful-pn (load-file "data/PNs/hopeful-pn2.clj")) ; POD Temporary
+
 (defn tryme
   []
   (let [log (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out-2.clj")
@@ -710,7 +710,7 @@
              #_(assoc  ?pn :distance-fn #(exper-dist-fn-4 (:rgraph ?pn) (:trans-counts ?pn) %1 %2))
              (assoc  ?pn :pdf-fns
                      (zipmap (-> ?pn :msg-table keys)
-                             (map #(fit/parzen-pdf-msg ?pn %)
+                             (map #(parzen-pdf-msg ?pn %)
                                   (-> ?pn :msg-table keys))))
              (assoc ?pn :winners (choose-winners ?pn)))]
     pn))
@@ -718,49 +718,3 @@
 (defn tryme-count []
   (count (filter #(= :ordinary (first %)) (-> (tryme) :winners vals))))
 
-
-(def hopeful-pn
-  {:initial-marking [1 0 0 0 0], ; I changed this too! How do I fix this? GP operator? Try different ones in simple-reach? 
-   :transitions
-   [{:name :m1-start-job,
-     :tid 38,
-     :type :exponential,
-     :rate 1.0,
-     :rep {:act :m1-start-job, :j 1991, :jt :jobType1, :ends 2356.5705647971827, :clk 2355.3103128463604, :line 1233, :mjpact :aj, :m :m1},
-     :visible? true}
-    {:name :m1-complete-job,
-     :tid 39,
-     :type :exponential,
-     :rate 1.0,
-     :rep {:act :m1-complete-job, :bf :b1, :j 1991, :n 1, :clk 2356.5705647971827, :line 1238, :mjpact :bj, :m :m1},
-     :visible? true}
-    {:name :m2-start-job,
-     :tid 40,
-     :type :exponential,
-     :rate 1.0,
-     :rep {:act :m2-start-job, :bf :b1, :j 1991, :n 3, :clk 2358.9070474961236, :line 1247, :mjpact :sm, :m :m2},
-     :visible? true}
-    {:name :m2-complete-job,
-     :tid 41,
-     :type :exponential,
-     :rate 1.0,
-     :rep {:act :m2-complete-job, :m :m2, :j 1991, :ent 2355.3103128463604, :clk 2360.0770474961237, :line 1248, :mjpact :ej},
-     :visible? true}],
-   :arcs
-   [{:aid 74, :source :place-1, :target :m2-start-job, :EDITED true :name :aa-74, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
-    {:aid 75, :source :m1-start-job, :target :place-2, :name :aa-75, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
-    {:aid 76, :source :place-2, :target :m1-complete-job, :name :aa-76, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
-    {:aid 77, :source :m1-complete-job, :target :place-3, :name :aa-77, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
-    {:aid 78, :source :place-3, :target :m1-start-job, :EDITED true :name :aa-78, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
-    {:aid 79, :source :m2-start-job, :target :place-4, :name :aa-79, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
-    {:aid 80, :source :place-4, :target :m2-complete-job, :name :aa-80, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
-    {:aid 81, :source :m2-complete-job, :target :place-1, :name :aa-81, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
-    {:aid 205, :source :m1-start-job, :target :Place-103, :name :aa-205, :type :normal, :multiplicity 1, :bind {:jtype :blue} :priority 2}
-    {:aid 206, :source :Place-103, :target :m2-start-job, :name :aa-206, :type :normal, :multiplicity 1 :bind {:jtype :blue}, :priority 1}],
-   :marking-key [:place-1 :place-2 :place-3 :place-4 :Place-103],
-   :places
-   [{:name :place-1, :pid 0, :initial-tokens 1, :visible? true}
-    {:name :place-2, :pid 1, :initial-tokens 0, :visible? true}
-    {:name :place-3, :pid 2, :initial-tokens 0, :visible? true}
-    {:name :place-4, :pid 3, :initial-tokens 0, :visible? true}
-    {:name :Place-103, :pid 4, :initial-tokens 0}]})

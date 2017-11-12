@@ -67,51 +67,7 @@
                {:act :aj, :tkns [{:type :a, :id 23} {:type :a, :id 22}]}
                {:act :sm, :tkns [{:type :a, :id 22}]}]))))))
 
-(def hopeful-pn
-  {:initial-marking [1 0 0 0 0], ; I changed this too! How do I fix this? GP operator? Try different ones in simple-reach? 
-   :transitions
-   [{:name :m1-start-job,
-     :tid 38,
-     :type :exponential,
-     :rate 1.0,
-     :rep {:act :m1-start-job, :j 1991, :jt :jobType1, :ends 2356.5705647971827, :clk 2355.3103128463604, :line 1233, :mjpact :aj, :m :m1},
-     :visible? true}
-    {:name :m1-complete-job,
-     :tid 39,
-     :type :exponential,
-     :rate 1.0,
-     :rep {:act :m1-complete-job, :bf :b1, :j 1991, :n 1, :clk 2356.5705647971827, :line 1238, :mjpact :bj, :m :m1},
-     :visible? true}
-    {:name :m2-start-job,
-     :tid 40,
-     :type :exponential,
-     :rate 1.0,
-     :rep {:act :m2-start-job, :bf :b1, :j 1991, :n 3, :clk 2358.9070474961236, :line 1247, :mjpact :sm, :m :m2},
-     :visible? true}
-    {:name :m2-complete-job,
-     :tid 41,
-     :type :exponential,
-     :rate 1.0,
-     :rep {:act :m2-complete-job, :m :m2, :j 1991, :ent 2355.3103128463604, :clk 2360.0770474961237, :line 1248, :mjpact :ej},
-     :visible? true}],
-   :arcs
-   [{:aid 74, :source :place-1, :target :m2-start-job, :EDITED true :name :aa-74, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
-    {:aid 75, :source :m1-start-job, :target :place-2, :name :aa-75, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
-    {:aid 76, :source :place-2, :target :m1-complete-job, :name :aa-76, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
-    {:aid 77, :source :m1-complete-job, :target :place-3, :name :aa-77, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
-    {:aid 78, :source :place-3, :target :m1-start-job, :EDITED true :name :aa-78, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
-    {:aid 79, :source :m2-start-job, :target :place-4, :name :aa-79, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
-    {:aid 80, :source :place-4, :target :m2-complete-job, :name :aa-80, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
-    {:aid 81, :source :m2-complete-job, :target :place-1, :name :aa-81, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
-    {:aid 205, :source :m1-start-job, :target :Place-103, :name :aa-205, :type :normal, :multiplicity 1, :bind {:jtype :blue} :priority 2}
-    {:aid 206, :source :Place-103, :target :m2-start-job, :name :aa-206, :type :normal, :multiplicity 1 :bind {:jtype :blue}, :priority 1}],
-   :marking-key [:place-1 :place-2 :place-3 :place-4 :Place-103],
-   :places
-   [{:name :place-1, :pid 0, :initial-tokens 1, :visible? true}
-    {:name :place-2, :pid 1, :initial-tokens 0, :visible? true}
-    {:name :place-3, :pid 2, :initial-tokens 0, :visible? true}
-    {:name :place-4, :pid 3, :initial-tokens 0, :visible? true}
-    {:name :Place-103, :pid 4, :initial-tokens 0}]})
+(def hopeful-pn (load-file "data/PNs/hopeful-pn.clj"))
 
 (defn m2-inhib-bas-workflow-fit
   "Setup the m2-inhib-bas PN for a fitness test"
@@ -157,6 +113,16 @@
             (and (= msg    (-> (get expected mark) first))
                  (=* value (-> (get expected mark) second) 0.00001)))
           calculated))
+
+;;; POD This one is worth lots more tests!!!
+(deftest logs-interpret
+  (testing "that interpretations can be found when they should be found."
+    (let [log (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj")
+          pn  (fit/find-interpretation hopeful-pn log)]
+      (is (= 3000 (count (:interp pn)))))
+    (let [log (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out-2.clj")
+          pn  (fit/find-interpretation hopeful-pn log)]
+      (is (= 3000 (count (:interp pn)))))))
 
 (def rgraph
   [{:M [1 1 0 0 2], :fire :m2-start-job, :Mp [0 1 0 1 1], :rate 1.0}
@@ -374,6 +340,26 @@
             [1 1 0 0 1] [:m2-starved 0.1690133154060661],
             [0 1 0 1 2] [:ordinary 0.20349378870019016],
             [1 0 1 0 0] [:ordinary 0.004807692848726801]})))))
+
+(defn tryme []
+  (let [pn (as-> {} ?pn
+             (assoc ?pn :sigma 0.30)
+             (assoc ?pn :rgraph rgraph)
+             (assoc ?pn :norm-factors (fit/normalize-marking-factors rgraph))
+             (assoc ?pn :msg-table msg-table)
+             ;;(assoc-in ?pn [:msg-table :m2-starved [1 1 0 0 0]] 1001)
+             ;;(do (ppprint (:msg-table ?pn)) ?pn)
+             (assoc ?pn :trans-counts trans-counts)
+             ;;(assoc-in ?pn [:trans-counts [0 1 0 1 0] [1 1 0 0 0]] 1020)
+             ;;(do (ppprint (:trans-counts ?pn)) ?pn)
+             (assoc ?pn :loom-prob (fit/rgraph2loom-probability (:rgraph ?pn) (:trans-counts ?pn)))
+             (assoc ?pn :distance-fn #(fit/exper-dist-fn-6 (:loom-prob ?pn) (:norm-factors ?pn) %1 %2))
+             (assoc ?pn :pdf-fns
+                    (zipmap (-> ?pn :msg-table keys)
+                            (map #(fit/parzen-pdf-msg ?pn %)
+                                 (-> ?pn :msg-table keys)))))]
+    (fit/choose-winners pn)))
+
 
 ;;;(alias 'gp 'gov.nist.sinet.gp)
 ;;;;(alias 'scada 'gov.nist.sinet.scada)
