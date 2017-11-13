@@ -3318,3 +3318,25 @@ This can't be write because if I swap them around, this test will pass and the o
 The problem is that I'm only looking at two at a time ???
 
 ---> Once you've got things working correctly, write "mix-up" (use all permutations)
+
+** <2017-11-12 Sun>
+
+I'm starting on (2) from yesterday. The new data is processed without a hitch. The results are perfect:
+{[0 0 1 1 1] [:ordinary 0.06992850508397208],
+ [0 1 0 1 0] [:ordinary 0.08482974339879687],
+ [1 1 0 0 2] [:ordinary 0.0695792210954763],
+ [0 1 0 1 3] [:m1-blocked 1.0000000000000002],
+ [1 1 0 0 3] [:ordinary 0.0972743434925606],
+ [0 1 0 1 1] [:ordinary 0.14409909278949354],
+ [1 1 0 0 0] [:m2-starved 1.0],
+ [0 0 1 1 0] [:ordinary 0.07206595066999992],
+ [0 0 1 1 2] [:ordinary 0.09880343751757752],
+ [1 1 0 0 1] [:m2-unstarved 1.0],
+ [0 1 0 1 2] [:m1-unblocked 1.0000000000000002],
+ [1 0 1 0 0] [:ordinary 0.01135570991588166]}
+
+Now on to (3). I'll update the tests with this, try a few of the others, etc. 
+
+Not so fast! Something up here. Is interpretation not working? 
+Ugh! Two functions called tryme. The one I've been using uses the old log file!
+There is no problem with the intpretation. I get good results up to sigma=0.35

@@ -399,7 +399,7 @@
              msg (nth log (-> start-link :indx inc))]
         (reset! diag {:lasti lasti :msg msg :job1 job1 :pn pn})
         (let [pn (next-match pn lasti msg job1)]
-          (println "matched = " (:matched pn))
+          ;;(println "matched = " (:matched pn))
           (cond (-> pn :matched not)
                 (persistent! interp)
                 (> (-> (:matched pn) :indx inc) last-indx)
@@ -508,15 +508,13 @@
     0.00001))
 
 (defn rgraph2loom-probability 
-  "Return a loom weighted-digraph where costs are based on probability."
+  "Return a loom weighted-digraph where costs are based on probability (1/p)."
   [rgraph trans-cnt]
   (apply graph/weighted-digraph
          (map #(let [m  (:M %)
                      mp (:Mp %)
                      p (trans-prob m mp trans-cnt)]
-                 (vector m mp (/ 1 p))
-                 #_(vector m mp (- (/ 1 p) 1))
-                 #_(vector m mp (Math/log (/ 1 p)))) ; POD consider also (Math/log 1/p)
+                 (vector m mp (/ 1 p)))
               rgraph)))
 
 (defn rgraph2loom-steps
@@ -563,7 +561,7 @@
     (fn [x]
       (* (/ 1 size)
          (reduce (fn [sum [mark cnt]] ; cnt the number of messages with this marking
-                   (+ sum (* cnt (Math/exp (- (/ (Math/sqrt (dist-fn mark x)) sig2))))))
+                   (+ sum (* cnt (Math/exp (- (/ (dist-fn mark x) sig2))))))
                  0.0
                  msg-table)))))
 
@@ -628,61 +626,11 @@
         (assoc :except (if (not-empty (:winners pn)) 0 1))
         (assoc :pn pn))))
 
-(defn exper-dist-fn-1
-  "Measure distance as the PRODUCT of probability along the 1/p path." 
-  [rgraph trans-cnts loom-prob from to]
-  (let [path (alg/dijkstra-path loom-prob from to)
-        adj-table (:adj loom-prob)]
-    (reduce (fn [probs ix]
-              (let [f (nth path ix)
-                    t (nth path (inc ix))]
-                (* probs (/ 1 (get (get adj-table f) t)))))
-            1
-            (range (-> path count dec)))))
 
-(defn exper-dist-fn-2
-  [rgraph trans-cnts from to]
-  "Measure distance as the product of probability along a '1 per step' cost path." 
-  (let [loom-steps (rgraph2loom-steps rgraph)
-        path (alg/dijkstra-path loom-steps from to)]
-    (reduce (fn [probs ix]
-              (let [f (nth path ix)
-                    t (nth path (inc ix))]
-                (* probs (trans-prob f t trans-cnts))))
-            1
-            (range (-> path count dec)))))
-
-(defn exper-dist-fn-3
-  [rgraph trans-cnts from to]
-  "Original steps * euclid-dist2." 
-  (let [loom-steps (rgraph2loom-steps rgraph)
-        path (alg/dijkstra-path loom-steps from to)]
-    (* (count path) (pnn/euclid-dist2 from to))))
-
-(defn exper-dist-fn-4
-  [rgraph trans-cnts norm-factors from to]
-  "Original steps * euclid-dist2 normalized." 
-  (let [loom-steps (rgraph2loom-steps rgraph)
-        path (alg/dijkstra-path loom-steps from to)
-        from (mapv * norm-factors from)
-        to   (mapv * norm-factors to)]
-    (* (count path) (pnn/euclid-dist2 from to))))
-
-(defn exper-dist-fn-5
-  "Measure distance as the sum of 1/p steps along shortest path." 
-  [loom-prob from to]
-  (second (alg/dijkstra-path-dist loom-prob from to)))
-
-(defn exper-dist-fn-6
-  "Measure distance as the sum of 1/p steps along shortest path 
-   multiplied by normalized Euclidean distance." 
-  [loom-prob norm-factors from to]
-  (let [ifrom (mapv #(-> % double Math/round) from)
-        ito   (mapv #(-> % double Math/round) to)
-        step-cost (second (alg/dijkstra-path-dist loom-prob ifrom ito))
-        from (mapv * norm-factors from)
-        to   (mapv * norm-factors to)]
-    (* step-cost (pnn/euclid-dist2 from to))))
+;;;==================== Distance Measures for PNN =========================
+(defn euclid-dist
+  [x y]
+  (Math/sqrt (apply + (map #(* (- %1 %2) (- %1 %2)) x y))))
 
 (defn normalize-marking-factors
   "Compute normalizing factors for each component of the marking."
@@ -694,27 +642,81 @@
     ;; zero? implies a bad PN, BTW. 
     (mapv #(if (zero? %) 0 (/ 1 %)) highs)))
 
-(def hopeful-pn (load-file "data/PNs/hopeful-pn2.clj")) ; POD Temporary
+(defn dist-fn-1
+  [norm-factors] 
+  "Distance = simple normalized euclid-dist squared."
+  (fn [x y]
+    (let [xn (mapv * norm-factors x)
+          yn (mapv * norm-factors y)]
+      (pnn/euclid-dist2 xn yn))))
+
+(defn dist-fn-2
+  [loom-steps norm-factors]
+  "Distance = steps * normalized euclid-dist2."
+  (fn [x y]
+    (let [path (alg/dijkstra-path loom-steps x y)
+          xn (mapv * norm-factors x)
+          yn (mapv * norm-factors y)]
+      (* (count path) (pnn/euclid-dist2 xn yn)))))
+
+(defn dist-fn-3 ; This one is not continuous.
+  "Distance = product of probability along the 1/p cost path." 
+  [rgraph trans-cnts loom-prob]
+  (fn [x y]
+    (let [path (alg/dijkstra-path loom-prob x y)
+          adj-table (:adj loom-prob)]
+      (reduce (fn [probs ix]
+                (let [f (nth path ix)
+                      t (nth path (inc ix))]
+                  (* probs (/ 1 (get (get adj-table f) t)))))
+              1
+              (range (-> path count dec))))))
+
+(defn dist-fn-4 ; This one is not continuous. ; <=========================  POD add euclid-dist to this one
+  [loom-steps trans-cnts] ; This one is not continuous.
+  "Distance = product of probability along a '1 per step' (i.e. shortest) cost path."
+  (fn [x y]
+    (let [path (alg/dijkstra-path loom-steps x y)]
+      (reduce (fn [probs ix]
+                (let [f (nth path ix)
+                      t (nth path (inc ix))]
+                  (* probs (trans-prob f t trans-cnts)))) ; POD needs work?
+              1
+              (range (-> path count dec))))))
+
+(defn dist-fn-5 ; This one is not continuous.
+  "Distance =  sqrt of the sum of 1/p steps along shortest path." 
+  [loom-prob]
+  (fn [x y]
+    (Math/sqrt (second (alg/dijkstra-path-dist loom-prob x y)))))
+
+(defn dist-fn-6
+  "Distance = sum of 1/p steps along shortest path 
+   multiplied by normalized Euclidean distance (not squared)." 
+  [loom-prob norm-factors]
+  (fn [x y]
+    (let [ifrom (mapv #(-> % double Math/round) x)
+          ito   (mapv #(-> % double Math/round) y)
+          path-cost (second (alg/dijkstra-path-dist loom-prob ifrom ito))
+          xn   (mapv * norm-factors x)
+          yn   (mapv * norm-factors y)]
+      ;;(Math/sqrt (* path-cost (pnn/euclid-dist2 xn yn))) ; POD Better, but what it it?
+      (* path-cost (euclid-dist xn yn)))))
 
 (defn tryme
   []
-  (let [log (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out-2.clj")
+  (let [log (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj")
         pn (as-> (find-interpretation hopeful-pn log) ?pn
              (assoc  ?pn :msg-table (compute-msg-table ?pn))
              (assoc  ?pn :norm-factors (normalize-marking-factors (:rgraph ?pn)))
              (assoc  ?pn :trans-counts (trans-counts (:interp ?pn)))
              (dissoc ?pn :interp)
-             (assoc  ?pn :sigma 0.25)
+             (assoc  ?pn :sigma 0.35)
              (assoc  ?pn :loom-prob (rgraph2loom-probability (:rgraph ?pn) (:trans-counts ?pn)))
-             (assoc  ?pn :distance-fn #(exper-dist-fn-6 (:loom-prob ?pn) (:norm-factors ?pn) %1 %2))
-             #_(assoc  ?pn :distance-fn #(exper-dist-fn-4 (:rgraph ?pn) (:trans-counts ?pn) %1 %2))
+             (assoc  ?pn :distance-fn (dist-fn-6 (:loom-prob ?pn) (:norm-factors ?pn)))
              (assoc  ?pn :pdf-fns
                      (zipmap (-> ?pn :msg-table keys)
                              (map #(parzen-pdf-msg ?pn %)
                                   (-> ?pn :msg-table keys))))
              (assoc ?pn :winners (choose-winners ?pn)))]
     pn))
-
-(defn tryme-count []
-  (count (filter #(= :ordinary (first %)) (-> (tryme) :winners vals))))
-
