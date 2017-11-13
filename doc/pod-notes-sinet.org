@@ -3337,6 +3337,5 @@ I'm starting on (2) from yesterday. The new data is processed without a hitch. T
 
 Now on to (3). I'll update the tests with this, try a few of the others, etc. 
 
-Not so fast! Something up here. Is interpretation not working? 
-Ugh! Two functions called tryme. The one I've been using uses the old log file!
-There is no problem with the intpretation. I get good results up to sigma=0.35
+(3) and some of (4) is done. Still more work needed on alternative -3 and -4!!!
+I really thing (3) should win!

@@ -661,28 +661,35 @@
 
 (defn dist-fn-3 ; This one is not continuous.
   "Distance = product of probability along the 1/p cost path." 
-  [rgraph trans-cnts loom-prob]
-  (fn [x y]
-    (let [path (alg/dijkstra-path loom-prob x y)
-          adj-table (:adj loom-prob)]
-      (reduce (fn [probs ix]
-                (let [f (nth path ix)
-                      t (nth path (inc ix))]
-                  (* probs (/ 1 (get (get adj-table f) t)))))
-              1
-              (range (-> path count dec))))))
+  [trans-cnts loom-prob]
+  (let  [adj-table (:adj loom-prob)]
+    (fn [x y]
+      (let [path (alg/dijkstra-path loom-prob x y)
+            (reduce (fn [probs ix]
+                      (let [f (nth path ix)
+                            t (nth path (inc ix))]
+                        (* probs (/ 1 (get (get adj-table f) t))))) ; vals in adj-table are 1/p
+                    1
+                    (range (-> path count dec))))))))
 
-(defn dist-fn-4 ; This one is not continuous. ; <=========================  POD add euclid-dist to this one
-  [loom-steps trans-cnts] ; This one is not continuous.
+(defn dist-fn-4 
+  [loom-steps loom-prob norm-factors] 
   "Distance = product of probability along a '1 per step' (i.e. shortest) cost path."
-  (fn [x y]
-    (let [path (alg/dijkstra-path loom-steps x y)]
-      (reduce (fn [probs ix]
-                (let [f (nth path ix)
-                      t (nth path (inc ix))]
-                  (* probs (trans-prob f t trans-cnts)))) ; POD needs work?
-              1
-              (range (-> path count dec))))))
+  (let  [adj-table (:adj loom-prob)]
+    (fn [x y]
+      (let [ix (mapv #(-> % double Math/round) x)
+            iy (mapv #(-> % double Math/round) y)
+            path (alg/dijkstra-path loom-steps ix iy) ; loom-prob ???
+            path-prob (reduce (fn [probs ix]
+                                (let [f (nth path ix)
+                                      t (nth path (inc ix))]
+                                  (* probs (/ 1 (get (get adj-table f) t))))) ; vals in adj-table are 1/p
+                              1
+                              (range (-> path count dec)))
+            xn   (mapv * norm-factors x)
+            yn   (mapv * norm-factors y)]
+        ;(println "path-prob = " path-prob "euclid dist = " (euclid-dist xn yn))
+        (* path-prob (euclid-dist xn yn))))))
 
 (defn dist-fn-5 ; This one is not continuous.
   "Distance =  sqrt of the sum of 1/p steps along shortest path." 

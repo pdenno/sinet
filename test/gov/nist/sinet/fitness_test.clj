@@ -234,6 +234,8 @@
               [0 1 0 1 2] [:m1-unblocked 1.0000000000000002],
               [1 0 1 0 0] [:ordinary 0.01139091655954467]})))))
 
+;;; In all tests that use 'distance' on markings, markings are normalized.
+;;; I think this is necessary if sigma is going to mean anything. 
 (deftest pnn-for-msgs-1 
   (testing "PNN-based classification based on 'traditional' euclid-dist2"
     (let [pn (as-> {} ?pn
@@ -262,7 +264,7 @@
             [1 0 1 0 0] [:ordinary 0.011415187440842868]})))))
 
 (deftest pnn-for-msgs-2
-  (testing "PNN-based classification based on Distance = steps * normalized euclid-dist2." 
+  (testing "PNN-based classification based on Distance = steps * euclid-dist2." 
     (let [pn (as-> {} ?pn
                (assoc ?pn :sigma 0.35)
                (assoc ?pn :rgraph rgraph)
@@ -272,7 +274,6 @@
                       (zipmap (keys msg-table) 
                               (map #(fit/parzen-pdf-msg ?pn %)
                                    (-> ?pn :msg-table keys)))))]
-      ;; Good values, but the sigma is so tight that it won't generalize well. 
       (is (winners-ok?
            (fit/choose-winners pn) ; results not very good with normalized!
            {[0 0 1 1 1] [:ordinary 0.11280115552657274],
@@ -293,14 +294,12 @@
     (let [pn (as-> {} ?pn
                (assoc ?pn :sigma 0.35)
                (assoc ?pn :rgraph rgraph)
-               (assoc ?pn :norm-factors (fit/normalize-marking-factors (:rgraph ?pn)))
                (assoc ?pn :msg-table msg-table)
-               (assoc ?pn :distance-fn (fit/dist-fn-3 rgraph trans-counts loom-prob))
+               (assoc ?pn :distance-fn (fit/dist-fn-3 trans-counts loom-prob))
                (assoc ?pn :pdf-fns
                       (zipmap (-> ?pn :msg-table keys)
                               (map #(fit/parzen-pdf-msg ?pn %)
                                    (-> ?pn :msg-table keys)))))]
-      ;; Much larger sigma, but bad performance.
       (is (winners-ok?
            (fit/choose-winners pn)
            {[0 0 1 1 1] [:m1-blocked 0.438586052885812],
@@ -317,43 +316,36 @@
             [1 0 1 0 0] [:m1-blocked 0.8897313188204132]})))))
 
 (deftest pnn-for-msgs-4
-  (testing "Distance = product of probability along a '1 per step' cost path."
+  (testing "Distance = product of probabilities along shortest path time euclidean distance."
     (let [pn (as-> {} ?pn
                (assoc ?pn :sigma 0.35)
                (assoc ?pn :rgraph rgraph)
-               (assoc ?pn :norm-factors (fit/normalize-marking-factors rgraph))
                (assoc ?pn :msg-table msg-table)
-               (assoc ?pn :trans-counts trans-counts)
-               (assoc ?pn :loom-prob loom-prob)
-               (assoc ?pn :distance-fn (fit/dist-fn-4 loom-steps trans-counts))
+               (assoc ?pn :distance-fn (fit/dist-fn-4 loom-steps loom-prob norm-factors))
                (assoc ?pn :pdf-fns
                       (zipmap (-> ?pn :msg-table keys)
                               (map #(fit/parzen-pdf-msg ?pn %)
                                    (-> ?pn :msg-table keys)))))]
-      ;; graph-distance scaling gives good results at wide sigma. 
       (is (winners-ok?
            (fit/choose-winners pn)
-           {[0 0 1 1 1] [:m2-starved 0.9999999998000205],
-            [0 1 0 1 0] [:m1-blocked 0.4240039342366138],
-            [1 1 0 0 2] [:m2-starved 0.9999999995918367],
-            [0 1 0 1 3] [:m2-starved 0.9999999998827412],
+           {[0 0 1 1 1] [:m2-unstarved 0.999999999600041],
+            [0 1 0 1 0] [:m1-unblocked 0.5632137924219007],
+            [1 1 0 0 2] [:m2-unstarved 0.9999999998639456],
+            [0 1 0 1 3] [:m1-blocked 1.0000000000000002],
             [1 1 0 0 3] [:m2-starved 1.0],
-            [0 1 0 1 1] [:m2-starved 0.9999999995918367],
-            [1 1 0 0 0] [:m1-blocked 0.8897313188204132],
-            [0 0 1 1 0] [:m1-blocked 0.47655278089878783],
-            [0 0 1 1 2] [:m2-starved 0.9999999998827412],
-            [1 1 0 0 1] [:m1-blocked 0.4240039342366138],
-            [0 1 0 1 2] [:m2-starved 0.9999999998000205],
-            [1 0 1 0 0] [:m1-blocked 0.8897313188204132]})))))
+            [0 1 0 1 1] [:m2-unstarved 0.99999999942277],
+            [1 1 0 0 0] [:m2-starved 1.0],
+            [0 0 1 1 0] [:ordinary 0.34927972517219386],
+            [0 0 1 1 2] [:m2-unstarved 0.9999999997622476],
+            [1 1 0 0 1] [:m2-unstarved 1.0],
+            [0 1 0 1 2] [:m1-unblocked 1.0000000000000002],
+            [1 0 1 0 0] [:m1-unblocked 0.7809764084470207]})))))
 
 (deftest pnn-for-msgs-5
-  (testing "Measure distance as the sum of 1/p steps along shortest path times 
-            normalized euclid-dist2, sigma=0.25, sqrt distance in the parzen-pdf-msg" 
+  (testing "Distance = the sum of 1/p steps along shortest path."
     (let [pn (as-> {} ?pn
                (assoc ?pn :sigma 0.35)
-               (assoc ?pn :rgraph rgraph)
                (assoc ?pn :msg-table msg-table)
-               (assoc ?pn :trans-counts trans-counts)
                (assoc ?pn :distance-fn (fit/dist-fn-5 loom-prob))
                (assoc ?pn :pdf-fns
                       (zipmap (-> ?pn :msg-table keys)
@@ -375,13 +367,10 @@
             [1 0 1 0 0] [:m2-starved 0.016879884148789895]})))))
 
 (deftest pnn-for-msgs-6
-  (testing "Measure distance as the sum of 1/p steps along shortest path times 
-            normalized euclid-dist2, sigma=0.25, sqrt distance in the parzen-pdf-msg" 
+  (testing "Distance = the sum of 1/p steps along shortest path times euclidean distance."
     (let [pn (as-> {} ?pn
                (assoc ?pn :sigma 0.35)
-               (assoc ?pn :rgraph rgraph)
                (assoc ?pn :msg-table msg-table)
-               (assoc ?pn :trans-counts trans-counts)
                (assoc ?pn :distance-fn (fit/dist-fn-6 loom-prob norm-factors))
                (assoc ?pn :pdf-fns
                       (zipmap (-> ?pn :msg-table keys)
