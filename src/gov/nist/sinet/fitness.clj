@@ -566,7 +566,7 @@
                  msg-table)))))
 
 (defn pnn-classification-table
-  "Return a table of the pnn scores for each class on each marking"
+  "Return a table of the pnn scores for each class on each marking and certainty"
   [pn]
   (let [pdf-fns    (:pdf-fns pn)
         msg-table  (:msg-table pn)
@@ -580,6 +580,25 @@
             []
             marks)))
 
+(defn pnn-certainty
+  "Produce a table describing winners and certainty"
+  [pn]
+  (let [full-class (pnn-classification-table pn)
+        marks (distinct (mapcat keys (vals (:msg-table pn))))]
+    (reduce (fn [table mark]
+              (let [on-mark (filter #(= (:mark %) mark) full-class)
+                    sorted (sort #(> (:score %1) (:score %2)) on-mark)
+                    best  (first sorted)
+                    best2 (second sorted)]
+                (conj table {:mark mark
+                             :certainty (/ (- (:score best) (:score best2)) (:score best))
+                             :best  (:class best) 
+                             :2best (:class best2)
+                             :score (:score best)})))
+            []
+            marks)))
+
+;;; POD Just replace this with pnn-certainty or use pnn-classification-table above. 
 (defn choose-winners
   "Map of the winners for each marking."
   [pn]

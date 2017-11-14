@@ -3337,5 +3337,22 @@ I'm starting on (2) from yesterday. The new data is processed without a hitch. T
 
 Now on to (3). I'll update the tests with this, try a few of the others, etc. 
 
-(3) and some of (4) is done. Still more work needed on alternative -3 and -4!!!
-I really thing (3) should win!
+I've done all the work I can on -4. It is not going to win!
+
+*** This one os probably goofed up. 
+(defn dist-fn-4 ; This one is not continuous. ; <=========================  POD add euclid-dist to this one
+  [loom-steps trans-cnts] ; This one is not continuous.
+  "Distance = product of probability along a '1 per step' (i.e. shortest) cost path."
+  (fn [x y]
+    (let [path (alg/dijkstra-path loom-steps x y)]
+      (reduce (fn [probs ix]
+                (let [f (nth path ix)
+                      t (nth path (inc ix))]
+                  (* probs (trans-prob f t trans-cnts)))) ; POD needs work?
+              1
+              (range (-> path count dec))))))
+
+
+I'm on "(5) Write it down."
+
+

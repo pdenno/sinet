@@ -250,18 +250,18 @@
       ;; Not so good values, even with medium sigma.
       (is (winners-ok?
            (fit/choose-winners pn)
-           {[0 0 1 1 1] [:ordinary 0.1772930229756261],
-            [0 1 0 1 0] [:ordinary 0.2019653717274339],
-            [1 1 0 0 2] [:m2-unstarved 0.6353909887688034],
-            [0 1 0 1 3] [:m1-blocked 1.0000000000000002],
-            [1 1 0 0 3] [:m2-unstarved 0.16299121800184535],
-            [0 1 0 1 1] [:m1-unblocked 0.6353909887688035],
-            [1 1 0 0 0] [:m2-starved 1.0],
-            [0 0 1 1 0] [:ordinary 0.1320291240060683],
-            [0 0 1 1 2] [:ordinary 0.15374605256549206],
-            [1 1 0 0 1] [:m2-unstarved 1.0],
-            [0 1 0 1 2] [:m1-unblocked 1.0000000000000002],
-            [1 0 1 0 0] [:ordinary 0.011415187440842868]})))))
+           {[0 0 1 1 1] [:ordinary 0.1772930229756261],           ; next best is 0.0001
+            [0 1 0 1 0] [:ordinary 0.2019653717274339],           ; next best is 0.163
+            [1 1 0 0 2] [:m2-unstarved 0.6353909887688034],       ; next best is 0.186
+            [0 1 0 1 3] [:m1-blocked 1.0000000000000002],         ; next best is 0.635
+            [1 1 0 0 3] [:m2-unstarved 0.16299121800184535],      ; next best is 0.155
+            [0 1 0 1 1] [:m1-unblocked 0.6353909887688035],       ; next best is 0.316
+            [1 1 0 0 0] [:m2-starved 1.0],                        ; next best is 0.635
+            [0 0 1 1 0] [:ordinary 0.1320291240060683],           ; next best is 0
+            [0 0 1 1 2] [:ordinary 0.15374605256549206],          ; next best is 0
+            [1 1 0 0 1] [:m2-unstarved 1.0],                      ; next best is 0.635
+            [0 1 0 1 2] [:m1-unblocked 1.0000000000000002],       ; next best is 0.635
+            [1 0 1 0 0] [:ordinary 0.011415187440842868]})))))    ; next best is 0
 
 (deftest pnn-for-msgs-2
   (testing "PNN-based classification based on Distance = steps * euclid-dist2." 
@@ -290,7 +290,7 @@
             [1 0 1 0 0] [:ordinary 0.011355578097432782]})))))
            
 (deftest pnn-for-msgs-3
-  (testing "PNN-based classification where Distance = product of probability along the 1/p cost path."
+  (testing "Distance = product of probability along the 1/p cost path."
     (let [pn (as-> {} ?pn
                (assoc ?pn :sigma 0.35)
                (assoc ?pn :rgraph rgraph)
@@ -341,7 +341,7 @@
             [0 1 0 1 2] [:m1-unblocked 1.0000000000000002],
             [1 0 1 0 0] [:m1-unblocked 0.7809764084470207]})))))
 
-(deftest pnn-for-msgs-5
+(deftest pnn-for-msgs-5 
   (testing "Distance = the sum of 1/p steps along shortest path."
     (let [pn (as-> {} ?pn
                (assoc ?pn :sigma 0.35)
@@ -378,18 +378,18 @@
                                    (-> ?pn :msg-table keys)))))]
       (is (winners-ok?
            (fit/choose-winners pn)
-           {[0 0 1 1 1] [:ordinary 0.07035003350586438],
-            [0 1 0 1 0] [:ordinary 0.08612941888443124],
-            [1 1 0 0 2] [:ordinary 0.06977395019946811],
-            [0 1 0 1 3] [:m1-blocked 1.0000000000000002],
-            [1 1 0 0 3] [:ordinary 0.09753131509940632],
-            [0 1 0 1 1] [:ordinary 0.14762935943771455],
-            [1 1 0 0 0] [:m2-starved 1.0],
-            [0 0 1 1 0] [:ordinary 0.0721420233904942],
-            [0 0 1 1 2] [:ordinary 0.0996944685574537],
-            [1 1 0 0 1] [:m2-unstarved 1.0],
-            [0 1 0 1 2] [:m1-unblocked 1.0000000000000002],
-            [1 0 1 0 0] [:ordinary 0.01139091655954467]})))))
+           {[0 0 1 1 1] [:ordinary 0.07035003350586438],  ; next best is 0
+            [0 1 0 1 0] [:ordinary 0.08612941888443124],  ; next best is 0 
+            [1 1 0 0 2] [:ordinary 0.06977395019946811],  ; next best is 0 
+            [0 1 0 1 3] [:m1-blocked 1.0000000000000002], ; next best is 0.10
+            [1 1 0 0 3] [:ordinary 0.09753131509940632],  ; next best is 0.003
+            [0 1 0 1 1] [:ordinary 0.14762935943771455],  ; next best is 0.01
+            [1 1 0 0 0] [:m2-starved 1.0],                ; next best is 0.011
+            [0 0 1 1 0] [:ordinary 0.0721420233904942],   ; next best is 0
+            [0 0 1 1 2] [:ordinary 0.0996944685574537],   ; next best is 0.00005
+            [1 1 0 0 1] [:m2-unstarved 1.0],              ; next best is 0.0854
+            [0 1 0 1 2] [:m1-unblocked 1.0000000000000002],   ; next best is 0.175
+            [1 0 1 0 0] [:ordinary 0.01139091655954467]}))))) ; next best is 0.0031
 
 ;;;(alias 'gp 'gov.nist.sinet.gp)
 ;;;;(alias 'scada 'gov.nist.sinet.scada)
