@@ -8,7 +8,6 @@
             [gov.nist.spntools.core :as pn :refer :all]
             [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp)]
             [gov.nist.spntools.util.reach :as pnr :refer (reachability renumber-pids)]
-            [gov.nist.spntools.util.pnml :as pnml :refer (read-pnml)] ; POD temporary
             [gov.nist.sinet.simulate :as sim :refer-only (simulate)]
             [gov.nist.sinet.util :as util :refer (app-info reset related-places)]
             [gov.nist.sinet.scada :as scada]
@@ -683,13 +682,13 @@
   [trans-cnts loom-prob]
   (let  [adj-table (:adj loom-prob)]
     (fn [x y]
-      (let [path (alg/dijkstra-path loom-prob x y)
-            (reduce (fn [probs ix]
-                      (let [f (nth path ix)
-                            t (nth path (inc ix))]
-                        (* probs (/ 1 (get (get adj-table f) t))))) ; vals in adj-table are 1/p
-                    1
-                    (range (-> path count dec))))))))
+      (let [path (alg/dijkstra-path loom-prob x y)]
+        (reduce (fn [probs ix]
+                  (let [f (nth path ix)
+                        t (nth path (inc ix))]
+                    (* probs (/ 1 (get (get adj-table f) t))))) ; vals in adj-table are 1/p
+                1
+                (range (-> path count dec)))))))
 
 (defn dist-fn-4 
   [loom-steps loom-prob norm-factors] 
@@ -728,21 +727,3 @@
           yn   (mapv * norm-factors y)]
       ;;(Math/sqrt (* path-cost (pnn/euclid-dist2 xn yn))) ; POD Better, but what it it?
       (* path-cost (euclid-dist xn yn)))))
-
-(defn tryme
-  []
-  (let [log (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj")
-        pn (as-> (find-interpretation hopeful-pn log) ?pn
-             (assoc  ?pn :msg-table (compute-msg-table ?pn))
-             (assoc  ?pn :norm-factors (normalize-marking-factors (:rgraph ?pn)))
-             (assoc  ?pn :trans-counts (trans-counts (:interp ?pn)))
-             (dissoc ?pn :interp)
-             (assoc  ?pn :sigma 0.35)
-             (assoc  ?pn :loom-prob (rgraph2loom-probability (:rgraph ?pn) (:trans-counts ?pn)))
-             (assoc  ?pn :distance-fn (dist-fn-6 (:loom-prob ?pn) (:norm-factors ?pn)))
-             (assoc  ?pn :pdf-fns
-                     (zipmap (-> ?pn :msg-table keys)
-                             (map #(parzen-pdf-msg ?pn %)
-                                  (-> ?pn :msg-table keys))))
-             (assoc ?pn :winners (choose-winners ?pn)))]
-    pn))

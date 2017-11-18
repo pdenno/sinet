@@ -217,7 +217,7 @@
                                (map #(fit/parzen-pdf-msg ?pn %)
                                     (-> ?pn :msg-table keys)))))]
       (is (= (:norm-factors pn) norm-factors))
-      (is (= (:rgraph pn) rgraph))
+      (is (= (mapv #(dissoc % :rate-fn) (:rgraph pn)) rgraph))
       (is (= (:msg-table pn) msg-table))
       (is (= (:trans-counts pn) trans-counts))
       (is (= (fit/choose-winners pn)

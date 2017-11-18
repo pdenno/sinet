@@ -89,6 +89,7 @@
 
 ** TODO [0 1 0 1 3] [:m1-unblocked 1.0] : Is that really the state I want associated (or state plus transition)? 
 
+** TODO Running lein repl gives only one "Compiling ClojureScript"; running lein start-repl gives three. 
 * Agenda up to December 1:
 ** DONE Fix bug in pnr/simple-reach. See bug <2017-10-15 Sun>
    CLOSED: [2017-10-15 Sun 18:13]
@@ -103,7 +104,8 @@
    CLOSED: [2017-11-04 Sat 22:13]
         lax-reach is this. It is used with new find-interpretation. 
         GP operators on tokens is a thing of the past. 
-** TODO How do I use graph distance with real-valued data (round???)
+** DONE How do I use graph distance with real-valued data (round???)
+   CLOSED: [2017-11-15 Wed 14:28]
 ** TODO Integrate exceptional fitness, try using it to place buffer limits.
     In addition to adding an inhibitor with multiplicity, may need to attach functions that
     will emit messages on exceptional events.
@@ -116,7 +118,7 @@
              - Probably want a "ready-made structure" for insertion of parallel workstations. 
 ** TODO Add Causal
     This entails making the infinitessimal generator parametric.
-
+** TODO Paper: Add more PNN distance algorithms
 ** TODO Add MJP 
     This entails
      (1) having an operator for adding other colours -- Not a crossover operator ???
@@ -2636,7 +2638,6 @@ I'm going to investigate better winners before fixing MJPdes.
                    (range (count from))))))))
 
 
-
 ** <2017-11-09 Thu>
 
  I didn't do much on the program OR the paper today. Instead I reviewed Liang's proposal and
@@ -3305,10 +3306,9 @@ sum =  2.3296608584222083E-10
     (vec (sort
       #(log/msg-before? test-model %1 %2)
         [{:clk 2053.7211 :act :m2-unstarved :m :m2 :mjpact :us :line 184}
-	{:clk 2053.7211 :act :m2-start-job :m :m2 :bf :b1 :n 1 :mjpact :sm :j 1724 :line 185}
-	{:clk 2053.7211 :act :m1-move-off :m :m1 :bf :b1 :n 0 :mjpact :bj :j 1724 :line 186}
-	{:clk 2053.7211 :act :m1-start-job :jt :jobType1 :m :m1 :ends 2054.7211 :mjpact :aj :j 1725 :line 187}]))))))
-
+	 {:clk 2053.7211 :act :m2-start-job :m :m2 :bf :b1 :n 1 :mjpact :sm :j 1724 :line 185}
+	 {:clk 2053.7211 :act :m1-move-off :m :m1 :bf :b1 :n 0 :mjpact :bj :j 1724 :line 186}
+	 {:clk 2053.7211 :act :m1-start-job :jt :jobType1 :m :m1 :ends 2054.7211 :mjpact :aj :j 1725 :line 187}]))))))
 
 This can't be write because if I swap them around, this test will pass and the other will fail. 
           ;; If neither of them are exceptional, do downstream first
@@ -3339,7 +3339,7 @@ Now on to (3). I'll update the tests with this, try a few of the others, etc.
 
 I've done all the work I can on -4. It is not going to win!
 
-*** This one os probably goofed up. 
+*** This one is probably goofed up. 
 (defn dist-fn-4 ; This one is not continuous. ; <=========================  POD add euclid-dist to this one
   [loom-steps trans-cnts] ; This one is not continuous.
   "Distance = product of probability along a '1 per step' (i.e. shortest) cost path."
@@ -3354,5 +3354,222 @@ I've done all the work I can on -4. It is not going to win!
 
 
 I'm on "(5) Write it down."
+
+
+** <2017-11-13 Mon>
+  I worked on the JMS paper, adding the PNN results. 
+** <2017-11-14 Tue>
+  I worked on the JMS paper, adding the interpretation algorithm.
+** <2017-11-15 Wed>
+  In the meeting with Charles we decided to work on the causal piece, with a goal
+  of having that complete (and in the paper, if possible) in a week. 
+  I might then go back and add more algorithms to the PNN table. 
+
+The "causal piece" involves lot of work on spntools, but I'm going to document that here. 
+
+OK, so I put :rate-fn in :next-links. I have not yet traced through how these functions
+would be used in the process of tangible rates. But let's give what we have a try, 
+and see if it generates the same values as in the test case. (I think it won't because
+there was some math in composing the tangible rates that isn't yet expressed ???
+
+(Actually the example has no :IMMs so it isn't going to matter.) 
+
+  {:M [1 0 0 1 1 0 0],
+   :fire :Treq1,
+   :Mp [0 1 0 1 1 0 0],
+   :rate-fn (clojure.core/fn [gov.nist.spntools.util.reach/rates] (:Treq1 gov.nist.spntools.util.reach/rates)),
+   :rate 1.0}
+  {:M [0 1 0 1 1 0 0],
+   :fire :Treq2,
+   :Mp [0 1 0 1 0 1 0],
+   :rate-fn (clojure.core/fn [gov.nist.spntools.util.reach/rates] (:Treq2 gov.nist.spntools.util.reach/rates)),
+   :rate 2.0}
+
+NICE!
+((-> foo :M2Mp first :rate-fn) {:Treq1 5.0})
+
+** <2017-11-16 Thu>
+
+*** Comments I don't need
+OK, not much time invested, but let's finish this thing!
+
+      ;; Every link in M2Mp provides a rate between *states*. Can I trace from the rate of
+      ;; a transition to rates of these states? Is this essentially just going through the
+      ;; reachability graph with new values or is there something I can do here that is
+      ;; more effective? When I was working on this code, I seemed to believe that the Q-matrix
+      ;; code was an appropriate place to make this parametric. Looking at Marsan....
+
+      ;; The transition rate from state si (corresponding to marking Mi) to state sj (Mj) is obtained
+      ;; as the sum of the firing rates of the transitions that are enabled in Mi and whose firings
+      ;; generate marking Mj.
+
+      ;;; That means sum rates of all transitions that have
+
+      ;; That's great, except that I'm starting from the premise that I'm changing one of the lambdas.
+      ;; I need an algebraic associated with the transition. Have to be careful about this because
+      ;; it is a function of reachability. 
+
+
+Oh man, a little more involved that I thought!
+Might have to keep around links that aren't directly used. ...Or some such thing. 
+
+**** In principle, it should not be necessary to keep around links other than those that actually appear in the PN. 
+     For example, in calc-vpath-rate I define :vrate-fn, which multiplies a path of rates. 
+***** Note that it looks necessary to keep around these for cycles:
+          - :Qt-states
+          - :Qtv-states
+          .... Nope, that's not a good idea! Need to use a closure in these cases! 
+               (because these properties are for each loop) .
+
+** <2017-11-17 Fri>
+
+I fixed a problem with vanish-matrices that I caused yesterday: I seemed to forget that 
+the function returns the whole ?calc object and that might need some of these additional
+keys! It needed :Qt-states. 
+
+*** Okay, I'm not going to pursue loops past Grace's appointment, but while I'm here....
+**** Firstly, I might *have* to pursue this a little further, might not be just about loops! (Verify.)
+ - vanish-matrices produces :loop-rates and :lv-St, which is further wrapped up in the caller, loop-reduce-vpath.
+ - loop-reduce-vpath is called from follow-vpath-loop and transfers :loop-rates and :lv-St 
+   *into* :new-vpath-rates and :new-St respectively.
+ - *follow-vpath* either calls *follow-vpath-to-tang* or *follow-vpath-loop*. *Both of these set :new-vpath-rates.*
+ - reach-reduce-vpaths (toplevel reduce of vpaths, called from tangible-reach-graph) calls 
+   *follow-vpath* and *into-v-rates* 
+
+*** A very useful call graph!
+reachability -> tangible-reach-graph -> reach-step-tangible
+                                        reach-reduce-vpaths -> into-v-rates (after follow-vpath)
+                                                               follow-vpath -> follow-vpath-to-tang
+                                                                               follow-vpath-loop
+
+follow-vpath-to-tang -> calc-vpath-rate (set :vrate-fn). 
+
+
+follow-vpath-loop -> loop-reduce-vpath -> vanishing-matrices. 
+
+*** TODO Strategy based on the call graph. 
+
+Looking at this, I would say I need to know what into-v-rates does in order to know what :vrate-fn is supposed to do. 
+A: It simply updates :v-rates (one line). Much like conj-t-rate.  (:t-rates, :v-rates). 
+
+(defn summarize-reach
+  "Merge :vpath-rates and :explored (sans vanishing) resulting in :M2Mp"
+  [pn]
+  (as-> pn ?pn
+    (assoc ?pn :M2Mp (into (distinct (:t-rates ?pn))
+                           (distinct (:v-rates ?pn)))) 
+    (dissoc ?pn :explored :vexplored :spaths :t-rates :v-rates))) ; keep
+
+If all goes well, then I'd have a :rate-fn on the appropriate links in :M2Mp. 
+Marsan69 is an example. 
+
+SUPER! I see that some links have :vrate-fn. If I just change that to :rate-fn ???
+
+Well, a little more to it, since :fire is a list...Hang on. That's not quite right. 
+It references next-links for rates, and these aren't a list.  So "simple syntax approach" should be okay. 
+
+{[:Tpar1 :t_syn :t_ok] 0.5,
+ [:Tpar1 :t_syn :t_ko] 0.5,
+ [:Tcheck :t_start] 1.0,
+ [:Tpar2 :t_syn :t_ok] 0.5,
+ [:Tpar2 :t_syn :t_ko] 0.5,
+ [:Tndata :t_start] 1.0,
+ :Tpar1 1.0,
+ :Tpar2 1.0,
+ :Tio 1.0}
+
+This rate table is kind of interesting! Shows just what I expect to get back!
+((-> (:M2Mp pnpn) first :rate-fn) rrr)
+
+[{:M [0 0 1 0 0 1 0 0 0], :fire :Tpar1, :Mp [0 0 0 0 1 1 0 0 0], :rate 1.0} 
+ {:M [0 0 0 0 1 1 0 0 0], :fire :t_syn, :Mp [0 0 0 0 0 0 1 0 0], :rate 1.0} 
+ {:M [0 0 0 0 0 0 1 0 0], :fire :t_ok, :Mp [0 0 0 0 0 0 0 0 1],  :rate 0.5}] 
+
+It looks like going after rates off the transitions is wrong somehow and that
+I should be going after the ones in these links. 
+
+ *However, these links are intermediate information.* That means, you would be getting what was closed-over, 
+  not a new computation. 
+
+{:t_ko 1.0, 
+ :t_ok 1.0, 
+ :t_start 1.0, 
+ :t_syn 1.0, 
+ :Tcheck 1.0, 
+ :Tio 1.0, 
+ :Tndata 1.0, 
+ :Tpar1 1.0, 
+ :Tpar2 1.0}
+
+t_ok is 1.0 but it competes with t_ko. There is a 1.0 rate into this 
+
+(pnr/next-links pnpn [0 0 0 0 0 0 1 0 0])
+
+[{:M [0 0 0 0 0 0 1 0 0],
+  :fire :t_ko,
+  :Mp [0 0 0 0 0 0 0 1 0],
+  :rate-fn #function[gov.nist.spntools.util.reach/next-links/fn--12693/fn--12694],
+  :rate 0.5}
+ {:M [0 0 0 0 0 0 1 0 0],
+  :fire :t_ok,
+  :Mp [0 0 0 0 0 0 0 0 1],
+  :rate-fn #function[gov.nist.spntools.util.reach/next-links/fn--12693/fn--12694],
+  :rate 0.5}]
+
+So I'm getting new rate functions out of these links. I should be calling that, 
+not pulling the rate out of table for the :fire. 
+
+** <2017-11-18 Sat>
+
+*** I pulled this out of spntools/core (quick-test)
+(defn quick-test []
+  (let [result (:avg-tokens-on-place (pn-steady-state (read-pnml "data/qo10.xml")))
+        correct  {:P1 0.111111, :P2 0.0, :P3 0.0, :P4 0.0, :P5 0.416667, 
+                  :P6 0.333333, :P7 0.083333,  :P8 0.055556}]
+        (every? (fn [[key val]]
+                  (=* val (get correct key) 0.0001))
+                result)))
+
+*** I spent a *few minutes* debugging the parameteric code in spntools. ;^). 
+*** Causal 
+Today I implement causal. New file causal.clj
+
+Here is the diagram [[file:~/TwoDrive/OneDrive/Repo/mindmaps/images/causal-model.jpg]]
+
+Hurray! No loops in m3.xml 
+Calculating its reachability graph takes 4.4 secs however. 
+
+Works great! In m3.xml, if I increase the rate of M2, then 
+  - M2 starves and blocks more.
+  - Buffer occupancy from the buffer M2 pulls from decreases.
+  - Buffer occupancy from the buffer M2 put to increases.
+
+[{:buffer-1 0.8484531004290863,
+  :buffer-2 0.2606202864362881,
+  :m1-blocked 0.6923152811471641,
+  :m1-busy 0.307684718852836,
+  :m2-blocked 0.14292679580528836,
+  :m2-busy 0.7933965380975156,
+  :m2-starved 0.20660346190248446,
+  :m3-busy 0.4727927954877663,
+  :m3-starved 0.5272072045122338}
+ {:buffer-1 0.7957467191633969,
+  :buffer-2 0.32785103456872683,
+  :m1-blocked 0.6242972600309968,
+  :m1-busy 0.3757027399690032,
+  :m2-blocked 0.18820608901740393,
+  :m2-busy 0.7190646665440273,
+  :m2-starved 0.28093533345597266,
+  :m3-busy 0.5479873160833673,
+  :m3-starved 0.45201268391663274}]
+
+I think I'll stop here and write this up. 
+
+
+
+
+
+
+
 
 
