@@ -90,6 +90,11 @@
 ** TODO [0 1 0 1 3] [:m1-unblocked 1.0] : Is that really the state I want associated (or state plus transition)? 
 
 ** TODO Running lein repl gives only one "Compiling ClojureScript"; running lein start-repl gives three. 
+** TODO Add MJP 
+    This entails
+     (1) having an operator for adding other colours -- Not a crossover operator ???
+     (2) watching the execution times, maybe doing GPtips like regression.
+
 * Agenda up to December 1:
 ** DONE Fix bug in pnr/simple-reach. See bug <2017-10-15 Sun>
    CLOSED: [2017-10-15 Sun 18:13]
@@ -119,11 +124,6 @@
 ** TODO Add Causal
     This entails making the infinitessimal generator parametric.
 ** TODO Paper: Add more PNN distance algorithms
-** TODO Add MJP 
-    This entails
-     (1) having an operator for adding other colours -- Not a crossover operator ???
-     (2) watching the execution times, maybe doing GPtips like regression.
-
 ** TODO Add parallel workstations to MJPdes and see what happens here (enhance notion of priority?). 
 
 * Discussion
@@ -3564,12 +3564,40 @@ Works great! In m3.xml, if I increase the rate of M2, then
   :m3-starved 0.45201268391663274}]
 
 I think I'll stop here and write this up. 
+** <2017-11-19 Sun>
 
+I worked on the paper. Finished the PNN diagram, I think. 
 
+** <2017-11-20 Mon>
+I worked on the paper, 
 
+I worked on the paper. Put in the causal stuff. Sent a copy to Charles and Jenny. 
 
+** <2017-11-21 Tue>
 
+I worked on the paper. I cleaned things up, particularly early in the paper. 
 
+** <2017-11-22 Wed>
+
+*** Paper 
+I worked on the paper until 5PM. I made a ToDo list of things needed; cleaned up several parts. 
+Charles and Jenny didn't think it was that far off. 
+They suggest doing 3 things well, rather than trying to explain everything. I agree;
+the ToDo list is about this. What I'm not talking about is a lot of GP stuff and Multi-model. 
+
+*** Code
+  Goal for the code is to get exceptional fitness pushing out individuals with queues. 
+  I think I'll start by just pushing the structure into qualifying PNs (e.g. hopeful-pn)
+  when it is determined. I'll watch if such individuals can initiate and rise to the top. 
+  If that occurs, then maybe note the PN and allow a semantic genetic operator to operate
+  on some such instances randomly. 
+
+**** So what are the circumstances for initiating N=3 ? 
+   1) k-bound to 3 -- need to recognize it and what place is being referred to.
+   2) exceptional blocking on 3 -- (once the k=3 place is recognized?)
+
+***** If this works, then (someday) I might want to "vectorize" k-binding. 
+      Meaning that each place would have its own k value. 
 
 
 

@@ -83,7 +83,7 @@
     (pn/avg-tokens-on-place pn)))
 
 (defn simple
-  "Example of causation: Increase production rate of M2 in an 3-machine serial line."
+  "Example of causation: Increase production rate of M2 in a 3-machine serial line."
   []
   (let [pn (-> (pnml/read-pnml "data/PNs/m3.xml")
                (pnr/reachability)) 

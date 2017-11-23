@@ -727,3 +727,17 @@
           yn   (mapv * norm-factors y)]
       ;;(Math/sqrt (* path-cost (pnn/euclid-dist2 xn yn))) ; POD Better, but what it it?
       (* path-cost (euclid-dist xn yn)))))
+
+;;; (bound-buffer fitt/hopeful-pn :place-1 3)
+(defn bound-buffer
+  "Return a PN where the buffer cannot exceed size N.
+   This involves adding an inhibitor arc of multiplicity N to either
+   where jobs start (BBS) or where they finish (BAS)." 
+  [pn buffer N & {:keys [BAS?] :or {BAS? true}}]
+  (when-let [trans (some #(when (= buffer (:target %)) (:source %)) (:arcs pn))]
+    (let [arc-index (pnu/arc-index pn trans)]
+      (as-> pn ?pn
+        (update ?pn :arcs #(conj % (pnu/make-arc ?pn buffer trans :type :inhibitor :multiplicity N)))
+        (assoc-in ?pn [:transitions arc-index :type] :immediate)))))
+      
+  
