@@ -3,7 +3,6 @@
   {:author "Peter Denno"}
   (:require [quil.core :as q :include-macros true]
             [quil.middleware :as qm]
-            [medley.core :refer (abs)]
             [cljs.pprint :refer (pprint)]))
   
 ;;; ToDo: * Replace pn-trans-point: review everything on the trans and distribute
@@ -403,9 +402,9 @@
         rootTerm (Math/sqrt (- (* r r dr dr) (* D D)))
         denom (* dr dr)]
     {:x1 (/ (+ (* D dy) (* sgnDy dx rootTerm)) denom)
-     :y1 (/ (+ (- (* D dx)) (* (abs dy) rootTerm)) denom)
+     :y1 (/ (+ (- (* D dx)) (* (Math/abs dy) rootTerm)) denom)
      :x2 (/ (- (* D dy) (* sgnDy dx rootTerm)) denom)
-     :y2 (/ (- (- (* D dx)) (* (abs dy) rootTerm)) denom)}))
+     :y2 (/ (- (- (* D dx)) (* (Math/abs dy) rootTerm)) denom)}))
 
 ;;; The actual quil/defsketch is in client.cljs. (Otherwise it doesn't load.) 
 

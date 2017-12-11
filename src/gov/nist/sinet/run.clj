@@ -27,7 +27,7 @@
 
 (defn reset []
   (stop)
-  ;; Reload changed files in dependency order, then do run/run. 
+  ;; Reloads changed files in dependency order, then do run/run. 
   (refresh :after 'gov.nist.sinet.run/run)) 
 
 ;;; POD This is essential to getting past component!

@@ -45,10 +45,11 @@
 
 ** Clojure.core is one file of about 8000 lines. Worth a read! Includes futures, etc. 
 
-* Sinet Miscellaneous TODOs
+* Sinet TODOs
 ** TODO Decide whether setting all transitions to timed makes sense for simple-reach. See discussion <2017-10-15 Sun>
 ** TODO Investigate possible bugs with MJPdes 'coordination' and create more 'deterministic' test cases.
-** TODO Conceive of a strategy for using exceptional fitness
+** DONE Conceive of a strategy for using exceptional fitness
+   CLOSED: [2017-12-07 Thu 11:17]
  [I think I missed the whole point in the stuff below, but just to be sure: There are messages that
   are not associated with transitions. They are associated with STATES. I may have a place in the network
   that is essentially "M1-BLOCKED" but it won't be labelled as such! A nice thing about this is that 
@@ -66,7 +67,8 @@
  they won't have meaningful names. I think I'll just wait to explore this after getting the exceptional 
  fitness hooked in. 
 
-** TODO Deal with vanishing transitions. 
+** DONE Deal with vanishing transitions. 
+   CLOSED: [2017-12-07 Thu 11:17]
  I need to generate blocking/starving messages ONLY when the net sojourns at blocking/starving. 
  So simulation has to be better and I need to distinguish these immediate transitions some how. 
 
@@ -81,20 +83,21 @@
 ** TODO Need a way to get the world after a time out. 
 ** TODO Does the :pop really need to be on app-info?
 ** TODO Every arc needs a :bind and :priority  <----------------------------SOON
-** TODO Perform experiments that will tell you what the value of exceptional messages is. 
+** DONE Perform experiments that will tell you what the value of exceptional messages is. 
+   CLOSED: [2017-12-07 Thu 11:20]
         I think one can learn the lower-bound on the buffer size just by witnessing how
         many jobs one machine can get ahead of the next machine. However, you don't know 
         the exact size of the buffer until the system "complains about a machine getting 
         too far ahead." THESIS POINT, STAR
 
 ** TODO [0 1 0 1 3] [:m1-unblocked 1.0] : Is that really the state I want associated (or state plus transition)? 
-
 ** TODO Running lein repl gives only one "Compiling ClojureScript"; running lein start-repl gives three. 
 ** TODO Add MJP 
     This entails
      (1) having an operator for adding other colours -- Not a crossover operator ???
      (2) watching the execution times, maybe doing GPtips like regression.
 
+** TODO Don't 'add choice' as a genetic operator, unless that is semantically what is intended! (see notes 2017-12-11)
 * Agenda up to December 1:
 ** DONE Fix bug in pnr/simple-reach. See bug <2017-10-15 Sun>
    CLOSED: [2017-10-15 Sun 18:13]
@@ -123,7 +126,8 @@
              - Probably want a "ready-made structure" for insertion of parallel workstations. 
 ** TODO Add Causal
     This entails making the infinitessimal generator parametric.
-** TODO Paper: Add more PNN distance algorithms
+** DONE Paper: Add more PNN distance algorithms
+   CLOSED: [2017-12-07 Thu 11:21]
 ** TODO Add parallel workstations to MJPdes and see what happens here (enhance notion of priority?). 
 
 * Discussion
@@ -2637,7 +2641,6 @@ I'm going to investigate better winners before fixing MJPdes.
                    0.0
                    (range (count from))))))))
 
-
 ** <2017-11-09 Thu>
 
  I didn't do much on the program OR the paper today. Instead I reviewed Liang's proposal and
@@ -3355,7 +3358,6 @@ I've done all the work I can on -4. It is not going to win!
 
 I'm on "(5) Write it down."
 
-
 ** <2017-11-13 Mon>
   I worked on the JMS paper, adding the PNN results. 
 ** <2017-11-14 Tue>
@@ -3596,8 +3598,234 @@ the ToDo list is about this. What I'm not talking about is a lot of GP stuff and
    1) k-bound to 3 -- need to recognize it and what place is being referred to.
    2) exceptional blocking on 3 -- (once the k=3 place is recognized?)
 
+***** 
+1) We know that :m1-blocked is a blocking message (:mjpact :bl :m :m1) (write scada/info-on-msg)
+2) (util/buffers-between fitt/hopeful-pn :m1 :m2) ===> :Place-103
+
 ***** If this works, then (someday) I might want to "vectorize" k-binding. 
       Meaning that each place would have its own k value. 
 
+
+
+
+Somehow, I have to conclude that :m1-blocked is a blocking message:
+
+[:place-1 :place-2 :place-3 :place-4 :Place-103]
+
+{[0 0 1 1 1] [:ordinary 0.0694485459151802],
+ [0 1 0 1 0] [:ordinary 0.08709351469710418],
+ [1 1 0 0 2] [:ordinary 0.06893423154021677],
+ [0 1 0 1 3] [:m1-blocked 1.0000000000000002],
+ [1 1 0 0 3] [:ordinary 0.1016596225146916],
+ [0 1 0 1 1] [:ordinary 0.14753147327597801],
+ [1 1 0 0 0] [:m2-starved 1.0],
+ [0 0 1 1 0] [:ordinary 0.07437507450091606],
+ [0 0 1 1 2] [:ordinary 0.09878476223725656],
+ [1 1 0 0 1] [:m2-unstarved 1.0],
+ [0 1 0 1 2] [:m1-unblocked 1.0000000000000002],
+ [1 0 1 0 0] [:m2-starved 0.043936933623407434]}
+
+** <2017-11-25 Sat>
+  I'm looking into adding columns for network hops to Table 2. ...Done. 
+
+*** To run pnn-certainty:
+(def pnpn (as-> {} ?pn
+            (assoc ?pn :sigma 0.35)
+            (assoc ?pn :msg-table fitt/msg-table)
+            (assoc ?pn :distance-fn (dist-fn-2 fitt/loom-steps fitt/norm-factors))
+            (assoc ?pn :pdf-fns
+                       (zipmap (-> ?pn :msg-table keys)
+		               (map #(parzen-pdf-msg ?pn %)
+                               (-> ?pn :msg-table keys))))))
+(pnn-certainty pnpn)
+
+
+[{:mark [0 0 1 1 1], :certainty 0.9999999999999906, :best :ordinary, :2best :m1-unblocked, :score 0.11280115552657274}
+ {:mark [0 1 0 1 0], :certainty 0.9990385213120857, :best :ordinary, :2best :m1-unblocked, :score 0.11964136621006477}
+ {:mark [1 1 0 0 2], :certainty 0.5509980610372053, :best :m2-unstarved, :2best :ordinary, :score 0.25652113562024753}
+ {:mark [0 1 0 1 3], :certainty 0.7434788643797525, :best :m1-blocked, :2best :m1-unblocked, :score 1.0000000000000002}
+ {:mark [1 1 0 0 3], :certainty 0.9989988579754929, :best :ordinary, :2best :m2-unstarved, :score 0.11490140358513679}
+ {:mark [0 1 0 1 1], :certainty 0.19955555576732248, :best :m1-unblocked, :2best :ordinary, :score 0.2565211356202476}
+ {:mark [1 1 0 0 0], :certainty 0.7434788643797525, :best :m2-starved, :2best :m2-unstarved, :score 1.0}
+ {:mark [0 0 1 1 0], :certainty 1.0,                :best :ordinary, :2best :m2-unstarved, :score 0.08979893169932006}
+ {:mark [0 0 1 1 2], :certainty 0.9999992983164814, :best :ordinary, :2best :m1-unblocked, :score 0.11570085562261395}
+ {:mark [1 1 0 0 1], :certainty 0.7434788643797525, :best :m2-unstarved, :2best :m2-starved, :score 1.0}
+ {:mark [0 1 0 1 2], :certainty 0.7434788643797525, :best :m1-unblocked, :2best :m1-blocked, :score 1.0000000000000002}
+ {:mark [1 0 1 0 0], :certainty 0.9999928506164287, :best :ordinary, :2best :m2-starved, :score 0.011355578097432782}]
+** <2017-12-06 Wed>
+
+Been away from this for a while!
+I updated to java 9, now nothing works. Is that really the reason? 
+Maybe not, I dropped back to java 8. Still NG. 
+Hmmm... I didn't really drop back! Oracle instructions for removing java didn't work?
+Also the java control center doesn't report any version. java -version reports 9 still.
+The Oracle instructions were for 1.9, not 1.9.1 (or whatever it is I had). 
+
+As I said on Nov 22:
+
+  Goal for the code is to get exceptional fitness pushing out individuals with queues. 
+  I think I'll start by just pushing the structure into qualifying PNs (e.g. hopeful-pn)
+  when it is determined. I'll watch if such individuals can initiate and rise to the top. 
+  If that occurs, then maybe note the PN and allow a semantic genetic operator to operate
+  on some such instances randomly. 
+
+... Specifically, I wrote buffers-to-constrain. 
+
+(def iii (exceptional-fitness (util/map->Inv {:pn fitt/hopeful-pn})))
+(def pnpn (:pn iii)) ==> [{:buffer :Place-103, :k 3}]
+
+** <2017-12-07 Thu>
+
+ptaoussanis involved in both http-kit and sente, but http-kit started by shenfeng.
+ptaoussanis is about the only one contributing to http-kit now. 
+
+I am still trying to get a usable abort from running (diag-run) with a population
+that contains nets with no places. All the nets in the population have no places, 
+but that is beside the point; diag-run just sits there and smokes. Adding try/catch
+and (>!! (rep/evolve-chan) "abort") isn't helping. 
+
+When I find something that works, maybe a macro (handling-evolve ....)
+
+Generation: 29
+Best Error: 1.000
+Avg Error: 1.241
+Avg Arc count: 7.280
+Avg Inhib count: 0.000
+Avg Trans count: 3.040
+Avg Place count: 2.040 <---------- Not kidding! Yet, there is not :remove-place operator in use. 
+SD Error: 0.814
+SD Arc count: 0.826
+SD Trans count: 0.196
+SD Place count: 0.196
+in loop, msg = abort
+aborting...
+
+
+[{:name :place-1, :pid 0, :initial-tokens 0, :visible? true}
+ {:name :place-2, :pid 1, :initial-tokens 1, :visible? true}
+ {:name :place-3, :pid 2, :initial-tokens 0, :visible? true}
+ {:name :place-4, :pid 3, :initial-tokens 1, :visible? true}
+ {:name :Place-103, :pid 4, :initial-tokens 0}]
+[{:name :m1-start-job,
+  :tid 6,
+  :type :exponential,
+  :rate 1.0,
+  :rep {:clk 2733.4538, :act :m1-start-job, :m :m1, :mjpact :aj, :jt :jobType1, :ends 2734.7764, :j 2313, :line 2577},
+  :visible? true}
+ {:name :m1-move-off,
+  :tid 7,
+  :type :immediate,
+  :rate 1.0,
+  :rep {:clk 2734.7764, :act :m1-move-off, :m :m1, :mjpact :bj, :bf :b1, :n 2, :j 2313, :line 2580},
+  :visible? true}
+ {:name :m2-start-job,
+  :tid 8,
+  :type :exponential,
+  :rate 1.0,
+  :rep {:clk 2737.3893, :act :m2-start-job, :m :m2, :mjpact :sm, :bf :b1, :n 3, :j 2313, :line 2591},
+  :visible? true}
+ {:name :m2-move-off,
+  :tid 9,
+  :type :exponential,
+  :rate 1.0,
+  :rep {:clk 2738.5593, :act :m2-move-off, :m :m2, :mjpact :ej, :ent 2733.4538, :j 2313, :line 2594},
+  :visible? true}
+ {:name :Trans-156, :tid 156, :type :exponential, :rate 1.0}
+ {:name :Trans-165, :tid 165, :type :exponential, :rate 1.0}]
+[{:aid 10, :source :place-1, :target :m1-start-job, :name :aa-10, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+ {:aid 11, :source :m1-start-job, :target :place-2, :name :aa-11, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+ {:aid 12, :source :place-2, :target :m1-move-off, :name :aa-12, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+ {:aid 13, :source :m1-move-off, :target :place-3, :name :aa-13, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+ {:aid 14, :source :place-3, :target :m2-start-job, :name :aa-14, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+ {:aid 15, :source :m2-start-job, :target :place-4, :name :aa-15, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+ {:aid 16, :source :place-4, :target :m2-move-off, :name :aa-16, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+ {:aid 17, :source :m2-move-off, :target :place-1, :name :aa-17, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+ {:aid 209, :source :m1-start-job, :target :Place-103, :name :aa-209, :type :normal, :multiplicity 1, :priority 2}
+ {:aid 210, :source :Place-103, :target :m1-move-off, :name :aa-210, :type :normal, :multiplicity 1}
+ {:aid 432, :source :place-2, :target :Trans-156, :name :aa-432, :type :normal, :multiplicity 1}
+ {:aid 433, :source :Trans-156, :target :place-1, :name :aa-433, :type :normal, :multiplicity 1, :priority 1}
+ {:aid 459, :source :Place-103, :target :Trans-165, :name :aa-459, :type :normal, :multiplicity 1}
+ {:aid 460, :source :Trans-165, :target :place-3, :name :aa-460, :type :normal, :multiplicity 1, :priority 1}
+ {:aid 461, :source :place-3, :target :m1-move-off, :name :aa-461, :type :inhibitor, :multiplicity 3}]
+
+
+;;; Cut out the *useless* disorder measurement and it finds an answer fast!
+;;; Still, its crap.
+
+(def pnpn
+{:places
+[{:name :place-1, :pid 0, :initial-tokens 0, :visible? true}
+ {:name :place-2, :pid 1, :initial-tokens 1, :visible? true}
+ {:name :place-3, :pid 2, :initial-tokens 0, :visible? true}
+ {:name :place-4, :pid 3, :initial-tokens 1, :visible? true}]
+:arcs
+[{:aid 106, :source :place-1, :target :m1-start-job, :name :aa-106, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+ {:aid 107, :source :m1-start-job, :target :place-2, :name :aa-107, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+ {:aid 108, :source :place-2, :target :m1-move-off, :name :aa-108, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+ {:aid 109, :source :m1-move-off, :target :place-3, :name :aa-109, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+ {:aid 110, :source :place-3, :target :m2-start-job, :name :aa-110, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+ {:aid 111, :source :m2-start-job, :target :place-4, :name :aa-111, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+ {:aid 112, :source :place-4, :target :m2-move-off, :name :aa-112, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+ {:aid 113, :source :m2-move-off, :target :place-1, :name :aa-113, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+ {:aid 221, :source :place-4, :target :Trans-106, :name :aa-221, :type :normal, :multiplicity 1}
+ {:aid 222, :source :Trans-106, :target :place-3, :name :aa-222, :type :normal, :multiplicity 1, :priority 1}
+ {:aid 246, :source :place-4, :target :Trans-115, :name :aa-246, :type :normal, :multiplicity 1}
+ {:aid 247, :source :Trans-115, :target :place-3, :name :aa-247, :type :normal, :multiplicity 1, :priority 1}
+ {:aid 268, :source :Trans-115, :target :place-1, :name :aa-268, :type :normal, :multiplicity 1, :priority 2}
+ {:aid 285, :source :place-3, :target :m1-move-off, :name :aa-285, :type :inhibitor, :multiplicity 3}]
+:transitions
+[{:name :m1-start-job,
+  :tid 54,
+  :type :exponential,
+  :rate 1.0,
+  :rep {:clk 2502.7852, :act :m1-start-job, :m :m1, :mjpact :aj, :jt :jobType1, :ends 2504.4905, :j 2121, :line 1781},
+  :visible? true}
+ {:name :m1-move-off,
+  :tid 55,
+  :type :immediate,
+  :rate 1.0,
+  :rep {:clk 2504.4905, :act :m1-move-off, :m :m1, :mjpact :bj, :bf :b1, :n 1, :j 2121, :line 1786},
+  :visible? true}
+ {:name :m2-start-job,
+  :tid 56,
+  :type :exponential,
+  :rate 1.0,
+  :rep {:clk 2506.3924, :act :m2-start-job, :m :m2, :mjpact :sm, :bf :b1, :n 2, :j 2121, :line 1793},
+  :visible? true}
+ {:name :m2-move-off,
+  :tid 57,
+  :type :exponential,
+  :rate 1.0,
+  :rep {:clk 2507.5624, :act :m2-move-off, :m :m2, :mjpact :ej, :ent 2502.7852, :j 2121, :line 1798},
+  :visible? true}
+ {:name :Trans-106, :tid 106, :type :exponential, :rate 1.0}
+ {:name :Trans-115, :tid 115, :type :exponential, :rate 1.0}]})
+
+** <2017-12-11 Mon>
+
+*** Reading the Busi and Pinna paper, it is about safe nets with one "source place" and one "sink place". 
+So I don't think it is very helpful.
+
+*** Don't 'add choice' as a genetic operator, unless that is semantically what is intended!
+
+Maybe this same sort of advice applies to all the operators (making it more deterministic?).
+The above PN has two transitions between the same two places. (One has an additional outbound
+to a third place, but that is beside the point, since that can be simplified.) 
+
+*** Debugging the current exceptional -- How do the marking proliferate like this?
+
+Oh how I would love for my pmap stuff to work! (What it does, I think is return with
+timeout but not kill the thread.)
+
+It takes way too long to compute! A first step might be to declare failure 
+when the number of tokens in a marking exceed  k*(m - 1) + m. 
+
+It might even make sense to fail when a place other than a buffer has a more than one token. 
+
+--> Maybe make :info -- part of pn that says what looks like a buffer, what looks like
+    machine state. 
+
+
+*** Determine whether hopeful-pn is achievable with the current operators. 
 
 

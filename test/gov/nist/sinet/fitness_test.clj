@@ -278,10 +278,10 @@
            (fit/choose-winners pn) ; results not very good with normalized!
            {[0 0 1 1 1] [:ordinary 0.11280115552657274],
             [0 1 0 1 0] [:ordinary 0.11964136621006477],
-            [1 1 0 0 2] [:m2-unstarved 0.25652113562024753],
+            [1 1 0 0 2] [:m2-unstarved 0.25652113562024753], ; wrong
             [0 1 0 1 3] [:m1-blocked 1.0000000000000002],
             [1 1 0 0 3] [:ordinary 0.11490140358513679],
-            [0 1 0 1 1] [:m1-unblocked 0.2565211356202476],
+            [0 1 0 1 1] [:m1-unblocked 0.2565211356202476],  ; wrong
             [1 1 0 0 0] [:m2-starved 1.0],
             [0 0 1 1 0] [:ordinary 0.08979893169932006],
             [0 0 1 1 2] [:ordinary 0.11570085562261395],

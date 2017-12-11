@@ -2,6 +2,7 @@
   "General sorts of things needed in several places in the sinet project."
   {:author "Peter Denno"}
   (:require [clojure.pprint :refer (cl-format pprint pp)]
+            [clojure.core.async :as async :refer [>! <! >!! <!! go-loop chan close!]]
             [clojure.spec.alpha :as s]
             [clojure.tools.namespace.repl :as nsp]
             [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp pn-ok-> as-pn-ok->)] ; POD TEMPORARY!
@@ -9,10 +10,22 @@
 
 (def ^:private diag (atom nil))
 
+(def failed-evolve "An individual that had an exception in fitness code." (atom nil))
+
 (defn app-info
   "The way into the app for reading."
   []
   ((resolve 'gov.nist.sinet.run/app-info)))
+
+(defn evolve-chan [] (-> (app-info) :gp-system :evolve-chan))
+
+(defmacro handling-evolve [[data] & body]
+  (let [e# nil]
+    `(try
+       ~@body
+       (catch Exception e#
+         (reset! failed-evolve {:except e# :data ~data})
+         (>!! (evolve-chan) "abort")))))
 
 ; (set-param! [:app :foobar] :baz)
 (defn set-param!
@@ -54,7 +67,6 @@
   "Reset the system, getting out of a jam if possible."
   []
   (nsp/clear)
-  (nsp/disable-reload! (find-ns 'gov.nist.sinet.untouched))
   ;(nsp/set-refresh-dirs)
   ;(nsp/disable-reload! (find-ns 'taoensso.sente))
   ;(nsp/disable-reload! (find-ns 'org.httpkit.server))
@@ -243,7 +255,5 @@
                 winners))
             []
             candidate-machines)))
-
-                
 
 

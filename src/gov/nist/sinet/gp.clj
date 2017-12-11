@@ -10,7 +10,7 @@
             [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp pn-ok-> as-pn-ok->)]
             [gov.nist.spntools.util.reach :as pnr :refer (reachability)]
             [gov.nist.spntools.util.pnml :as pnml :refer (read-pnml)] ;  POD clean this up
-            [gov.nist.sinet.util :as util :refer (app-info map->Inv gp-param pr-param *debugging*)]
+            [gov.nist.sinet.util :as util :refer (app-info map->Inv gp-param pr-param *debugging* handling-evolve)]
             [gov.nist.sinet.simulate :as sim :refer (simulate)]
             [gov.nist.sinet.fitness :as fit :refer (workflow-fitness exceptional-fitness)]
             [gov.nist.sinet.scada :as scada]
@@ -38,7 +38,13 @@
 ;;; :elite-individuals -- carry over this amount of the best without revision.
 ;;; :max-initial-mutations -- apply 1 to this number of mutations (uniform distribution to the "Eden individual")
 
+(s/def ::pop (s/coll-of #(identity %) :kind vector?))
+(s/def ::state keyword?)
+(s/def ::gen number?)
+(s/def ::world (s/keys :req-un [::gen ::state ::pop]))
+
 (defn update-pop! [pop]
+  (s/assert ::pop pop)
   (alter-var-root
    (resolve 'gov.nist.sinet.run/system)
    #(assoc-in % [:app :pop] pop))
@@ -486,12 +492,14 @@
 (defn i-error 
   "Compute the individual's score."
   [inv]
-  (as-> inv ?i
-    (assoc ?i :disorder nil)
-    (assoc ?i :except nil)
-    (fit/workflow-fitness ?i)
-    (fit/exceptional-fitness ?i)
-    (assoc ?i :err (+ (:disorder ?i) (:except ?i)))))
+  (when-not @util/failed-evolve
+    (handling-evolve [inv]
+      (as-> inv ?i
+        (assoc ?i :disorder nil)
+        (assoc ?i :except nil)
+        ;(fit/workflow-fitness ?i)
+        (fit/exceptional-fitness ?i)
+        (assoc ?i :err (:except ?i)#_(+ (:disorder ?i) (:except ?i)))))))
 
 (def diag-timeouts (atom []))
 
@@ -499,18 +507,21 @@
   "Add value for :err to each PN and used it to sort the population by disorder.
    Where disorder is equal, prefer the one with less structure."
   [popu]
-  (as-> popu ?p
-    (reset! diag (u4pmap/pmap-timeout1 i-error ?p 5000)) 
-    (map #(if (= (-> % keys set) #{:timeout})
-            (do (swap! diag-timeouts conj %)
-                (assoc (:timeout %) :err 123))
-            %)
-         ?p)
-    (vec (sort #(cond (< (:err %1) (:err %2)) true,
-                      (and (== (:err %1) (:err %2))
-                           (< (pnu/pn-size (:pn %1)) (pnu/pn-size (:pn %2)))) true,
-                      :else false)
-               ?p))))
+  (handling-evolve [popu]
+   (let [favor-small? (-> (app-info) :gp-params :favor-smaller-pn?)]
+     (as-> popu ?p
+       ;;(u4pmap/pmap-timeout1 i-error ?p 15000)
+       (pmap i-error ?p)
+       #_(map #(if (= (-> % keys set) #{:timeout})
+                 (do (swap! diag-timeouts conj %)
+                     (assoc (:timeout %) :err 123))
+                 %)
+              ?p)
+       (vec (sort #(cond (< (:err %1) (:err %2)) true,
+                         (and (== (:err %1) (:err %2)) favor-small?)
+                         (< (pnu/pn-size (:pn %1)) (pnu/pn-size (:pn %2))),
+                         :else false)
+                  ?p))))))
 
 (defn select
   "Select an individual from a sorted population using a tournament of given size."
@@ -527,6 +538,7 @@
 
 (defn reset-all! []
   (reset-spntools!)
+  (reset! util/failed-evolve nil)
   (reset! util/+log+ []))
 
 ;;; Lee Spector's original were:
@@ -541,10 +553,11 @@
         pop-size (gp-param :pop-size)
         pressure (gp-param :select-pressure)] ; POD I'm running 4 right now. 
     (update world :pop
-            (fn [?x] ; POD no # and % allowed here. Why? (CIDER says unmatched parentheses.)
+            (fn [?x] 
               (as-> ?x ?spop
                 (into (subvec ?spop 0 e-cnt)
-                      (repeatedly (* 3/4 pop-size) #(mutate (select ?spop pressure)))) ; POD gp-param
+                      (repeatedly (int (* 3/4 pop-size))
+                                  #(mutate (select ?spop pressure)))) ; POD gp-param
                 ;;(repeatedly (* 2/8 (gp-param :pop-size)) #(crossover (select ?spop 7) (select ?spop 7)))
                 (loop [pop ?spop]
                   (if (>= (count pop) pop-size)
@@ -566,11 +579,6 @@
             (assoc :state :failure)
             (assoc :reason :timeout-secs)),
         :else world))
-
-(s/def ::pop (s/coll-of #(identity %) :kind vector?))
-(s/def ::state keyword?)
-(s/def ::gen number?)
-(s/def ::world (s/keys :req-un [::gen ::state ::pop]))
 
 (def the-promise (atom nil))
 (def the-future  (atom nil))
@@ -594,11 +602,12 @@
 (defn evolve-continue
   "Loop through generations until success, failure or paused
    On success or failure, put a message to that effect on the channel."
-  [world prom chan]
+  [world prom]
   (println "evolve-continue...")
   (util/log {:in 'evolve-continue :world world})
   (reset! rep/pause-evolve? false)
   (loop [w world]
+    (println "evolve-continue-loop, gen = " (:gen w) "...")
     (rep/pop-stats w)
     (as-> w ?w
       (assoc ?w :state :running)
@@ -610,17 +619,17 @@
       (cond @rep/pause-evolve?
             (do (rep/push-inv (-> ?w :pop first))
                 (deliver prom ?w)
-                (>!! chan "pause"))
+                (>!! (util/evolve-chan) "pause"))
             
             (= (:state ?w) :failure)
             (do (rep/push-inv (-> ?w :pop first))
                 (deliver prom ?w)
-                (>!! chan "abort")),
+                (>!! (util/evolve-chan) "abort")),
 
             (= (:state ?w) :success)
             (do (rep/push-inv (-> ?w :pop first))
                 (deliver prom ?w)
-                (>!! chan "success")),
+                (>!! (util/evolve-chan) "success")),
             
             :else
             (recur (make-next-gen ?w))))))
@@ -628,31 +637,34 @@
 ;;; POD currently not doing anything with the world. 
 (defn continue-msg
   "Setup for running the evolve loop, setting the-promise, the-future and a reaper process."
-  [world evolve-chan]
+  [world]
   (if @the-future
     (do (println "Ignoring second continue.") world)
     (do (println "Starting future for evolve-continue")
         (reset! the-promise (promise))
         (reset! the-future
-                (future (evolve-continue world @the-promise evolve-chan)))
+                (future (evolve-continue world @the-promise)))
         (future ; This is a last resort timeout method; see also evolve-success?
           (let [result (deref @the-promise ; yes, 'double deref'
                               (* 1000 (-> (app-info) :gp-params :timeout-secs)) 
                               :too-late)]
             (when (= result :too-late)
-              (>!! evolve-chan "abort"))))
+              (>!! (util/evolve-chan) "abort"))))
         world)))
 
 ;;; Both of the following get pushed when the client sends :sinet/evolve-run (see report.clj)
-;;; (>!! (rep/evolve-chan) "init")
-;;; (>!! (rep/evolve-chan) "continue")
+;;; (>!! (util/evolve-chan) "init")
+;;; (>!! (util/evolve-chan) "continue")
 ;;; =====>>> In order to see changes in this function, you need to do a util/big-reset. <<<=======
 (defn start-evolve-loop!
   "Called from app.clj when starting the app. Waits for messages. Never stops."
-  [evolve-chan]
+  []
   (reset! util/+log+ [])
+  (when (not= clojure.core.async.impl.channels.ManyToManyChannel
+              (type (util/evolve-chan)))
+    (throw (ex-info "Failed to start: no evolve-chan" {:chan (util/evolve-chan)})))
   (async/go-loop [world nil]
-    (let [msg (<! evolve-chan)] ; parks thread, doesn't block.
+    (let [msg (<! (util/evolve-chan))] ; parks thread, doesn't block.
       (println (str "in loop, msg = " msg))
       (util/log {:in "evolve-loop" :msg msg})
       (if (= msg "ABORT")
@@ -661,7 +673,7 @@
                           (evolve-init world), ; returns world map with population, etc.
                           
                           (= msg "continue") ; new future & promise and returns world
-                          (continue-msg world evolve-chan) 
+                          (continue-msg world) 
                           
                           (= msg "pause") ; continue-msg will have delivered it.
                           (do (reset! the-future nil)
@@ -679,7 +691,8 @@
                           
                           (= msg "abort")
                           (do (println "aborting...")
-                              ;(future-cancel @the-future)
+                              (when (future? @the-future)
+                                (future-cancel @the-future)) ; 2017-12-07 uncommented
                               (reset! the-future nil)
                               ;(reset! diag {:world world})
                               (reset! the-promise nil)
@@ -718,14 +731,14 @@
       inv)
     inv))
 
-;;; To stop it: (>!! (rep/evolve-chan) "abort")
+;;; To stop it: (>!! (util/evolve-chan) "abort")
 (defn diag-run
   "Run the GP in diagnostic mode from the REPL. A very useful function!"
   []
   (binding [*debugging* false] ;<===== Whether or not to save every individual
     (reset! diag-all-inv {})
-    (>!! (rep/evolve-chan) "init") 
-    (>!! (rep/evolve-chan) "continue")))
+    (>!! (util/evolve-chan) "init") 
+    (>!! (util/evolve-chan) "continue")))
 
 (defn diag-sim
   "Simulate some steps on the best Inv."

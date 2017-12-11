@@ -223,3 +223,8 @@
          (map :act)
          distinct
          set)))
+
+(defn msg-matching
+  [pred]
+  (let [log (-> (app-info) :problem :scada-log)]
+    (some #(when (pred %) %) log)))

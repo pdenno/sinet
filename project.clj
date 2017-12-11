@@ -4,7 +4,7 @@
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :global-vars {*assert* true}
-  :dependencies [[org.clojure/clojure            "1.9.0-beta2"]
+  :dependencies [[org.clojure/clojure            "1.9.0"]
                  [org.clojure/clojurescript      "1.9.946"]
                  [org.clojure/tools.trace        "0.7.9"]
                  [org.clojure/core.async         "0.3.443"]
@@ -14,7 +14,6 @@
                  [ch.qos.logback/logback-classic "1.2.3"] 
                  [org.clojure/tools.logging      "0.4.0"]
                  
-
                  [ring                       "1.6.2" :exclusions [org.clojure/tools.namespace]]
                  [ring/ring-defaults         "0.3.1"]
                  [compojure                  "1.6.0"]

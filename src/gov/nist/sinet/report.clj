@@ -35,20 +35,18 @@
             (when (and (>= pn-index 0) (< pn-index (count pop)))
               (?reply-fn (-> (nth pop pn-index) clean-inv-for-transmit)))))))))
 
-(defn evolve-chan   [] (-> (util/app-info) :gp-system :evolve-chan))
-
 (def pause-evolve? "True if pausing evolution" (atom false))
 
 (ws/register-method
  :sinet/evolve-run
  (fn [ev-msg]
-   (>!! (evolve-chan) "init")
-   (>!! (evolve-chan) "continue")))
+   (>!! (util/evolve-chan) "init")
+   (>!! (util/evolve-chan) "continue")))
 
  (ws/register-method
   :sinet/evolve-continue
   (fn [ev-msg]
-    (>!! (evolve-chan) "continue")))
+    (>!! (util/evolve-chan) "continue")))
 
  (ws/register-method
   :sinet/evolve-pause
@@ -58,7 +56,7 @@
  (ws/register-method
   :sinet/evolve-abort
   (fn [ev-msg]
-    (>!! (evolve-chan) "abort")))
+    (>!! (util/evolve-chan) "abort")))
 
 (defn report-map [world]
   (let [pop (:pop world)
