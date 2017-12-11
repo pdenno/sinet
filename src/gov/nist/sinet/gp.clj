@@ -658,13 +658,10 @@
 ;;; =====>>> In order to see changes in this function, you need to do a util/big-reset. <<<=======
 (defn start-evolve-loop!
   "Called from app.clj when starting the app. Waits for messages. Never stops."
-  []
+  [evolve-chan]  ; Can't use util/evolve-chan here. It is not set yet!
   (reset! util/+log+ [])
-  (when (not= clojure.core.async.impl.channels.ManyToManyChannel
-              (type (util/evolve-chan)))
-    (throw (ex-info "Failed to start: no evolve-chan" {:chan (util/evolve-chan)})))
   (async/go-loop [world nil]
-    (let [msg (<! (util/evolve-chan))] ; parks thread, doesn't block.
+    (let [msg (<! evolve-chan)] ; parks thread, doesn't block.
       (println (str "in loop, msg = " msg))
       (util/log {:in "evolve-loop" :msg msg})
       (if (= msg "ABORT")

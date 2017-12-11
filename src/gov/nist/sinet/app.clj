@@ -68,7 +68,6 @@
 (defn app-start-body
   "Compose the parts of component and optionally s/check-assert."
   [component ws-connection]
-  (println "app-start-body...")
   (let [comp (as-> component ?c
                (assoc ?c
                       :gp-params @gp-params
@@ -82,7 +81,7 @@
                                                  (-> ?c :problem :scada-log))))]
     (s/check-asserts (-> comp :gp-system :check-asserts?))
     (s/assert ::app comp)
-    (gp/start-evolve-loop!)
+    (gp/start-evolve-loop! (-> comp :gp-system :evolve-chan))
     comp))
 
 (s/def ::evolve-chan (s/and #(= (type %) clojure.core.async.impl.channels.ManyToManyChannel))) 
