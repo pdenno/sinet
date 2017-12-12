@@ -10,7 +10,7 @@
             [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp pn-ok-> as-pn-ok->)]
             [gov.nist.spntools.util.reach :as pnr :refer (reachability)]
             [gov.nist.spntools.util.pnml :as pnml :refer (read-pnml)] ;  POD clean this up
-            [gov.nist.sinet.util :as util :refer (app-info map->Inv gp-param pr-param *debugging* handling-evolve)]
+            [gov.nist.sinet.util :as util :refer (log app-info map->Inv gp-param pr-param *debugging* handling-evolve)]
             [gov.nist.sinet.simulate :as sim :refer (simulate)]
             [gov.nist.sinet.fitness :as fit :refer (workflow-fitness exceptional-fitness)]
             [gov.nist.sinet.scada :as scada]
@@ -248,16 +248,17 @@
   "Mutate the individual. If impossible (after 5 tries) just return it."
   ([inv] (mutate inv :pick-fn rand-mute-key)) ; no args to r-m defaults to :mutation-dist
   ([inv & {:keys [pick-fn force] :or {pick-fn rand-mute-key}}]
-   (let [save-inv inv]
-     (as-> inv ?inv
-       (loop [n 4] ; POD five...belongs in params.
-         (let [i (mutate-m ?inv :pick-fn pick-fn :force force)]
-           ;; Try 5 times to mutate; POD this skews things!
-           (cond (pnu/pn? (:pn i)) (diag-record-inv i)
-                 (= n 0) (do (util/log {:in 'mutate :inv-id (:id ?inv)}) save-inv)
-                 :else (recur (dec n)))))
-       (add-color-binding ?inv)
-       (update ?inv :pn add-flow-priorities)))))
+   (handling-evolve [inv]
+     (let [save-inv inv]
+       (as-> inv ?inv
+         (loop [n 4] ; POD five...belongs in params.
+           (let [i (mutate-m ?inv :pick-fn pick-fn :force force)]
+             ;; Try 5 times to mutate; POD this skews things!
+             (cond (pnu/pn? (:pn i)) (diag-record-inv i)
+                   (= n 0) (do (log {:in 'mutate :inv-id (:id ?inv)}) save-inv)
+                   :else (recur (dec n)))))
+         (add-color-binding ?inv)
+         (update ?inv :pn add-flow-priorities))))))
 
 (defn- mutate-m-dispatch [inv & {:keys [pick-fn force]
                                  :or {pick-fn rand-mute-key}}]
@@ -492,14 +493,14 @@
 (defn i-error 
   "Compute the individual's score."
   [inv]
-  (when-not @util/failed-evolve
-    (handling-evolve [inv]
-      (as-> inv ?i
-        (assoc ?i :disorder nil)
-        (assoc ?i :except nil)
-        ;(fit/workflow-fitness ?i)
-        (fit/exceptional-fitness ?i)
-        (assoc ?i :err (:except ?i)#_(+ (:disorder ?i) (:except ?i)))))))
+  (reset! diag {:inv inv})
+  (handling-evolve [inv]
+    (as-> inv ?i
+      (assoc ?i :disorder nil)
+      (assoc ?i :except nil)
+      ;;(fit/workflow-fitness ?i)
+      (fit/exceptional-fitness ?i)
+      (assoc ?i :err (:except ?i)#_(+ (:disorder ?i) (:except ?i))))))
 
 (def diag-timeouts (atom []))
 
@@ -510,9 +511,9 @@
   (handling-evolve [popu]
    (let [favor-small? (-> (app-info) :gp-params :favor-smaller-pn?)]
      (as-> popu ?p
-       ;;(u4pmap/pmap-timeout1 i-error ?p 15000)
-       (pmap i-error ?p)
-       #_(map #(if (= (-> % keys set) #{:timeout})
+       (u4pmap/pmap-timeout1 i-error ?p 15000)
+       ;(map i-error ?p)
+       (map #(if (= (-> % keys set) #{:timeout})
                  (do (swap! diag-timeouts conj %)
                      (assoc (:timeout %) :err 123))
                  %)
@@ -549,21 +550,22 @@
   "Compute the next generation, a combination of tournament selection, mutations and crossover
    of tournament winners, and elite individuals. Argument has :state (e.g. :continue, :success)
    start-time and population Invs"
-  (let [e-cnt    (gp-param :elite-individuals)
-        pop-size (gp-param :pop-size)
-        pressure (gp-param :select-pressure)] ; POD I'm running 4 right now. 
-    (update world :pop
-            (fn [?x] 
-              (as-> ?x ?spop
-                (into (subvec ?spop 0 e-cnt)
-                      (repeatedly (int (* 3/4 pop-size))
-                                  #(mutate (select ?spop pressure)))) ; POD gp-param
-                ;;(repeatedly (* 2/8 (gp-param :pop-size)) #(crossover (select ?spop 7) (select ?spop 7)))
-                (loop [pop ?spop]
-                  (if (>= (count pop) pop-size)
-                    (subvec (vec pop) 0 pop-size)
-                    (recur (conj pop (select ?x pressure))))))))))
-
+  (handling-evolve [world]
+     (let [e-cnt    (gp-param :elite-individuals)
+           pop-size (gp-param :pop-size)
+           pressure (gp-param :select-pressure)] ; POD I'm running 4 right now. 
+       (update world :pop
+               (fn [?x] 
+                 (as-> ?x ?spop
+                   (into (subvec ?spop 0 e-cnt)
+                         (repeatedly (int (* 3/4 pop-size))
+                                     #(mutate (select ?spop pressure)))) ; POD gp-param
+                   ;;(repeatedly (* 2/8 (gp-param :pop-size)) #(crossover (select ?spop 7) (select ?spop 7)))
+                   (loop [pop ?spop]
+                     (if (>= (count pop) pop-size)
+                       (subvec (vec pop) 0 pop-size)
+                       (recur (conj pop (select ?x pressure)))))))))))
+  
 (defn evolve-success? [world]
   (cond (< (-> world :pop first :err)
            (gp-param :success-threshold))
@@ -604,13 +606,13 @@
    On success or failure, put a message to that effect on the channel."
   [world prom]
   (println "evolve-continue...")
-  (util/log {:in 'evolve-continue :world world})
+  (log {:in 'evolve-continue :world world})
   (reset! rep/pause-evolve? false)
   (loop [w world]
     (println "evolve-continue-loop, gen = " (:gen w) "...")
     (rep/pop-stats w)
     (as-> w ?w
-      (assoc ?w :state :running)
+      (assoc  ?w :state :running)
       (update ?w :pop #(sort-by-error %))
       (do (update-pop! (:pop ?w)) ?w)
       (update ?w :gen inc)
@@ -630,12 +632,11 @@
             (do (rep/push-inv (-> ?w :pop first))
                 (deliver prom ?w)
                 (>!! (util/evolve-chan) "success")),
-            
             :else
             (recur (make-next-gen ?w))))))
 
 ;;; POD currently not doing anything with the world. 
-(defn continue-msg
+(defn evolve-continue-start
   "Setup for running the evolve loop, setting the-promise, the-future and a reaper process."
   [world]
   (if @the-future
@@ -649,6 +650,8 @@
                               (* 1000 (-> (app-info) :gp-params :timeout-secs)) 
                               :too-late)]
             (when (= result :too-late)
+              (log "evolve-continue the-future expired.") 
+              (println "evolve-continue the-future expired.") 
               (>!! (util/evolve-chan) "abort"))))
         world)))
 
@@ -659,20 +662,19 @@
 (defn start-evolve-loop!
   "Called from app.clj when starting the app. Waits for messages. Never stops."
   [evolve-chan]  ; Can't use util/evolve-chan here. It is not set yet!
-  (reset! util/+log+ [])
   (async/go-loop [world nil]
     (let [msg (<! evolve-chan)] ; parks thread, doesn't block.
       (println (str "in loop, msg = " msg))
-      (util/log {:in "evolve-loop" :msg msg})
+      (log {:in "evolve-loop" :msg msg})
       (if (= msg "ABORT")
         (println "Leaving go; will need to run start-evolve-loop!.")
         (let [world (cond (= msg "init")
                           (evolve-init world), ; returns world map with population, etc.
                           
-                          (= msg "continue") ; new future & promise and returns world
-                          (continue-msg world) 
+                          (= msg "continue")   ; new future & promise and returns world
+                          (evolve-continue-start world) 
                           
-                          (= msg "pause") ; continue-msg will have delivered it.
+                          (= msg "pause")      ; continue-evolve will have delivered it.
                           (do (reset! the-future nil)
                               (deref @the-promise))
                           
@@ -696,6 +698,30 @@
                               world))]
           (s/assert ::world world)
           (recur world))))))
+
+(defn diag-simple-evolve
+  "Run the program without async"
+  []
+  (reset-all!)
+  (let [world (as-> {} ?w
+                (assoc ?w :gen 0)
+                (assoc ?w :state :init)
+                (assoc ?w :start-time (System/currentTimeMillis))
+                (assoc ?w :pop (initial-pop (gp-param :pop-size))))]
+    (update-pop! (:pop world))
+    (loop [w world]
+      (println "evolve-continue-loop, gen = " (:gen w) "...")
+      (rep/pop-stats w)
+      (as-> w ?w
+        (assoc  ?w :state :running)
+        (update ?w :pop #(sort-by-error %))
+        (do (update-pop! (:pop ?w)) ?w)
+        (update ?w :gen inc)
+        (evolve-success? ?w)
+        (rep/report-gen ?w)
+        (cond (= (:state ?w) :failure) ?w
+              (= (:state ?w) :success) ?w
+              :else (recur (make-next-gen ?w)))))))
 
 ;;; This is from the ICMR 2017 days!
 #_(defn eval-inv

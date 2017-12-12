@@ -426,7 +426,7 @@
 (declare max-marks)
 (defn lax-reach
   "Set the marking-key such there is one token on each machine.
-   Return the pn with an :rgraph associated with this marking." 
+   Return the pn with an artificially k-bounded :rgraph associated with this marking."
   [pn max-k]
   (let [pn (pnr/renumber-pids pn)
         r-places (atom (util/related-places pn))
@@ -467,10 +467,11 @@
 (defn interp-possible?
   "Returns true if there are enough buffers for an async serial line."
   [pn]
-  (let [m (util/machines-of pn)
-        combos (combo/permutations m)]
-    (>= (count (set (mapcat (fn [[m1 m2]] (util/buffers-between pn m1 m2)) combos)))
-        (dec (count m)))))
+  (when (s/valid? ::util/gppn pn)
+    (let [m (util/machines-of pn)
+          combos (combo/permutations m)]
+      (>= (count (set (mapcat (fn [[m1 m2]] (util/buffers-between pn m1 m2)) combos)))
+          (dec (count m))))))
       
 (defn find-interpretation
   "At increasing values of max-k, find new starting links and try to interpret

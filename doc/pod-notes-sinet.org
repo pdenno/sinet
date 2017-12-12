@@ -3820,12 +3820,14 @@ timeout but not kill the thread.)
 It takes way too long to compute! A first step might be to declare failure 
 when the number of tokens in a marking exceed  k*(m - 1) + m. 
 
-It might even make sense to fail when a place other than a buffer has a more than one token. 
-
---> Maybe make :info -- part of pn that says what looks like a buffer, what looks like
-    machine state. 
-
+**** I do this one: Fail when a place other than a buffer has more than one token. 
 
 *** Determine whether hopeful-pn is achievable with the current operators. 
 
+*** NOT KEEPING THE ELITE!
 
+** <2017-12-12 Tue>
+
+*** NOT KEEPING THE ELITE!
+
+*** The above not solved, but now it goes off and never returns -- just dead. 

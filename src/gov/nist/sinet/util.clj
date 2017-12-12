@@ -10,8 +10,6 @@
 
 (def ^:private diag (atom nil))
 
-(def failed-evolve "An individual that had an exception in fitness code." (atom nil))
-
 (defn app-info
   "The way into the app for reading."
   []
@@ -19,13 +17,17 @@
 
 (defn evolve-chan [] (-> (app-info) :gp-system :evolve-chan))
 
+(def failed-evolve "An individual that had an exception in fitness code." (atom nil))
+
 (defmacro handling-evolve [[data] & body]
   (let [e# nil]
-    `(try
-       ~@body
-       (catch Exception e#
-         (reset! failed-evolve {:except e# :data ~data})
-         (>!! (evolve-chan) "abort")))))
+    `(if (not @failed-evolve)
+       (try
+         ~@body
+         (catch Exception e#
+           (reset! failed-evolve {:exception e# :data ~data})
+           (>!! (evolve-chan) "abort")))
+       (throw (ex-info "handling-evolve " {:exception @failed-evolve})))))
 
 ; (set-param! [:app :foobar] :baz)
 (defn set-param!
@@ -153,12 +155,11 @@
 (defn check-pn
   "clojure.spec check the pn."
   [pn]
-  (s/assert ::gppn pn))
+  (if (s/valid? ::gppn pn) pn nil))
 
 (defn machines-of
   "Return collection of the machines used in the PN."
   [pn]
-  ;(s/assert ::gppn pn) ; POD needs investigation
   (distinct (mapv #(-> % :rep :m)
                   (filter #(contains? % :rep) (:transitions pn)))))
 

@@ -32,7 +32,7 @@
     
     :max-gens 300           ; These three control how long gp runs.  ; POD actually stops at :max-gens - 1.
     :success-threshold 0.1
-    :timeout-secs 6000
+    :timeout-secs 20
     :favor-smaller-pn? false
     
     :debugging? true
