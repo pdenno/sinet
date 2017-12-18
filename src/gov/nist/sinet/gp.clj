@@ -291,15 +291,6 @@
       (update ?i :pn pnr/renumber-pids)
       (update ?i :history conj [:add-place (-> ?i :pn :places last :name) :from (:id ?i)]))))
 
-;;; POD this should probably go away! Replace by some sort of coping mechanism!
-(defmethod mutate-m :add-token [inv & args]
-  (if-let [places (-> inv :pn :places not-empty)]
-    (let [p-indx (rand-int (count places))]
-      (as-> inv ?i
-          (update-in ?i [:pn :places p-indx :initial-tokens] inc)
-          (update    ?i :history conj [:add-token (-> ?i :pn :places p-indx :name) :from (:id ?i)])))
-    {:skip :add-token :msg "no place!"}))
-
 (defmethod mutate-m :add-trans [inv & args]
   (if-let [p-in (:name (random-place (:pn inv)))]
     (if-let [p-out (:name (random-place (:pn inv) :subset #(remove (fn [pl] (= (:name pl) p-in)) %)))]
@@ -333,27 +324,43 @@
       {:skip :add-arc :msg "No place"})
     {:skip :add-arc :msg "No trans"}))
 
-(defmethod mutate-m :add-inhibitor [inv & args]
-  (if-let [tr (random-trans (:pn inv))]
-    (if-let [pl (random-place (:pn inv))]
-      (if-let [have-one (some #(when (and (= (:name pl) (:source %))
-                                          (= (:name tr) (:target %))) %)
-                              (filter #(= (:type %) :inhibitor) (-> inv :pn :arcs)))]
-        (as-> inv ?i
-          (update-in ?i [:pn :arcs (pnu/arc-index (:pn ?i) (:name have-one)) :multiplicity] inc)
-          (update    ?i :history conj [:add-inhibitor :have-one (:name have-one) :from (:id ?i)]))
-        (as-> inv ?i
-          (update ?i :pn #(pnu/add-pn % (pnu/make-arc % (:name pl) (:name tr) :type :inhibitor)))
-          (update ?i :history conj [:add-inhibitor (-> ?i :pn :arcs last :name) :from (:id ?i)])))
-      {:skip :add-inhibitor :msg "No place"})
-    {:skip :add-inhibitor :msg "No trans"}))
+(declare add-buffer)
+(defmethod mutate-m :add-buffer
+  [inv & args]
+  (let [pn (:pn inv)
+        machines (util/machines-of pn)
+        size (count machines)
+        m1 (nth machines (rand-int size))
+        m2 (util/next-machine pn m1)]
+    (if (and m2 (empty? (util/buffers-between pn m1 m2)))
+      (assoc inv :pn (add-buffer pn m1 m2))
+      inv)))
 
-(defmethod mutate-m :bump-inhibitor-3 [inv & args]
-  (if-let [inh (random-inhib (:pn inv))]
-    (-> inv
-        (update-in [:pn :arcs (pnu/arc-index (:pn inv) (:name inh)) :multiplicity] #(+ % 3))
-        (update    :history conj [:bump-inhibitor-3 (:name inh) :from (:id inv)]))
-    {:skip :bump-inhibitor-3 :msg "No inhib"}))
+(defn add-buffer
+  "Add a buffer between two adjacent machines."
+  [pn m1 m2]
+  (let [buffer (pnu/make-place pn)
+        m1-start (some #(when (and (= m1 (-> % :rep :m))
+                                   (contains? #{:aj :sm} (-> % :rep :mjpact)))
+                          (:name %))
+                       (:transitions pn))
+        m2-start (some #(when (and (= m2  (-> % :rep :m))
+                                   (= :sm (-> % :rep :mjpact)))
+                          (:name %))
+                       (:transitions pn))
+        m1-to-buffer (assoc (pnu/make-arc pn m1-start (:name buffer)) :bind {:jtype :blue})
+        buffer-to-m2 (assoc (pnu/make-arc pn (:name buffer) m2-start) :bind {:jtype :blue})
+        p1-m2 (some #(when (= m2-start (:target %)) (:name %)) (:arcs pn))
+        p3-m1 (some #(when (= m1-start (:target %)) (:name %)) (:arcs pn))]
+    (println "adding buffer!")
+    (if (and m1-start m2-start p1-m2 p3-m1)
+      (-> pn
+          (pnu/add-pn buffer)
+          (pnu/add-pn m1-to-buffer)
+          (pnu/add-pn buffer-to-m2)
+          (assoc-in [:arcs (pnu/arc-index pn p1-m2) :target] m1-start)
+          (assoc-in [:arcs (pnu/arc-index pn p3-m1) :target] m2-start))
+       (throw (ex-info "Couldn't find pieces for add-buffer" {:pn pn :m1 m1 :m2 m2})))))
 
 ;;;------------------ Remove -----------------------------
 (defn sole-arc?
@@ -404,14 +411,6 @@
         (update    :history conj [:remove-trans tr :from (:id inv)]))
       {:skip :remove-trans :msg "too few"})))
 
-(defmethod mutate-m :remove-token [inv & args]
-  (if (> (apply + (->> inv :pn :places (map :initial-tokens))) 1)
-    (let [pl (:name (random-place (:pn inv) :subset #(remove (fn [pl] (= 0 (:initial-tokens pl))) %)))]
-      (-> inv
-          (update-in [:pn :places (pnu/place-index (:pn inv) pl) :initial-tokens] dec)
-          (update    :history conj [:remove-token pl :from (:id inv)])))
-    {:skip :remove-token :msg "Not enough tokens left"}))
-
 (defn update-arc-removal
   "If arc has multiplicity 1, remove it. Otherwise, reduce its multiplicity."
   [inv ar]
@@ -427,17 +426,6 @@
         (update :history conj [:remove-or-dec-arc (:name ar) :from (:id inv)]))
     {:skip :remove-arc :msg "No arc"}))
 
-(defmethod mutate-m :remove-inhibitor [inv & args]
-  (if-let [ar (random-arc (:pn inv) :subset #(filter (fn [ar] (= :inhibitor (:type ar))) %))]
-    (if (= 1 (:multiplicity ar))
-      (-> inv
-          (update-in [:pn :arcs] (fn [arcs] (vec (remove #(=  % ar) arcs))))
-          (update    :history conj [:remove-inhib (:name ar) :from (:id inv)]))
-      (-> inv
-          (update-in [:pn :arcs (pnu/arc-index (:pn inv) (:name ar)) :multiplicity] dec)
-          (update    :history conj [:remove-inhib :dec (:name ar) :from (:id inv)])))
-    {:skip :remove-inhibitor :msg "No inhibitor arcs"}))
-
 ;;;------------------ Swap -----------------------------
 (defn swap-arcs [pn pl1 pl2]
   "Swap use of places pl1 and pl2 in the arcs of the PN. Works on trans too!"
@@ -451,24 +439,6 @@
                              (= (:target ?ar) pl2) (assoc ar :target pl1)
                              :else ?ar)))
                    (:arcs pn)))))
-
-(defmethod mutate-m :swap-places [inv & args]
-  (if-let [pl1 (:name (random-place (:pn inv)))]
-    (if-let [pl2 (:name (random-place (:pn inv):subset #(filter (fn [pl] (not= (:name pl) pl1)) %)))]
-      (-> inv
-          (update :pn #(swap-arcs % pl1 pl2))
-          (update :history conj [:swap-places pl1 pl2 :from (:id inv)]))
-      {:skip :swap-places :msg "no 2nd place"})
-    {:skip :swap-places :msg "no 1st place"}))
-
-(defmethod mutate-m :swap-trans [inv & args]
-  (if-let [tr1 (:name (random-trans (:pn inv)))]
-    (if-let [tr2 (:name (random-trans (:pn inv):subset #(filter (fn [tr] (not= (:name tr) tr1)) %)))]
-      (-> inv 
-          (update :pn #(swap-arcs % tr1 tr2))
-          (update :history conj [:swap-arcs tr1 tr2 :from (:id inv)]))
-      {:skip :swap-trans :msg "no 2nd trans"})
-    {:skip :swap-trans :msg "no 1st trans"}))
 
 (defmethod mutate-m :swap-priority [inv & args]
   (let [pn (:pn inv)
@@ -863,5 +833,5 @@
      (assoc (-> (app-info) :pop) ix
             (map->Inv {:pn pn}))))
 
-  
-  
+;(def pnpn (-> (initial-pop 1) first :pn))
+;(def iii  (-> (initial-pop 1) first))

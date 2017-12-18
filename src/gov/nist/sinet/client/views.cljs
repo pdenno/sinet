@@ -117,7 +117,7 @@
 (defn quil-pn []
   (let [pn @(rf/subscribe [:pn])]
     (when (contains? pn :places)
-      (reset! draw/+display-pn+ (draw/pn-geom pn))
+      (reset! draw/+display-pn+ (draw/pn-geom pn @draw/+display-pn+))
       (draw-it))
     [:canvas {:id "best-pn"}]))
 

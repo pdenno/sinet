@@ -8,33 +8,26 @@
             [gov.nist.sinet.gp :as gp]))
 
 (def mutation-dist "The pdf for ordinary mutations (not eden mutations)"
-  [[:add-place        1/10]    ; Add place (mine can't be absorbing, thus Nobile 1&2).
-   [:add-token           0]    ; Add token to some place (visible or hidden).
-   [:add-trans        1/10]
-   [:apply-buffer        0] ; New for November 27. 
+  [[:add-place           0] ; Add place (mine can't be absorbing, thus Nobile 1&2).
+   [:add-trans           0]
+   [:add-buffer       2/10] ; New for November 27. (Yeah right, finishend Dec 17th!)
    [:add-arc          1/10] ; 1/20 pre-except
-   [:add-inhibitor       0] ; 1/10 pre-November 27
-;  [:bump-inhibitor-3 1/20]    ; N.B. Makes it hard to remove, (but that might be good).
-   [:remove-place     1/10] ; 1/10 pre-except
-   [:remove-token        0]
+   [:remove-place        0] ; 1/10 pre-except
    [:remove-trans        0] ; 1/10 pre-November 27
    [:remove-arc       1/10] ; 
-   [:remove-inhibitor    0] ; 1/10 pre-November 27
-   [:swap-places         0] ; 2/10 pre-except
-   [:swap-trans          0] ; 2/10 pre-except
    [:swap-priority    1/10]])
 
 (def gp-params
   (atom
    {:pn-elements [:place :token :normal-arc :inhibitor-arc :expo-trans #_:immediate-trans #_:fixed-trans]
-    :pop-size 25 ; 100 pre-except
-    :aqpn-warm-up 5 ; "Ignore this number of tokens on both ends of the log."
+    :pop-size 25          ; 100 pre-except
+    :aqpn-warm-up 5       ; Ignore this number of tokens on both ends of the log.
     
-    :max-gens 300           ; These three control how long gp runs.  ; POD actually stops at :max-gens - 1.
+    :max-gens 30           ; These three control how long gp runs.  
     :success-threshold 0.1
-    :timeout-secs 20
-    :favor-smaller-pn? false
+    :timeout-secs 15
     
+    :favor-smaller-pn? false
     :debugging? true
     :pn-k-bounded 10 ; When to give up on computing the reachability graph.
     :min-max-k  3    ;2 POD TEMP    ; Minimum token count for max-k used in computing lax rgraph

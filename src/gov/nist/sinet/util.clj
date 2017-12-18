@@ -5,8 +5,9 @@
             [clojure.core.async :as async :refer [>! <! >!! <!! go-loop chan close!]]
             [clojure.spec.alpha :as s]
             [clojure.tools.namespace.repl :as nsp]
-            [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp pn-ok-> as-pn-ok->)] ; POD TEMPORARY!
-            [clojure.core.async :as async :refer [chan alts!! go timeout >!]]))
+            [clojure.math.combinatorics :as combo]
+            [clojure.core.async :as async :refer [chan alts!! go timeout >!]]
+            [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp pn-ok-> as-pn-ok->)]))
 
 (def ^:private diag (atom nil))
 
@@ -194,6 +195,31 @@
                                        (:places pn))))))
                  machines))))
 
+(defn iface-places
+  "Return a map keyed by [mx my] where mx and my are keywords 
+   naming machines. For each key [mx my] the map's value is a vector
+   of places that connect a transition associated with mx to an 
+   transition associated with my."
+  [pn]
+  (let [machines (machines-of pn)
+        combos   (map vec (combo/combinations machines 2))
+        from-to  (into combos (map (fn [[x y]] [y x]) combos))] ; machine pairs
+    (zipmap from-to
+            (let [places   (map :name (:places pn))
+                  arcs     (:arcs pn)]
+              (map (fn [[mx my]]
+                     (filterv (fn [p]
+                                (and (some (fn [a]
+                                             (and (= (:target a) p)
+                                                  (= mx (-> (pnu/name2obj pn (:source a)) :rep :m))))
+                                           arcs)
+                                     (some (fn [a]
+                                             (and (= (:source a) p)
+                                                  (= my (-> (pnu/name2obj pn (:target a)) :rep :m))))
+                                           arcs)))
+                              places))
+                   from-to)))))
+    
 (defn related-arcs
   "Return a map where the each key is a machine name and each value is a set of arc names.
    Both ends of the arcs must be connected a related-place or related-transition."
@@ -213,25 +239,67 @@
                                        (:arcs pn))))))
                  machines))))
 
+(defn first-contact
+  "Return the path from the START (a transition) to :sm or :aj transition on MACHINE."
+  [pn start machine]
+  (let [end (some #(when (and (= machine (-> % :rep :m))
+                              (contains? #{:aj :sm} (-> % :rep :mjpact)))
+                     (:name %))
+                  (:transitions pn))]
+    (if (= (-> (pnu/name2obj pn start) :rep :m) machine)
+      [start]
+      (some #(let [paths (pnu/paths-to pn start end %)]
+               (first paths))
+            (map #(* % 4) (range 1 (inc (count (machines-of pn)))))))))
+
+(defn upstream? 
+  "Return true if mx is upstream of my."
+  [pn mx my]
+  (let [start-trans (some #(when (= :aj (-> % :rep :mjpact)) (:name %)) (:transitions pn))]
+    (< (count (first-contact pn start-trans mx))
+       (count (first-contact pn start-trans my)))))
+
+(defn next-machine
+  "Return the next machine in the serial line."
+  [pn m]
+  (let [candidates
+        (->> (machines-of pn)
+             (remove #(= m %))
+             (filter #(upstream? pn m %)))
+        m-trans (some #(when (and (=   m (-> % :rep :m))
+                                  (contains? #{:aj :sm} (-> % :rep :mjpact)))
+                         (:name %))
+                      (:transitions pn))
+        [best _] (reduce (fn [[best bsize] [mcand path]]
+                           (let [psize (count path)]
+                             (if (and (> psize 0) (< psize bsize))
+                               [mcand psize]
+                               [best bsize])))
+                         [nil 999999]
+                         (zipmap candidates
+                                 (map #(first-contact pn m-trans %)
+                                      candidates)))]
+        best))
+             
+
+;;; POD Could probably use iface-places in the implementation of this. 
 (defn buffers-between
-  "Return all (only one?) buffers between the argument machines 
-   which should be adjacent"
+  "Return all (only one?) buffers between the argument machines. 
+   (1) If m1 is not upstream from m2, return nil. 
+   (2) The candidate place must not function as blocking (that is,
+       be between :ej and :sm or :aj transitions)."
   [pn m1 m2]
-  (let [places (related-places pn)
-        trans  (related-trans  pn)
-        m1-places (m1 places)
-        m2-places (m2 places)
-        m1-trans (m1 trans)
-        m2-trans (m2 trans)]
-    (filterv (fn [p] (and (not (contains? m1-places p))
-                          (not (contains? m2-places p))
-                          (some #(and (= (:target %) p)
-                                      (contains? m1-trans (:source %)))
-                                (:arcs pn))
-                          (some #(and (= (:source %) p)
-                                      (contains? m2-trans (:target %)))
-                                (:arcs pn))))
-             (map :name (:places pn)))))
+  (let [candidates (get (iface-places pn) [m1 m2])
+        arcs  (:arcs pn)]
+    (when (upstream? pn m1 m2)
+      (filterv (fn [p]
+                 (not (and (some #(and (= (:target %) p)
+                                       (= :bj (-> (pnu/name2obj pn (:source %)) :rep :mjpact)))
+                                 arcs)
+                           (some #(and (= (:source %) p)
+                                       (contains? #{:aj :sm} (-> (pnu/name2obj pn (:target %)) :rep :mjpact)))
+                                 arcs))))
+               candidates))))
 
 ;;; POD assembly scenarios (name*S*) NYT
 ;;; Find a place that is util/buffer-between and has an arc into a util/related-transition. 

@@ -474,11 +474,10 @@
           (dec (count m))))))
       
 (defn find-interpretation
-  "At increasing values of max-k, find new starting links and try to interpret
-   the entire log. Return the first complete interpretation found, if any below
-   max-max-k."
+  "At increasing values of max-k, find new starting links and try to interpret the entire log. 
+   Return the first complete interpretation found, if any below max-max-k."
   [pn log]
-  (when (interp-possible? pn)
+  (if (interp-possible? pn)
     (let [last-line (-> log last :line)
           max-max-k (-> (app-info) :gp-params :max-max-k)]
       (loop [max-k  (-> (app-info) :gp-params :min-max-k)]
@@ -491,9 +490,10 @@
           (cond (not (empty? good-interp))
                 (-> pn
                     (assoc :interp good-interp)
-                    (assoc :max-k-used max-k))
-                (> max-k max-max-k) pn
-                true (recur (inc max-k))))))))
+                    (assoc :max-k-used max-k)),
+                (> max-k max-max-k) pn,
+                true (recur (inc max-k))))))
+    pn))
 
 ;;; You can have the same marking associated with more than one class. The more times you have
 ;;; it associated with a class, the stronger the result will be for that class. To make
@@ -680,9 +680,11 @@
                           (buffers-to-constrain ?pn))
                   ?pn))]
       (-> inv ; POD most of these are temporary.
-          (assoc :except (if (not-empty (:winners pn)) 0.1 1))
+          (assoc :except (cond
+                           (not-empty (:trans-count pn)) 0.5
+                           (not-empty (:winners pn))     0.1
+                           true                          1.0))
           (assoc :pn pn)))))
-
 
 ;;;==================== Distance Measures for PNN =========================
 (defn euclid-dist

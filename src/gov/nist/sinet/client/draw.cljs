@@ -104,7 +104,7 @@
     (doseq [arc (:arcs pn)]
       (draw-arc pn arc))))
 
-(def +diag+ (atom nil))
+(def ^:private diag (atom nil))
 
 (defn handle-move!
   "Mouse pressed: Update coordinates to move an element or its label."
@@ -351,13 +351,13 @@
             candidates (remove (fn [c] (some #(= (first c) %) taken)) candidates)
             candidates (sort (fn [[_ d1] [_ d2]] (< d1 d2)) candidates)
             #_zippy #_(when (and (= place :Place-22) (= trans :m1-start-job) (= arc :aa-76))
-                    (reset! +diag+ {:place place :trans trans :arc arc
-                                    :top-showing? top-showing?
-                                    :me-now? me-now?
-                                    :left-showing? left-showing?
-                                    :first-candidate (first candidates)
-                                    :taken-map taken-map
-                                    :y-diff y-diff :cy cy :ty ty}))
+                    (reset! diag {:place place :trans trans :arc arc
+                                  :top-showing? top-showing?
+                                  :me-now? me-now?
+                                  :left-showing? left-showing?
+                                  :first-candidate (first candidates)
+                                  :taken-map taken-map
+                                  :y-diff y-diff :cy cy :ty ty}))
             best (cond (empty? candidates) closest
                        (and (< y-diff 5) left-showing? (not-taken? 1)) (gfn 1) 
                        (and (< y-diff 5) (not-taken? 0)) (gfn 0)
@@ -430,12 +430,10 @@
 (def graph-window-params {:window-size {:length 900 :height 500}
                           :x-start 30 :y-start 30})
 
-;;;(def diag (atom nil))
-
 (defn pn-graph-scale
   "Return a map providing reasonable scale factor for displaying the graph,
    given that the PN might have originated with another tool."
-  [pn]
+  [geom]
   (let [range
         (reduce (fn [range xy]
                   (as-> range ?r
@@ -445,7 +443,7 @@
                     (assoc ?r :max-y (max (:max-y ?r) (:y xy)))))
                 {:min-x 99999 :max-x -99999
                  :min-y 99999 :max-y -99999}
-                (-> pn :geom vals))
+                (vals geom))
         length (- (:max-x range) (:min-x range))
         height (- (:max-y range) (:min-y range))
         params graph-window-params]
@@ -455,27 +453,65 @@
       (assoc ?r :x-off (- (:x-start params) (:min-x range)))
       (assoc ?r :y-off (- (:y-start params) (:min-y range))))))
 
-(defn rescale
-  "Modifiy :geom to fit graph-window-params"
-  [pn]
-  (let [params (pn-graph-scale pn)
-        scale (:scale params)
-        xs (:x-off params)
-        ys (:y-off params)]
-    (update pn :geom
-           #(reduce (fn [mp [key val]]
-                      (assoc mp key
-                             (-> val
-                                 (assoc :x (Math/round (* scale (+ xs (-> val :x)))))
-                                 (assoc :y (Math/round (* scale (+ ys (-> val :y)))))
-                                 (assoc :label-x-off (max 10 (Math/round (* 0.6 scale (-> val :label-x-off)))))
-                                 (assoc :label-y-off (max 10 (Math/round (* 0.6 scale (-> val :label-y-off))))))))
-                    {}
-                    %))))
-
+(declare calc-new-geom match-geom best-match)
 (defn pn-geom
   "Compute reasonable display placement (:geom) for the argument PN."
-  [pn]
+  [pn old-pn]
+  (if (contains? old-pn :geom)
+    (assoc pn :geom (match-geom pn old-pn))
+    (assoc pn :geom (calc-new-geom pn))))
+
+(defn match-geom
+  "Set the geom to match positions of stuff on the screen now, as much as possible."
+  [pn old-pn]
+  (let [new-geom (calc-new-geom pn)
+        old-geom (atom (:geom old-pn))]
+    (reduce (fn [geom [key val]]
+              (if-let [old-val (key @old-geom)]
+                (do (swap! old-geom #(dissoc % key))
+                    (assoc geom key old-val))
+                (let [[kill-key new-val] (best-match pn old-pn new-geom @old-geom key)]
+                  (swap! old-geom #(dissoc % kill-key)) ; kill-key may be nil (no good match, new-val from new-geom). 
+                  (assoc geom key new-val))))
+            {}
+            new-geom)))
+
+(defn best-match
+  "Return the [key, object] from old-geom that best matches the argument obj."
+  [pn old-pn new-geom old-geom key]
+  ;; Find the other (not key) side of arcs into and out of the key object.
+  ;; If these arcs also name things that are in the old-pn, return the geometry
+  ;; This is NOT foolproof! Return the old-pn.geom and new or old geometry object. 
+  (let [new-arcs (:arcs pn)                 
+        into-new  (some #(when (= key (:target %)) (:source %)) new-arcs)
+        outof-new (some #(when (= key (:source %)) (:target %)) new-arcs)
+        old-arcs (:arcs old-pn)                 
+        arc-in  (some #(when (= into-new  (:target %)) %) old-arcs)
+        arc-out (some #(when (= outof-new (:source %)) %) old-arcs)]
+    (reset! diag {:arc-in arc-in :arc-out arc-out})
+    (if (and arc-in arc-out (= (:target arc-in) (:source arc-out)))
+      [(:target arc-in) ((:target arc-in) old-geom)]
+      [nil (key new-geom)])))
+
+(defn rescale
+  "Modifiy :geom to fit graph-window-params"
+  [geom params]
+  (let [scale (:scale params)
+        xs (:x-off params)
+        ys (:y-off params)]
+    (reduce (fn [mp [key val]]
+              (assoc mp key
+                     (-> val
+                         (assoc :x (Math/round (* scale (+ xs (-> val :x)))))
+                         (assoc :y (Math/round (* scale (+ ys (-> val :y)))))
+                         (assoc :label-x-off (max 10 (Math/round (* 0.6 scale (-> val :label-x-off)))))
+                         (assoc :label-y-off (max 10 (Math/round (* 0.6 scale (-> val :label-y-off))))))))
+            {}
+            geom)))
+
+(defn calc-new-geom
+  "No geometry exists for this pn; spread it out in a circle."
+  [pn]  
   (let [places (->> pn :places (map :name))
         trans  (->> pn :transitions (map :name))
         elems  (-> (vec (interleave places trans))
@@ -483,16 +519,15 @@
                    (into trans)
                    (distinct))
         angle-inc (/ (* 2 Math/PI) (count elems))
-        angle (atom (- angle-inc))]
-    (-> pn 
-        (assoc :geom 
-               (reduce (fn [geom ename]
-                         (swap! angle #(+ % angle-inc))
-                         (assoc geom ename
-                                {:x (Math/round (* 100 (Math/cos @angle)))
-                                 :y (Math/round (* 100 (Math/sin @angle)))
-                                 :label-x-off 10
-                                 :label-y-off 15}))
-                       {}
-                       elems))
-          (rescale))))
+        angle (atom (- angle-inc))
+        geom (reduce (fn [geom ename]
+                       (swap! angle #(+ % angle-inc))
+                       (assoc geom ename
+                              {:x (Math/round (* 100 (Math/cos @angle)))
+                               :y (Math/round (* 100 (Math/sin @angle)))
+                               :label-x-off 10
+                               :label-y-off 15}))
+                     {}
+                     elems)]
+    (rescale geom (pn-graph-scale geom))))
+

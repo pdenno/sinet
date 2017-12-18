@@ -3828,6 +3828,170 @@ when the number of tokens in a marking exceed  k*(m - 1) + m.
 
 ** <2017-12-12 Tue>
 
-*** NOT KEEPING THE ELITE!
+*** NOT KEEPING THE ELITE! 
 
 *** The above not solved, but now it goes off and never returns -- just dead. 
+Fixed, function not returning object problem.
+ 
+*** Add a "add-buffer" mutation -- works between machines. 
+
+I wrote diag-simple-evolve, which greatly simplifies running things.
+I decided towards add-buffer, but this will need more thought. 
+
+** <2017-12-13 Wed>
+
+Even a [[file:~/TwoDrive/OneDrive/Repo/mindmaps/images/sinet-simple-individual.jpg][simple individual]] has a buffer, in the sense of utils/buffers-between. 
+But what it doesn't have is *machine perspective*: there is "probably" a set of messages
+associated with a machine producing a part, and a cycle back to its original. 
+
+The solution might be to apply two "machine cycle" mutations and one "buffer mutation."n
+
+** <2017-12-17 Sun>
+
+*** This is the old util/buffers-between
+(defn buffers-between
+  "Return all (only one?) buffers between the argument machines. 
+   (1) The machines must be adjacent with m2 downstream from m1.
+   (2) The candidate place must not function as blocking (that is,
+   be between :ej and :sm or :aj transitions)."
+  [pn m1 m2]
+  (let [arcs  (:arcs pn)
+        places (related-places pn)
+        trans  (related-trans  pn)
+        m1-places (m1 places)
+        m2-places (m2 places)
+        m1-trans (m1 trans)
+        m2-trans (m2 trans)
+        candidates (filterv
+                    (fn [p] (and (not (contains? m1-places p))
+                                 (not (contains? m2-places p))
+                                 (some #(and (= (:target %) p)
+                                             (contains? m1-trans (:source %)))
+                                       (:arcs pn))
+                                 (some #(and (= (:source %) p)
+                                             (contains? m2-trans (:target %)))
+                                       (:arcs pn))))
+                    (map :name (:places pn)))]
+    (filterv (fn [p]
+               (not (and (some #(and (= (:target %) p)
+                                     (= :bj (-> (pnu/name2obj pn (:source %)) :rep :mjpact)))
+                               arcs)
+                         (some #(and (= (:source %) p)
+                                     (contains? #{:aj :sm} (-> (pnu/name2obj pn (:target %)) :rep :mjpact)))
+                               arcs))))
+             candidates)))
+
+
+*** Here are old mutation operators
+;;; POD this should probably go away! Replace by some sort of coping mechanism!
+(defmethod mutate-m :add-token [inv & args]
+  (if-let [places (-> inv :pn :places not-empty)]
+    (let [p-indx (rand-int (count places))]
+      (as-> inv ?i
+          (update-in ?i [:pn :places p-indx :initial-tokens] inc)
+          (update    ?i :history conj [:add-token (-> ?i :pn :places p-indx :name) :from (:id ?i)])))
+    {:skip :add-token :msg "no place!"}))
+
+(defmethod mutate-m :remove-token [inv & args]
+  (if (> (apply + (->> inv :pn :places (map :initial-tokens))) 1)
+    (let [pl (:name (random-place (:pn inv) :subset #(remove (fn [pl] (= 0 (:initial-tokens pl))) %)))]
+      (-> inv
+          (update-in [:pn :places (pnu/place-index (:pn inv) pl) :initial-tokens] dec)
+          (update    :history conj [:remove-token pl :from (:id inv)])))
+    {:skip :remove-token :msg "Not enough tokens left"}))
+
+(defmethod mutate-m :swap-places [inv & args]
+  (if-let [pl1 (:name (random-place (:pn inv)))]
+    (if-let [pl2 (:name (random-place (:pn inv):subset #(filter (fn [pl] (not= (:name pl) pl1)) %)))]
+      (-> inv
+          (update :pn #(swap-arcs % pl1 pl2))
+          (update :history conj [:swap-places pl1 pl2 :from (:id inv)]))
+      {:skip :swap-places :msg "no 2nd place"})
+    {:skip :swap-places :msg "no 1st place"}))
+
+(defmethod mutate-m :swap-trans [inv & args]
+  (if-let [tr1 (:name (random-trans (:pn inv)))]
+    (if-let [tr2 (:name (random-trans (:pn inv):subset #(filter (fn [tr] (not= (:name tr) tr1)) %)))]
+      (-> inv 
+          (update :pn #(swap-arcs % tr1 tr2))
+          (update :history conj [:swap-arcs tr1 tr2 :from (:id inv)]))
+      {:skip :swap-trans :msg "no 2nd trans"})
+    {:skip :swap-trans :msg "no 1st trans"}))
+
+(defmethod mutate-m :add-inhibitor [inv & args]
+  (if-let [tr (random-trans (:pn inv))]
+    (if-let [pl (random-place (:pn inv))]
+      (if-let [have-one (some #(when (and (= (:name pl) (:source %))
+                                          (= (:name tr) (:target %))) %)
+                              (filter #(= (:type %) :inhibitor) (-> inv :pn :arcs)))]
+        (as-> inv ?i
+          (update-in ?i [:pn :arcs (pnu/arc-index (:pn ?i) (:name have-one)) :multiplicity] inc)
+          (update    ?i :history conj [:add-inhibitor :have-one (:name have-one) :from (:id ?i)]))
+        (as-> inv ?i
+          (update ?i :pn #(pnu/add-pn % (pnu/make-arc % (:name pl) (:name tr) :type :inhibitor)))
+          (update ?i :history conj [:add-inhibitor (-> ?i :pn :arcs last :name) :from (:id ?i)])))
+      {:skip :add-inhibitor :msg "No place"})
+    {:skip :add-inhibitor :msg "No trans"}))
+
+(defmethod mutate-m :bump-inhibitor-3 [inv & args]
+  (if-let [inh (random-inhib (:pn inv))]
+    (-> inv
+        (update-in [:pn :arcs (pnu/arc-index (:pn inv) (:name inh)) :multiplicity] #(+ % 3))
+        (update    :history conj [:bump-inhibitor-3 (:name inh) :from (:id inv)]))
+    {:skip :bump-inhibitor-3 :msg "No inhib"}))
+
+(defmethod mutate-m :remove-inhibitor [inv & args]
+  (if-let [ar (random-arc (:pn inv) :subset #(filter (fn [ar] (= :inhibitor (:type ar))) %))]
+    (if (= 1 (:multiplicity ar))
+      (-> inv
+          (update-in [:pn :arcs] (fn [arcs] (vec (remove #(=  % ar) arcs))))
+          (update    :history conj [:remove-inhib (:name ar) :from (:id inv)]))
+      (-> inv
+          (update-in [:pn :arcs (pnu/arc-index (:pn inv) (:name ar)) :multiplicity] dec)
+          (update    :history conj [:remove-inhib :dec (:name ar) :from (:id inv)])))
+    {:skip :remove-inhibitor :msg "No inhibitor arcs"}))
+
+
+*** Running with new add-buffer mutation operator
+
+I'm stuck with simple-reach not fully expanding on [1 1 1 1 3] and the 
+
+*** No implementation of method: :sch-send! of protocol: #'taoensso.sente.interfaces/IServerChan found 
+
+for class: org.httpkit.server.AsyncChannel
+
+Oh, sente!
+
+Does this just not get loaded? 
+
+**** Here is the code for the http-client (none)
+(ns gov.nist.sinet.client.cexample
+  (:require [clojure.string :as str]
+            [org.httpkit.client :as hkit-c]  ; <============ DNE
+            [reagent.core :as reagent]
+            [re-frame.core :as rf]))
+
+**** Here is the code for the http-server
+(ns gov.nist.sinet.sexample
+  (:require [clojure.string :as str]
+            [org.httpkit.server :as hkit-s]
+            [reagent.core :as reagent]
+            [re-frame.core :as rf]))
+
+(defn handler [req]
+  (hkit-s/with-channel req channel              ; get the channel
+    ;; communicate with client using method defined above
+    (hkit-s/on-close channel (fn [status] (println "channel closed")))
+    (if (hkit-s/websocket? channel)
+      (println "WebSocket channel")
+      (println "HTTP channel"))
+    (hkit-s/on-receive channel (fn [data]       ; data received from client
+           ;; An optional param can pass to send!: close-after-send?
+           ;; When unspecified, `close-after-send?` defaults to true for HTTP channels
+           ;; and false for WebSocket.  (send! channel data close-after-send?)
+                                 (hkit-s/send! channel data))))) ; data is sent directly to the client
+
+
+
+
+
