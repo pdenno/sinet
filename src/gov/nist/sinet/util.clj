@@ -145,7 +145,10 @@
 (s/def ::visible boolean?)
 (s/def ::place       (s/keys :req-un [])) ; ::visible?
 (s/def ::transition  (s/keys :req-un [])) ; POD doesn't need a ::rep! ::visible?
-(s/def ::arc         (s/keys :req-un [::bind]))
+(s/def ::normal-arc  (s/keys :req-un [::bind]))
+(s/def ::arc         (s/or :inhib #(= :inhibitor (:type %))
+                           :normal (s/and #(= :normal (:type %))
+                                          ::normal-arc)))
 
 (s/def ::places      (s/and ::pnu/places      (s/coll-of ::place)))
 (s/def ::transitions (s/and ::pnu/transitions (s/coll-of ::transition)))

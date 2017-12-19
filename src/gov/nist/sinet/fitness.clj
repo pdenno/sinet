@@ -660,7 +660,7 @@
   [inv]
   (handling-evolve [inv]
     (let [log (-> (app-info) :problem :scada-log)
-          pn  (as-> (find-interpretation (:pn inv) log) ?pn
+              pn  (as-> (find-interpretation (:pn inv) log) ?pn
                 (assoc  ?pn :msg-table (compute-msg-table ?pn))
                 (assoc  ?pn :trans-counts (trans-counts (:interp ?pn)))
                 (dissoc ?pn :interp)
@@ -776,7 +776,6 @@
    where jobs start (BBS) or where they finish (BAS)." 
   [pn buffer N & {:keys [BAS?] :or {BAS? true}}]
   (when-let [trans (some #(when (= buffer (:target %)) (:source %)) (:arcs pn))]
-    (reset! diag {:pn pn :trans trans})
     (let [trans-index (pnu/trans-index pn trans)]
       (as-> pn ?pn
         (update ?pn :arcs #(conj % (pnu/make-arc ?pn buffer trans :type :inhibitor :multiplicity N)))
@@ -796,11 +795,15 @@
     (reduce (fn [cmaps [marking [msg _]]]
                  (let [example-msg (scada/msg-matching #(= (:act %) msg))
                        m (:m example-msg)] ; POD first
-                   (if-let [buf (some #(when-let [b (first (util/buffers-between pn m %))] b)
-                                      machines)]
-                     (conj cmaps {:buffer buf
-                                  :k (nth marking (.indexOf marking-key buf))})
-                     cmaps)))
+                   (let [buf (some #(when-let [b (first (util/buffers-between pn m %))] b)
+                                   machines)
+                         size (nth marking (.indexOf marking-key buf))]
+                     (if (and buf
+                              (not (some #(and (= (:source %) buf) ; If so, already constrained. 
+                                               (= (:type %) :inhibitor)
+                                               (= (:multiplicity %) size)) (:arcs pn))))
+                     (conj cmaps {:buffer buf :k size})
+                     cmaps))))
             []
             blocking)))
                        

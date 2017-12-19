@@ -257,7 +257,7 @@
              (cond (pnu/pn? (:pn i)) (diag-record-inv i)
                    (= n 0) (do (log {:in 'mutate :inv-id (:id ?inv)}) save-inv)
                    :else (recur (dec n)))))
-         (add-color-binding ?inv)
+         (add-color-binding ?inv) ;; POD meant to be temporary??? Same with next one. 
          (update ?inv :pn add-flow-priorities))))))
 
 (defn- mutate-m-dispatch [inv & {:keys [pick-fn force]
@@ -333,7 +333,9 @@
         m1 (nth machines (rand-int size))
         m2 (util/next-machine pn m1)]
     (if (and m2 (empty? (util/buffers-between pn m1 m2)))
-      (assoc inv :pn (add-buffer pn m1 m2))
+      (-> inv
+          (assoc :pn (add-buffer pn m1 m2))
+          (update :history conj [:add-buffer m1 m2]))
       inv)))
 
 (defn add-buffer
@@ -352,7 +354,6 @@
         buffer-to-m2 (assoc (pnu/make-arc pn (:name buffer) m2-start) :bind {:jtype :blue})
         p1-m2 (some #(when (= m2-start (:target %)) (:name %)) (:arcs pn))
         p3-m1 (some #(when (= m1-start (:target %)) (:name %)) (:arcs pn))]
-    (println "adding buffer!")
     (if (and m1-start m2-start p1-m2 p3-m1)
       (-> pn
           (pnu/add-pn buffer)

@@ -3954,7 +3954,7 @@ The solution might be to apply two "machine cycle" mutations and one "buffer mut
 
 *** Running with new add-buffer mutation operator
 
-I'm stuck with simple-reach not fully expanding on [1 1 1 1 3] and the 
+I'm stuck with simple-reach not fully expanding on [1 1 1 1 3] and a pn with a buffer. 
 
 *** No implementation of method: :sch-send! of protocol: #'taoensso.sente.interfaces/IServerChan found 
 
@@ -3995,3 +3995,15 @@ Does this just not get loaded?
 
 
 
+** <2017-12-18 Mon>
+
+I worked on:
+  (1) client/draw: not losing the graphics after moving things around. 
+  (2) Fixing add-buffer (The error is now apparent thanks to (1).).
+  (3) Adjusting the clojure.spec for PNs with inhibitor arcs.
+** <2017-12-19 Tue>
+
+The GP now works. Hurray! It finds something acceptable in 2 generations on the 2-machine example. 
+
+DONE: Need to not add an inhibitor where one already exists (a problem both with :add-inhibitor and :add-buffer). 
+      (The problem was actually with fit/buffers-to-constrain; :add-inhibitor DNE.)
