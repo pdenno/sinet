@@ -118,38 +118,38 @@
 (deftest logs-interpret
   (testing "that interpretations can be found when they should be found."
     (let [log (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj")
-          pn  (fit/find-interpretation hopeful-pn log)]
+          pn  (fit/find-interpretation hopeful-pn log 3 3)]
       (is (= 3002 (count (:interp pn)))))))
 
 (def rgraph
   [{:M [1 1 0 0 2], :fire :m2-start-job, :Mp [0 1 0 1 1], :rate 1.0}
-   {:M [1 1 0 0 3], :fire :m1-move-off, :Mp [1 0 1 0 3], :rate 1.0}
-   {:M [1 1 0 0 1], :fire :m1-move-off, :Mp [1 0 1 0 1], :rate 1.0}
+   {:M [1 1 0 0 3], :fire :m1-complete-job, :Mp [1 0 1 0 3], :rate 1.0}
+   {:M [1 1 0 0 1], :fire :m1-complete-job, :Mp [1 0 1 0 1], :rate 1.0}
    {:M [1 1 0 0 1], :fire :m2-start-job, :Mp [0 1 0 1 0], :rate 1.0}
-   {:M [0 1 0 1 3], :fire :m1-move-off, :Mp [0 0 1 1 3], :rate 1.0}
+   {:M [0 1 0 1 3], :fire :m1-complete-job, :Mp [0 0 1 1 3], :rate 1.0}
    {:M [0 0 1 1 1], :fire :m1-start-job, :Mp [0 1 0 1 2], :rate 1.0}
-   {:M [0 0 1 1 0], :fire :m2-move-off, :Mp [1 0 1 0 0], :rate 1.0}
+   {:M [0 0 1 1 0], :fire :m2-complete-job, :Mp [1 0 1 0 0], :rate 1.0}
    {:M [1 0 1 0 1], :fire :m1-start-job, :Mp [1 1 0 0 2], :rate 1.0}
-   {:M [1 1 0 0 2], :fire :m1-move-off, :Mp [1 0 1 0 2], :rate 1.0}
-   {:M [0 0 1 1 3], :fire :m2-move-off, :Mp [1 0 1 0 3], :rate 1.0}
+   {:M [1 1 0 0 2], :fire :m1-complete-job, :Mp [1 0 1 0 2], :rate 1.0}
+   {:M [0 0 1 1 3], :fire :m2-complete-job, :Mp [1 0 1 0 3], :rate 1.0}
    {:M [1 0 1 0 2], :fire :m1-start-job, :Mp [1 1 0 0 3], :rate 1.0}
    {:M [1 1 0 0 3], :fire :m2-start-job, :Mp [0 1 0 1 2], :rate 1.0}
    {:M [0 0 1 1 2], :fire :m1-start-job, :Mp [0 1 0 1 3], :rate 1.0}
    {:M [1 0 1 0 3], :fire :m2-start-job, :Mp [0 0 1 1 2], :rate 1.0}
-   {:M [0 1 0 1 2], :fire :m1-move-off, :Mp [0 0 1 1 2], :rate 1.0}
+   {:M [0 1 0 1 2], :fire :m1-complete-job, :Mp [0 0 1 1 2], :rate 1.0}
    {:M [0 0 1 1 0], :fire :m1-start-job, :Mp [0 1 0 1 1], :rate 1.0}
    {:M [1 0 1 0 1], :fire :m2-start-job, :Mp [0 0 1 1 0], :rate 1.0}
-   {:M [0 0 1 1 2], :fire :m2-move-off, :Mp [1 0 1 0 2], :rate 1.0}
-   {:M [0 1 0 1 0], :fire :m2-move-off, :Mp [1 1 0 0 0], :rate 1.0}
-   {:M [1 1 0 0 0], :fire :m1-move-off, :Mp [1 0 1 0 0], :rate 1.0}
-   {:M [0 1 0 1 1], :fire :m2-move-off, :Mp [1 1 0 0 1], :rate 1.0}
-   {:M [0 1 0 1 1], :fire :m1-move-off, :Mp [0 0 1 1 1], :rate 1.0}
-   {:M [0 1 0 1 0], :fire :m1-move-off, :Mp [0 0 1 1 0], :rate 1.0}
+   {:M [0 0 1 1 2], :fire :m2-complete-job, :Mp [1 0 1 0 2], :rate 1.0}
+   {:M [0 1 0 1 0], :fire :m2-complete-job, :Mp [1 1 0 0 0], :rate 1.0}
+   {:M [1 1 0 0 0], :fire :m1-complete-job, :Mp [1 0 1 0 0], :rate 1.0}
+   {:M [0 1 0 1 1], :fire :m2-complete-job, :Mp [1 1 0 0 1], :rate 1.0}
+   {:M [0 1 0 1 1], :fire :m1-complete-job, :Mp [0 0 1 1 1], :rate 1.0}
+   {:M [0 1 0 1 0], :fire :m1-complete-job, :Mp [0 0 1 1 0], :rate 1.0}
    {:M [1 0 1 0 2], :fire :m2-start-job, :Mp [0 0 1 1 1], :rate 1.0}
    {:M [1 0 1 0 0], :fire :m1-start-job, :Mp [1 1 0 0 1], :rate 1.0}
-   {:M [0 0 1 1 1], :fire :m2-move-off, :Mp [1 0 1 0 1], :rate 1.0}
-   {:M [0 1 0 1 2], :fire :m2-move-off, :Mp [1 1 0 0 2], :rate 1.0}
-   {:M [0 1 0 1 3], :fire :m2-move-off, :Mp [1 1 0 0 3], :rate 1.0}])
+   {:M [0 0 1 1 1], :fire :m2-complete-job, :Mp [1 0 1 0 1], :rate 1.0}
+   {:M [0 1 0 1 2], :fire :m2-complete-job, :Mp [1 1 0 0 2], :rate 1.0}
+   {:M [0 1 0 1 3], :fire :m2-complete-job, :Mp [1 1 0 0 3], :rate 1.0}])
 
 (def msg-table
   {:m2-starved   {[1 1 0 0 0] 32},
@@ -190,7 +190,7 @@
 (deftest trans-counts-test
   (testing "that trans-counts works"
       (let [log (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj")
-            pn (as-> (fit/find-interpretation hopeful-pn log) ?pn
+            pn (as-> (fit/find-interpretation hopeful-pn log 3 3) ?pn
                  (assoc ?pn :msg-table (fit/compute-msg-table ?pn)))] 
         (is (= trans-counts (fit/trans-counts (:interp pn)))))))
                                         
@@ -198,14 +198,38 @@
   (testing "that the message table looks good"
     (is (= msg-table
            (let [log (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj")]
-             (as-> (fit/find-interpretation hopeful-pn log) ?pn
+             (as-> (fit/find-interpretation hopeful-pn log 3 3) ?pn
                (fit/compute-msg-table ?pn)))))))
+
+(defn tryme []
+  (let [log (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj")
+        patterns (scada/scada-patterns log)
+        msg-types (conj (scada/exceptional-msgs patterns log) :ordinary)
+        foo (println "msg-types =" msg-types)
+        pn (as-> (fit/find-interpretation hopeful-pn log 3 3) ?pn
+             (assoc  ?pn :msg-table (fit/compute-msg-table ?pn msg-types))
+             (assoc  ?pn :norm-factors (fit/normalize-marking-factors (:rgraph ?pn)))
+             (assoc  ?pn :trans-counts (fit/trans-counts (:interp ?pn)))
+             (dissoc ?pn :interp)
+             (assoc  ?pn :sigma 0.35)
+             (assoc  ?pn :loom-prob (fit/rgraph2loom-probability (:rgraph ?pn) (:trans-counts ?pn)))
+             (assoc  ?pn :distance-fn (fit/dist-fn-6 (:loom-prob ?pn) (:norm-factors ?pn)))
+             (assoc  ?pn :pdf-fns
+                     (zipmap (-> ?pn :msg-table keys)
+                             (map #(fit/parzen-pdf-msg ?pn %)
+                                  (-> ?pn :msg-table keys)))))]
+    pn))
+
+    
+
 
 (deftest full-winner-process
   (testing "that the process works to winners and that intermediate test data is in sync."
     (let [log (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj")
-          pn (as-> (fit/find-interpretation hopeful-pn log) ?pn
-               (assoc  ?pn :msg-table (fit/compute-msg-table ?pn))
+          patterns (scada/scada-patterns log)
+          msg-types (conj (scada/exceptional-msgs patterns log) :ordinary)
+          pn (as-> (fit/find-interpretation hopeful-pn log 3 3) ?pn
+               (assoc  ?pn :msg-table (fit/compute-msg-table ?pn msg-types))
                (assoc  ?pn :norm-factors (fit/normalize-marking-factors (:rgraph ?pn)))
                (assoc  ?pn :trans-counts (fit/trans-counts (:interp ?pn)))
                (dissoc ?pn :interp)

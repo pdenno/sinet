@@ -671,7 +671,7 @@
           (recur world))))))
 
 (defn diag-simple-evolve
-  "Run the program without async"
+  "Run the program without async and GUI"
   []
   (reset-all!)
   (let [world (as-> {} ?w
@@ -693,6 +693,14 @@
         (cond (= (:state ?w) :failure) ?w
               (= (:state ?w) :success) ?w
               :else (recur (make-next-gen ?w)))))))
+
+(defn diag-i-error
+  []
+  (reset-all!)
+  (let [popu (-> (app-info) :pop)]
+    (for [i (range (count popu))]
+      (do (println "Inv " i)
+          (i-error (nth popu i))))))
 
 ;;; This is from the ICMR 2017 days!
 #_(defn eval-inv

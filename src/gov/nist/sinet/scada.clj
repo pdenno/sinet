@@ -205,7 +205,7 @@
                      (rest events)))))))
 
 (defn exceptional-msgs
-  "Return a list of the exceptional messages found in the scada log."
+  "Return the set of the exceptional messages found in the scada log."
   [scada-patterns scada-log]
   (let [ordinary (set (mapcat (fn [pat]
                                 (map :act (:form pat)))
@@ -223,6 +223,23 @@
          (map :act)
          distinct
          set)))
+
+(defn active-jobs
+  "Return the set of active jobs in the system"
+  [log]
+  (let [all-jobs (set (reduce (fn [accum msg]
+                                (if-let [job (:j msg)]
+                                  (conj accum job)
+                                  accum))
+                              []
+                              log))
+        add-jobs (set (reduce (fn [accum msg]
+                                (if (= (:mjpact msg) :aj)
+                                  (conj accum (:j msg))
+                                  accum))
+                              []
+                              log))]
+    (difference all-jobs add-jobs)))
 
 (defn msg-matching
   [pred]

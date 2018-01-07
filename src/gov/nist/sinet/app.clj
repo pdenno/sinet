@@ -24,14 +24,14 @@
     :aqpn-warm-up 5       ; Ignore this number of tokens on both ends of the log.
     
     :max-gens 30           ; These three control how long gp runs.  
-    :success-threshold 0.1
+    :success-threshold 0.15
     :timeout-secs 15
     
     :favor-smaller-pn? false
     :debugging? true
     :pn-k-bounded 10 ; When to give up on computing the reachability graph.
-    :min-max-k  3    ;2 POD TEMP    ; Minimum token count for max-k used in computing lax rgraph
-    :max-max-k  3    ;4 POD TEMP   ; Maximum token count for max-k used in computing lax rgraph 
+    :min-max-k  1 ; 2    ; Minimum token count for max-k used in computing lax rgraph
+    :max-max-k  3 ; 2    ; Maximum token count for max-k used in computing lax rgraph 
     :pn-max-rs 1000
     :crossover-to-mutation-ratio 0.5
     :select-pressure 4 ; POD not normalized to pop-size! Spector: 7/1000
@@ -45,7 +45,8 @@
 (def problem
   (atom 
    {:keep-vs-ignore 0.8
-    :scada-data-file "data/SCADA-logs/m2-j1-n3-block-mild-out.clj"      
+    :scada-data-file "data/SCADA-logs/scada-3m-2j-out.clj"
+    #_"data/SCADA-logs/m2-j1-n3-block-mild-out.clj"      
     #_"data/SCADA-logs/m2-j1-n3-block-out.clj"
     #_"data/SCADA-logs/scada-m2-j1-starve-m2-out.clj" ;"scada-f0-imbalanced.clj"
     :pattern-reserves #{:act :jt :bf :m :n}}))

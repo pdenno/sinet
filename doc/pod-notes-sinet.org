@@ -1,11 +1,5 @@
-* Org Mode Tasks
-** DONE Start using org for programming notes.
-   CLOSED: [2017-10-14 Sat 18:06]
-** DONE Learn how to 'open' and edit a link. Right now the org manual link is just the URL. 
-   CLOSED: [2017-10-15 Sun 12:25]
-** TODO Find out what good the source code marking is. I see that you can edit it with C-c ' but so what?
-
 * Notes on org mode
+** M-x widen -- When you lose text!
 ** Useful Links
 *** The tutorial 
  [[http://orgmode.org/worg/org-tutorials/orgtutorial_dto.html][The tutorial]]
@@ -37,6 +31,13 @@
 
 **** Footnotes [fn:1] is a reference.  Says it needs to start with "fn:" but it doesn't. 
      The definition must begin in column 1. 
+* Org Mode Tasks
+** DONE Start using org for programming notes.
+   CLOSED: [2017-10-14 Sat 18:06]
+** DONE Learn how to 'open' and edit a link. Right now the org manual link is just the URL. 
+   CLOSED: [2017-10-15 Sun 12:25]
+** TODO Find out what good the source code marking is. I see that you can edit it with C-c ' but so what?
+
 * Miscellaneous loosly related
 ** [[https://www.datasciencecentral.com/profiles/blogs/artificial-intelligence-is-not-fake-intelligence][This]] neural net chart is pretty good.
    Much better discussion of it [[http://www.asimovinstitute.org/neural-network-zoo/][here]].
@@ -45,7 +46,7 @@
 
 ** Clojure.core is one file of about 8000 lines. Worth a read! Includes futures, etc. 
 
-* Sinet TODOs
+* Sinet/MJPdes/SPNtools TODOs
 ** TODO Decide whether setting all transitions to timed makes sense for simple-reach. See discussion <2017-10-15 Sun>
 ** TODO Investigate possible bugs with MJPdes 'coordination' and create more 'deterministic' test cases.
 ** DONE Conceive of a strategy for using exceptional fitness
@@ -81,8 +82,10 @@
 ** TODO Rewrite disorder code to use rgraph.
 
 ** TODO Need a way to get the world after a time out. 
-** TODO Does the :pop really need to be on app-info?
-** TODO Every arc needs a :bind and :priority  <----------------------------SOON
+** DONE Does the :pop really need to be on app-info?
+   CLOSED: [2017-12-19 Tue 16:07]
+** DONE Every arc needs a :bind and :priority
+   CLOSED: [2017-12-19 Tue 16:07]
 ** DONE Perform experiments that will tell you what the value of exceptional messages is. 
    CLOSED: [2017-12-07 Thu 11:20]
         I think one can learn the lower-bound on the buffer size just by witnessing how
@@ -98,6 +101,14 @@
      (2) watching the execution times, maybe doing GPtips like regression.
 
 ** TODO Don't 'add choice' as a genetic operator, unless that is semantically what is intended! (see notes 2017-12-11)
+** TODO Set the marking in draw.cljs to something reasonable (use imark from lax-reach). 
+** TODO MJPdes: Update MJPdes README to note what :mx-complete-job means when :mx was blocked in BAS. 
+        Processing stopped at :mx-blocked. :mx-complete-job is always reported contemporaneous 
+        with :mx-unblock if :mx was blocked. 
+        In BAS, :mx-unblock reports where the part moves off the machine. 
+        In BBS, the part moves off the machine at :mx-complete-job and :mx-blocked prevents starting a new job.
+        (Regarding the BBS comment, at least that's the way I see it for PNs.) See next TODO!
+** TODO MJPdes: Make BBS/BAS something settable on the individual machine. 
 * Agenda up to December 1:
 ** DONE Fix bug in pnr/simple-reach. See bug <2017-10-15 Sun>
    CLOSED: [2017-10-15 Sun 18:13]
@@ -4007,3 +4018,885 @@ The GP now works. Hurray! It finds something acceptable in 2 generations on the 
 
 DONE: Need to not add an inhibitor where one already exists (a problem both with :add-inhibitor and :add-buffer). 
       (The problem was actually with fit/buffers-to-constrain; :add-inhibitor DNE.)
+
+Moving on to a 3-machine example; investigating move-on versus complete-job in MJPdes.
+
+Fails at find-interpretation. 
+
+[:place-1 :place-2 :place-3 :place-4 :place-5 :place-6 :Place-177 :Place-178]
+Here are the starting links: (It looks like only a subset of the possible buffer contents.)
+
+[{:M [0 1 0 1 0 1 1 1],
+  :fire :m2-complete-job,
+  :Mp [0 1 0 0 1 1 1 1],
+  :rate 1.0,
+  :indx 0,
+  :job 1356}
+ {:M [0 1 0 1 0 1 1 0],
+  :fire :m2-complete-job,
+  :Mp [0 1 0 0 1 1 1 0],
+  :rate 1.0,
+  :indx 0,
+  :job 1356}
+ {:M [0 1 0 1 0 1 2 1],
+  :fire :m2-complete-job,
+  :Mp [0 1 0 0 1 1 2 1],
+  :rate 1.0,
+  :indx 0,
+  :job 1356}
+ {:M [0 1 0 1 0 1 2 0],
+  :fire :m2-complete-job,
+  :Mp [0 1 0 0 1 1 2 0],
+  :rate 1.0,
+  :indx 0,
+  :job 1356}]
+
+Best of these is n=3, stops at :indx 155
+                                                            :b1       :b2
+[:place-1 :place-2 :place-3 :place-4 :place-5 :place-6 :Place-177 :Place-178]
+{:M [0 1 0 1 0 1 2 2], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 2], :rate-fn, :rate 1.0, :m :m2, :job 1381, :clk 2033.3367, :indx 155}
+
+{:clk 2033.3367 :act :m2-complete-job :m :m2 :mjpact :bj :bf :b2 :n 1 :j 1381 :line 155}
+{:clk 2033.3367 :act :m2-start-job :m :m2 :mjpact :sm :bf :b1 :n 2 :j 1382 :line 156}
+
+---> As shown, there should be n=1 in :b2 at line 155, according to the marking, there is 2.
+I think that means a better starting marking would have one less, but this is starting with [0 1 0 1 0 1 2 0] -- nothing in :b2
+
+It can't do line 156 because under the assumed marking the machine is blocked. That part makes sense! 
+So if it is really starting with 0 in :b2, how does it get here? (Check log too). 
+
+--> log suggest [0 1 0 1 0 1 2 0]  should be the right starting place. 
+
+That is all machines busy. First , buffers full!
+
+[0 1 0 1 0 1 2 0]
+{:clk 1999.6152 :act :m2-complete-job :m :m2 :mjpact :bj :bf :b2 :n 0 :j 1356 :line 0}
+{:clk 1999.6152 :act :m2-start-job :m :m2 :mjpact :sm :bf :b1 :n 2 :j 1357 :line 1}
+{:clk 1999.6152 :act :m1-unblocked :m :m1 :mjpact :ub :line 2}
+{:clk 1999.6152 :act :m1-complete-job :m :m1 :mjpact :bj :bf :b1 :n 1 :j 1359 :line 3}
+{:clk 1999.6152 :act :m1-start-job :m :m1 :mjpact :aj :jt :jobType1 :ends 2000.6152 :j 1360 :line 4}
+{:clk 2000.1007 :act :m3-complete-job :m :m3 :mjpact :ej :ent 1992.4608 :j 1355 :line 5}
+{:clk 2000.1007 :act :m3-start-job :m :m3 :mjpact :sm :bf :b2 :n 1 :j 1356 :line 6}
+{:clk 2000.6152 :act :m1-blocked :m :m1 :mjpact :bl :line 7}
+{:clk 2001.1152 :act :m2-complete-job :m :m2 :mjpact :bj :bf :b2 :n 0 :j 1357 :line 8}
+{:clk 2001.1152 :act :m2-start-job :m :m2 :mjpact :sm :bf :b1 :n 2 :j 1358 :line 9}
+{:clk 2001.1152 :act :m1-unblocked :m :m1 :mjpact :ub :line 10}
+{:clk 2001.1152 :act :m1-complete-job :m :m1 :mjpact :bj :bf :b1 :n 1 :j 1360 :line 11}
+
+
+Nothing goes past 155. 
+(defn foo [pn]
+  (let [starts (:rgraph pn)
+        log (-> (app-info) :problem :scada-log)]
+    (doall (map #(interpret-scada pn log (assoc % :indx 0, :job 1356))
+                starts))))
+
+{:clk 2029.4593 :act :m1-start-job :m :m1 :mjpact :aj :jt :jobType1 :ends 2030.4593 :j 1383 :line 144}
+matched =  {:M [0 0 1 1 0 1 1 2], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 2], :rate 1.0, :m :m1, :job 1383, :indx 144}
+
+{:clk 2029.8525 :act :m2-blocked :m :m2 :mjpact :bl :line 145}
+{:clk 2030.4593 :act :m1-blocked :m :m1 :mjpact :bl :line 146}
+
+{:clk 2031.8367 :act :m3-complete-job :m :m3 :mjpact :ej :ent 2021.4593 :j 1377 :line 147}
+matched =  {:M [0 1 0 1 0 1 2 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 2 2], :rate 1.0, :m :m3, :job 1377, :indx 147}
+
+{:clk 2031.8367 :act :m3-start-job :m :m3 :mjpact :sm :bf :b2 :n 2 :j 1378 :line 148}
+matched =  {:M [1 1 0 1 0 0 2 2], :fire :m3-start-job, :Mp [0 1 0 1 0 1 2 1], :rate 1.0, :m :m3, :job 1378, :indx 148}
+
+{:clk 2031.8367 :act :m2-unblocked :m :m2 :mjpact :ub :line 149}
+
+{:clk 2031.8367 :act :m2-complete-job :m :m2 :mjpact :bj :bf :b2 :n 1 :j 1380 :line 150}
+matched =  {:M [0 1 0 1 0 1 2 1], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 1], :rate 1.0, :m :m2, :job 1380, :indx 150}
+
+{:clk 2031.8367 :act :m2-start-job :m :m2 :mjpact :sm :bf :b1 :n 2 :j 1381 :line 151}
+matched =  {:M [0 1 0 0 1 1 2 1], :fire :m2-start-job, :Mp [0 1 0 1 0 1 1 2], :rate 1.0, :m :m2, :job 1381, :indx 151}
+
+{:clk 2031.8367 :act :m1-unblocked :m :m1 :mjpact :ub :line 152}
+
+{:clk 2031.8367 :act :m1-complete-job :m :m1 :mjpact :bj :bf :b1 :n 1 :j 1383 :line 153}
+matched =  {:M [0 1 0 1 0 1 1 2], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 2], :rate 1.0, :m :m1, :job 1383, :indx 153}
+
+{:clk 2031.8367 :act :m1-start-job :m :m1 :mjpact :aj :jt :jobType1 :ends 2033.4168 :j 1384 :line 154}
+matched =  {:M [0 0 1 1 0 1 1 2], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 2], :rate 1.0, :m :m1, :job 1384, :indx 154}
+
+{:clk 2033.3367 :act :m2-complete-job :m :m2 :mjpact :bj :bf :b2 :n 1 :j 1381 :line 155}
+matched =  {:M [0 1 0 1 0 1 2 2], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 2], :rate 1.0, :m :m2, :job 1381, :indx 155}
+**** If these markings were correct, m2 would be blocking now. It is not because n=1.
+     The log starts with zero in :b2, and the starts[3] marking reflects this:
+     starts[3] = {:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 0], :rate 1.0, :indx 0, :job 1356}
+     So how do I get to messed up landing on n=1 here? 
+
+{:clk 2033.3367 :act :m2-start-job :m :m2 :mjpact :sm :bf :b1 :n 2 :j 1382 :line 156}
+{:clk 2033.3367 :act :m3-complete-job :m :m3 :mjpact :ej :ent 2022.9593 :j 1378 :line 157}
+{:clk 2033.3367 :act :m3-start-job :m :m3 :mjpact :sm :bf :b2 :n 2 :j 1379 :line 158}
+
+** <2017-12-20 Wed>
+
+*** Deep dive into the log and rgraph:
+
+log =  {:clk 1999.6152, :act :m2-complete-job, :m :m2, :mjpact :bj, :bf :b2, :n 0, :j 1356, :line 0}
+start =  {:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 0], :rate 1.0, :indx 0, :job 1356}
+
+log =  {:clk 1999.6152, :act :m2-start-job, :m :m2, :mjpact :sm, :bf :b1, :n 2, :j 1357, :line 1}
+matched =  {:M [0 1 0 0 1 1 2 0], :fire :m2-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m2, :job 1357, :indx 1}
+
+log =  {:clk 1999.6152, :act :m1-unblocked, :m :m1, :mjpact :ub, :line 2}
+matched =  {:act :m1-unblocked, :prev-act :m2-start-job, :Mp [0 1 0 1 0 1 1 1], :state [0 1 0 1 0 1 1 1], :job 1357, :indx 2}
+log =  {:clk 1999.6152, :act :m1-complete-job, :m :m1, :mjpact :bj, :bf :b1, :n 1, :j 1359, :line 3}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 1], :rate 1.0, :m :m1, :job 1359, :indx 3}
+
+log =  {:clk 1999.6152, :act :m1-start-job, :m :m1, :mjpact :aj, :jt :jobType1, :ends 2000.6152, :j 1360, :line 4}
+matched =  {:M [0 0 1 1 0 1 1 1], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 1], :rate 1.0, :m :m1, :job 1360, :indx 4}
+
+log =  {:clk 2000.1007, :act :m3-complete-job, :m :m3, :mjpact :ej, :ent 1992.4608, :j 1355, :line 5}
+matched =  {:M [0 1 0 1 0 1 2 1], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 2 1], :rate 1.0, :m :m3, :job 1355, :indx 5}
+
+log =  {:clk 2000.1007, :act :m3-start-job, :m :m3, :mjpact :sm, :bf :b2, :n 1, :j 1356, :line 6}
+matched =  {:M [1 1 0 1 0 0 2 1], :fire :m3-start-job, :Mp [0 1 0 1 0 1 2 0], :rate 1.0, :m :m3, :job 1356, :indx 6}
+
+log =  {:clk 2000.6152, :act :m1-blocked, :m :m1, :mjpact :bl, :line 7}
+matched =  {:act :m1-blocked, :prev-act :m3-start-job, :Mp [0 1 0 1 0 1 2 0], :state [0 1 0 1 0 1 2 0], :job 1356, :indx 7}
+**** This part is hard to understand and messed up! 
+**** There is no token in place-3 (:m1 blocked) at this point, but there should be starting with :m1-blocked.
+**** DES is noting that 1 time unit has elapsed since :m1-start-job at 1999.6152. 
+**** Essentially, DES.m1-blocked corresponds to PN.m1-complete-job where the buffer is full. 
+**** This is, of course, what the exceptional code recognizes. 
+
+log =  {:clk 2001.1152, :act :m2-complete-job, :m :m2, :mjpact :bj, :bf :b2, :n 0, :j 1357, :line 8}
+matched =  {:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 0], :rate 1.0, :m :m2, :job 1357, :indx 8}
+**** According to PN :m1 was working on a part (:place-2 = 1). THAT'S NOT TRUE; :m1 IS BLOCKED. ---> START OF WRONG
+
+log =  {:clk 2001.1152, :act :m2-start-job, :m :m2, :mjpact :sm, :bf :b1, :n 2, :j 1358, :line 9}
+matched =  {:M [0 1 0 0 1 1 2 0], :fire :m2-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m2, :job 1358, :indx 9}
+
+log =  {:clk 2001.1152, :act :m1-unblocked, :m :m1, :mjpact :ub, :line 10}
+matched =  {:act :m1-unblocked, :prev-act :m2-start-job, :Mp [0 1 0 1 0 1 1 1], :state [0 1 0 1 0 1 1 1], :job 1358, :indx 10}
+log =  {:clk 2001.1152, :act :m1-complete-job, :m :m1, :mjpact :bj, :bf :b1, :n 1, :j 1360, :line 11}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 1], :rate 1.0, :m :m1, :job 1360, :indx 11}
+**** Finally here (:Mp) PN moves into m1 blocked (:place-3 = 1).                                 ---> END OF WRONG 
+**** m1-unblocked/m1-complete-job is "move-off" WHICH IS SIGNIFIED IN MJPdes WITH :M1-COMPLETE-JOB. 
+***** This 'error' has consequences in terms of quantification of sojourn times!
+***** Adjustment ("re-interpretation of PN") will be necessary, setting :m1-complete-job to the time
+***** of :m1-blocked.  
+
+****** The question now is whether this has is what is causing the problem at line 155. 
+
+log =  {:clk 2001.1152, :act :m1-start-job, :m :m1, :mjpact :aj, :jt :jobType2, :ends 2002.6152, :j 1361, :line 12}
+matched =  {:M [0 0 1 1 0 1 1 1], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 1], :rate 1.0, :m :m1, :job 1361, :indx 12}
+
+*** More of log (not studied)
+
+log =  {:clk 2001.6007, :act :m3-complete-job, :m :m3, :mjpact :ej, :ent 1993.9608, :j 1356, :line 13}
+matched =  {:M [0 1 0 1 0 1 2 1], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 2 1], :rate 1.0, :m :m3, :job 1356, :indx 13}
+log =  {:clk 2001.6007, :act :m3-start-job, :m :m3, :mjpact :sm, :bf :b2, :n 1, :j 1357, :line 14}
+matched =  {:M [1 1 0 1 0 0 2 1], :fire :m3-start-job, :Mp [0 1 0 1 0 1 2 0], :rate 1.0, :m :m3, :job 1357, :indx 14}
+log =  {:clk 2002.1152, :act :m2-complete-job, :m :m2, :mjpact :bj, :bf :b2, :n 0, :j 1358, :line 15}
+matched =  {:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 0], :rate 1.0, :m :m2, :job 1358, :indx 15}
+log =  {:clk 2002.1152, :act :m2-start-job, :m :m2, :mjpact :sm, :bf :b1, :n 2, :j 1359, :line 16}
+matched =  {:M [0 1 0 0 1 1 2 0], :fire :m2-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m2, :job 1359, :indx 16}
+log =  {:clk 2002.6152, :act :m1-complete-job, :m :m1, :mjpact :bj, :bf :b1, :n 1, :j 1361, :line 17}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 1], :rate 1.0, :m :m1, :job 1361, :indx 17}
+log =  {:clk 2002.6152, :act :m1-start-job, :m :m1, :mjpact :aj, :jt :jobType2, :ends 2004.1152, :j 1362, :line 18}
+matched =  {:M [0 0 1 1 0 1 1 1], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 1], :rate 1.0, :m :m1, :job 1362, :indx 18}
+log =  {:clk 2003.1007, :act :m3-complete-job, :m :m3, :mjpact :ej, :ent 1995.4608, :j 1357, :line 19}
+matched =  {:M [0 1 0 1 0 1 2 1], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 2 1], :rate 1.0, :m :m3, :job 1357, :indx 19}
+log =  {:clk 2003.1007, :act :m3-start-job, :m :m3, :mjpact :sm, :bf :b2, :n 1, :j 1358, :line 20}
+matched =  {:M [1 1 0 1 0 0 2 1], :fire :m3-start-job, :Mp [0 1 0 1 0 1 2 0], :rate 1.0, :m :m3, :job 1358, :indx 20}
+log =  {:clk 2003.1152, :act :m2-complete-job, :m :m2, :mjpact :bj, :bf :b2, :n 0, :j 1359, :line 21}
+matched =  {:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 0], :rate 1.0, :m :m2, :job 1359, :indx 21}
+log =  {:clk 2003.1152, :act :m2-start-job, :m :m2, :mjpact :sm, :bf :b1, :n 2, :j 1360, :line 22}
+matched =  {:M [0 1 0 0 1 1 2 0], :fire :m2-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m2, :job 1360, :indx 22}
+log =  {:clk 2004.1007, :act :m3-complete-job, :m :m3, :mjpact :ej, :ent 1996.9608, :j 1358, :line 23}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 1], :rate 1.0, :m :m3, :job 1358, :indx 23}
+log =  {:clk 2004.1007, :act :m3-start-job, :m :m3, :mjpact :sm, :bf :b2, :n 1, :j 1359, :line 24}
+matched =  {:M [1 1 0 1 0 0 1 1], :fire :m3-start-job, :Mp [0 1 0 1 0 1 1 0], :rate 1.0, :m :m3, :job 1359, :indx 24}
+log =  {:clk 2004.1152, :act :m1-complete-job, :m :m1, :mjpact :bj, :bf :b1, :n 1, :j 1362, :line 25}
+matched =  {:M [0 1 0 1 0 1 1 0], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 0], :rate 1.0, :m :m1, :job 1362, :indx 25}
+log =  {:clk 2004.1152, :act :m1-start-job, :m :m1, :mjpact :aj, :jt :jobType2, :ends 2005.6152, :j 1363, :line 26}
+matched =  {:M [0 0 1 1 0 1 1 0], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 0], :rate 1.0, :m :m1, :job 1363, :indx 26}
+log =  {:clk 2004.1152, :act :m2-complete-job, :m :m2, :mjpact :bj, :bf :b2, :n 0, :j 1360, :line 27}
+matched =  {:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 0], :rate 1.0, :m :m2, :job 1360, :indx 27}
+log =  {:clk 2004.1152, :act :m2-start-job, :m :m2, :mjpact :sm, :bf :b1, :n 2, :j 1361, :line 28}
+matched =  {:M [0 1 0 0 1 1 2 0], :fire :m2-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m2, :job 1361, :indx 28}
+log =  {:clk 2005.1007, :act :m3-complete-job, :m :m3, :mjpact :ej, :ent 1997.9608, :j 1359, :line 29}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 1], :rate 1.0, :m :m3, :job 1359, :indx 29}
+log =  {:clk 2005.1007, :act :m3-start-job, :m :m3, :mjpact :sm, :bf :b2, :n 1, :j 1360, :line 30}
+matched =  {:M [1 1 0 1 0 0 1 1], :fire :m3-start-job, :Mp [0 1 0 1 0 1 1 0], :rate 1.0, :m :m3, :job 1360, :indx 30}
+log =  {:clk 2005.6152, :act :m1-complete-job, :m :m1, :mjpact :bj, :bf :b1, :n 1, :j 1363, :line 31}
+matched =  {:M [0 1 0 1 0 1 1 0], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 0], :rate 1.0, :m :m1, :job 1363, :indx 31}
+log =  {:clk 2005.6152, :act :m1-start-job, :m :m1, :mjpact :aj, :jt :jobType2, :ends 2007.1152, :j 1364, :line 32}
+matched =  {:M [0 0 1 1 0 1 1 0], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 0], :rate 1.0, :m :m1, :job 1364, :indx 32}
+log =  {:clk 2005.6152, :act :m2-complete-job, :m :m2, :mjpact :bj, :bf :b2, :n 0, :j 1361, :line 33}
+matched =  {:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 0], :rate 1.0, :m :m2, :job 1361, :indx 33}
+log =  {:clk 2005.6152, :act :m2-start-job, :m :m2, :mjpact :sm, :bf :b1, :n 2, :j 1362, :line 34}
+matched =  {:M [0 1 0 0 1 1 2 0], :fire :m2-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m2, :job 1362, :indx 34}
+log =  {:clk 2006.1007, :act :m3-complete-job, :m :m3, :mjpact :ej, :ent 1999.6152, :j 1360, :line 35}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 1], :rate 1.0, :m :m3, :job 1360, :indx 35}
+log =  {:clk 2006.1007, :act :m3-start-job, :m :m3, :mjpact :sm, :bf :b2, :n 1, :j 1361, :line 36}
+matched =  {:M [1 1 0 1 0 0 1 1], :fire :m3-start-job, :Mp [0 1 0 1 0 1 1 0], :rate 1.0, :m :m3, :job 1361, :indx 36}
+log =  {:clk 2007.1152, :act :m1-complete-job, :m :m1, :mjpact :bj, :bf :b1, :n 1, :j 1364, :line 37}
+matched =  {:M [0 1 0 1 0 1 1 0], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 0], :rate 1.0, :m :m1, :job 1364, :indx 37}
+log =  {:clk 2007.1152, :act :m1-start-job, :m :m1, :mjpact :aj, :jt :jobType1, :ends 2008.1152, :j 1365, :line 38}
+matched =  {:M [0 0 1 1 0 1 1 0], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 0], :rate 1.0, :m :m1, :job 1365, :indx 38}
+log =  {:clk 2007.1152, :act :m2-complete-job, :m :m2, :mjpact :bj, :bf :b2, :n 0, :j 1362, :line 39}
+matched =  {:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 0], :rate 1.0, :m :m2, :job 1362, :indx 39}
+log =  {:clk 2007.1152, :act :m2-start-job, :m :m2, :mjpact :sm, :bf :b1, :n 2, :j 1363, :line 40}
+matched =  {:M [0 1 0 0 1 1 2 0], :fire :m2-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m2, :job 1363, :indx 40}
+log =  {:clk 2007.6007, :act :m3-complete-job, :m :m3, :mjpact :ej, :ent 2001.1152, :j 1361, :line 41}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 1], :rate 1.0, :m :m3, :job 1361, :indx 41}
+log =  {:clk 2007.6007, :act :m3-start-job, :m :m3, :mjpact :sm, :bf :b2, :n 1, :j 1362, :line 42}
+matched =  {:M [1 1 0 1 0 0 1 1], :fire :m3-start-job, :Mp [0 1 0 1 0 1 1 0], :rate 1.0, :m :m3, :job 1362, :indx 42}
+log =  {:clk 2008.1152, :act :m1-complete-job, :m :m1, :mjpact :bj, :bf :b1, :n 1, :j 1365, :line 43}
+matched =  {:M [0 1 0 1 0 1 1 0], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 0], :rate 1.0, :m :m1, :job 1365, :indx 43}
+log =  {:clk 2008.1152, :act :m1-start-job, :m :m1, :mjpact :aj, :jt :jobType1, :ends 2009.1152, :j 1366, :line 44}
+matched =  {:M [0 0 1 1 0 1 1 0], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 0], :rate 1.0, :m :m1, :job 1366, :indx 44}
+log =  {:clk 2008.6152, :act :m2-complete-job, :m :m2, :mjpact :bj, :bf :b2, :n 0, :j 1363, :line 45}
+matched =  {:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 0], :rate 1.0, :m :m2, :job 1363, :indx 45}
+log =  {:clk 2008.6152, :act :m2-start-job, :m :m2, :mjpact :sm, :bf :b1, :n 2, :j 1364, :line 46}
+matched =  {:M [0 1 0 0 1 1 2 0], :fire :m2-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m2, :job 1364, :indx 46}
+log =  {:clk 2009.1007, :act :m3-complete-job, :m :m3, :mjpact :ej, :ent 2002.6152, :j 1362, :line 47}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 1], :rate 1.0, :m :m3, :job 1362, :indx 47}
+log =  {:clk 2009.1007, :act :m3-start-job, :m :m3, :mjpact :sm, :bf :b2, :n 1, :j 1363, :line 48}
+matched =  {:M [1 1 0 1 0 0 1 1], :fire :m3-start-job, :Mp [0 1 0 1 0 1 1 0], :rate 1.0, :m :m3, :job 1363, :indx 48}
+log =  {:clk 2009.1152, :act :m1-complete-job, :m :m1, :mjpact :bj, :bf :b1, :n 1, :j 1366, :line 49}
+matched =  {:M [0 1 0 1 0 1 1 0], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 0], :rate 1.0, :m :m1, :job 1366, :indx 49}
+log =  {:clk 2009.1152, :act :m1-start-job, :m :m1, :mjpact :aj, :jt :jobType1, :ends 2010.9593, :j 1367, :line 50}
+matched =  {:M [0 0 1 1 0 1 1 0], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 0], :rate 1.0, :m :m1, :job 1367, :indx 50}
+log =  {:clk 2010.6007, :act :m3-complete-job, :m :m3, :mjpact :ej, :ent 2004.1152, :j 1363, :line 51}
+matched =  {:M [0 1 0 1 0 1 2 0], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 2 0], :rate 1.0, :m :m3, :job 1363, :indx 51}
+log =  {:clk 2010.6007, :act :m3-starved, :m :m3, :mjpact :st, :line 52}
+matched =  {:act :m3-starved, :prev-act :m3-complete-job, :Mp [1 1 0 1 0 0 2 0], :state [1 1 0 1 0 0 2 0], :job 1363, :indx 52}
+log =  {:clk 2010.7528, :act :m2-complete-job, :m :m2, :mjpact :bj, :bf :b2, :n 0, :j 1364, :line 53}
+matched =  {:M [1 1 0 1 0 0 2 0], :fire :m2-complete-job, :Mp [1 1 0 0 1 0 2 0], :rate 1.0, :m :m2, :job 1364, :indx 53}
+log =  {:clk 2010.7528, :act :m2-start-job, :m :m2, :mjpact :sm, :bf :b1, :n 2, :j 1365, :line 54}
+matched =  {:M [1 1 0 0 1 0 2 0], :fire :m2-start-job, :Mp [1 1 0 1 0 0 1 1], :rate 1.0, :m :m2, :job 1365, :indx 54}
+log =  {:clk 2010.7528, :act :m3-unstarved, :m :m3, :mjpact :us, :line 55}
+matched =  {:act :m3-unstarved, :prev-act :m2-start-job, :Mp [1 1 0 1 0 0 1 1], :state [1 1 0 1 0 0 1 1], :job 1365, :indx 55}
+log =  {:clk 2010.7528, :act :m3-start-job, :m :m3, :mjpact :sm, :bf :b2, :n 1, :j 1364, :line 56}
+matched =  {:M [1 1 0 1 0 0 1 1], :fire :m3-start-job, :Mp [0 1 0 1 0 1 1 0], :rate 1.0, :m :m3, :job 1364, :indx 56}
+log =  {:clk 2010.9593, :act :m1-complete-job, :m :m1, :mjpact :bj, :bf :b1, :n 1, :j 1367, :line 57}
+matched =  {:M [0 1 0 1 0 1 1 0], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 0], :rate 1.0, :m :m1, :job 1367, :indx 57}
+log =  {:clk 2010.9593, :act :m1-start-job, :m :m1, :mjpact :aj, :jt :jobType2, :ends 2012.4593, :j 1368, :line 58}
+matched =  {:M [0 0 1 1 0 1 1 0], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 0], :rate 1.0, :m :m1, :job 1368, :indx 58}
+log =  {:clk 2011.7528, :act :m2-complete-job, :m :m2, :mjpact :bj, :bf :b2, :n 0, :j 1365, :line 59}
+matched =  {:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 0], :rate 1.0, :m :m2, :job 1365, :indx 59}
+log =  {:clk 2011.7528, :act :m2-start-job, :m :m2, :mjpact :sm, :bf :b1, :n 2, :j 1366, :line 60}
+matched =  {:M [0 1 0 0 1 1 2 0], :fire :m2-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m2, :job 1366, :indx 60}
+log =  {:clk 2012.2528, :act :m3-complete-job, :m :m3, :mjpact :ej, :ent 2005.6152, :j 1364, :line 61}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 1], :rate 1.0, :m :m3, :job 1364, :indx 61}
+log =  {:clk 2012.2528, :act :m3-start-job, :m :m3, :mjpact :sm, :bf :b2, :n 1, :j 1365, :line 62}
+matched =  {:M [1 1 0 1 0 0 1 1], :fire :m3-start-job, :Mp [0 1 0 1 0 1 1 0], :rate 1.0, :m :m3, :job 1365, :indx 62}
+log =  {:clk 2012.4593, :act :m1-complete-job, :m :m1, :mjpact :bj, :bf :b1, :n 1, :j 1368, :line 63}
+matched =  {:M [0 1 0 1 0 1 1 0], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 0], :rate 1.0, :m :m1, :job 1368, :indx 63}
+log =  {:clk 2012.4593, :act :m1-start-job, :m :m1, :mjpact :aj, :jt :jobType1, :ends 2013.4593, :j 1369, :line 64}
+matched =  {:M [0 0 1 1 0 1 1 0], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 0], :rate 1.0, :m :m1, :job 1369, :indx 64}
+log =  {:clk 2012.7528, :act :m2-complete-job, :m :m2, :mjpact :bj, :bf :b2, :n 0, :j 1366, :line 65}
+matched =  {:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 0], :rate 1.0, :m :m2, :job 1366, :indx 65}
+log =  {:clk 2012.7528, :act :m2-start-job, :m :m2, :mjpact :sm, :bf :b1, :n 2, :j 1367, :line 66}
+matched =  {:M [0 1 0 0 1 1 2 0], :fire :m2-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m2, :job 1367, :indx 66}
+log =  {:clk 2013.2528, :act :m3-complete-job, :m :m3, :mjpact :ej, :ent 2007.1152, :j 1365, :line 67}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 1], :rate 1.0, :m :m3, :job 1365, :indx 67}
+log =  {:clk 2013.2528, :act :m3-start-job, :m :m3, :mjpact :sm, :bf :b2, :n 1, :j 1366, :line 68}
+matched =  {:M [1 1 0 1 0 0 1 1], :fire :m3-start-job, :Mp [0 1 0 1 0 1 1 0], :rate 1.0, :m :m3, :job 1366, :indx 68}
+log =  {:clk 2013.4593, :act :m1-complete-job, :m :m1, :mjpact :bj, :bf :b1, :n 1, :j 1369, :line 69}
+matched =  {:M [0 1 0 1 0 1 1 0], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 0], :rate 1.0, :m :m1, :job 1369, :indx 69}
+log =  {:clk 2013.4593, :act :m1-start-job, :m :m1, :mjpact :aj, :jt :jobType2, :ends 2014.9593, :j 1370, :line 70}
+matched =  {:M [0 0 1 1 0 1 1 0], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 0], :rate 1.0, :m :m1, :job 1370, :indx 70}
+log =  {:clk 2013.7528, :act :m2-complete-job, :m :m2, :mjpact :bj, :bf :b2, :n 0, :j 1367, :line 71}
+matched =  {:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 0], :rate 1.0, :m :m2, :job 1367, :indx 71}
+log =  {:clk 2013.7528, :act :m2-start-job, :m :m2, :mjpact :sm, :bf :b1, :n 2, :j 1368, :line 72}
+matched =  {:M [0 1 0 0 1 1 2 0], :fire :m2-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m2, :job 1368, :indx 72}
+log =  {:clk 2014.2528, :act :m3-complete-job, :m :m3, :mjpact :ej, :ent 2008.1152, :j 1366, :line 73}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 1], :rate 1.0, :m :m3, :job 1366, :indx 73}
+log =  {:clk 2014.2528, :act :m3-start-job, :m :m3, :mjpact :sm, :bf :b2, :n 1, :j 1367, :line 74}
+matched =  {:M [1 1 0 1 0 0 1 1], :fire :m3-start-job, :Mp [0 1 0 1 0 1 1 0], :rate 1.0, :m :m3, :job 1367, :indx 74}
+log =  {:clk 2014.9593, :act :m1-complete-job, :m :m1, :mjpact :bj, :bf :b1, :n 1, :j 1370, :line 75}
+matched =  {:M [0 1 0 1 0 1 1 0], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 0], :rate 1.0, :m :m1, :job 1370, :indx 75}
+log =  {:clk 2014.9593, :act :m1-start-job, :m :m1, :mjpact :aj, :jt :jobType2, :ends 2016.4593, :j 1371, :line 76}
+matched =  {:M [0 0 1 1 0 1 1 0], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 0], :rate 1.0, :m :m1, :job 1371, :indx 76}
+log =  {:clk 2015.2528, :act :m2-complete-job, :m :m2, :mjpact :bj, :bf :b2, :n 0, :j 1368, :line 77}
+matched =  {:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 0], :rate 1.0, :m :m2, :job 1368, :indx 77}
+log =  {:clk 2015.2528, :act :m2-start-job, :m :m2, :mjpact :sm, :bf :b1, :n 2, :j 1369, :line 78}
+matched =  {:M [0 1 0 0 1 1 2 0], :fire :m2-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m2, :job 1369, :indx 78}
+log =  {:clk 2016.2543, :act :m2-complete-job, :m :m2, :mjpact :bj, :bf :b2, :n 1, :j 1369, :line 79}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 1 1], :rate 1.0, :m :m2, :job 1369, :indx 79}
+log =  {:clk 2016.2543, :act :m2-start-job, :m :m2, :mjpact :sm, :bf :b1, :n 1, :j 1370, :line 80}
+matched =  {:M [0 1 0 0 1 1 1 1], :fire :m2-start-job, :Mp [0 1 0 1 0 1 0 2], :rate 1.0, :m :m2, :job 1370, :indx 80}
+log =  {:clk 2016.4593, :act :m1-complete-job, :m :m1, :mjpact :bj, :bf :b1, :n 0, :j 1371, :line 81}
+matched =  {:M [0 1 0 1 0 1 0 2], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 0 2], :rate 1.0, :m :m1, :job 1371, :indx 81}
+log =  {:clk 2016.4593, :act :m1-start-job, :m :m1, :mjpact :aj, :jt :jobType1, :ends 2017.4593, :j 1372, :line 82}
+matched =  {:M [0 0 1 1 0 1 0 2], :fire :m1-start-job, :Mp [0 1 0 1 0 1 1 2], :rate 1.0, :m :m1, :job 1372, :indx 82}
+log =  {:clk 2016.845, :act :m3-complete-job, :m :m3, :mjpact :ej, :ent 2009.1152, :j 1367, :line 83}
+matched =  {:M [0 1 0 1 0 1 1 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 2], :rate 1.0, :m :m3, :job 1367, :indx 83}
+log =  {:clk 2016.845, :act :m3-start-job, :m :m3, :mjpact :sm, :bf :b2, :n 2, :j 1368, :line 84}
+matched =  {:M [1 1 0 1 0 0 1 2], :fire :m3-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m3, :job 1368, :indx 84}
+log =  {:clk 2017.4593, :act :m1-complete-job, :m :m1, :mjpact :bj, :bf :b1, :n 1, :j 1372, :line 85}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 1], :rate 1.0, :m :m1, :job 1372, :indx 85}
+log =  {:clk 2017.4593, :act :m1-start-job, :m :m1, :mjpact :aj, :jt :jobType1, :ends 2018.4593, :j 1373, :line 86}
+matched =  {:M [0 0 1 1 0 1 1 1], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 1], :rate 1.0, :m :m1, :job 1373, :indx 86}
+log =  {:clk 2017.8525, :act :m2-complete-job, :m :m2, :mjpact :bj, :bf :b2, :n 1, :j 1370, :line 87}
+matched =  {:M [0 1 0 1 0 1 2 1], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 1], :rate 1.0, :m :m2, :job 1370, :indx 87}
+log =  {:clk 2017.8525, :act :m2-start-job, :m :m2, :mjpact :sm, :bf :b1, :n 2, :j 1371, :line 88}
+matched =  {:M [0 1 0 0 1 1 2 1], :fire :m2-start-job, :Mp [0 1 0 1 0 1 1 2], :rate 1.0, :m :m2, :job 1371, :indx 88}
+log =  {:clk 2018.345, :act :m3-complete-job, :m :m3, :mjpact :ej, :ent 2010.9593, :j 1368, :line 89}
+matched =  {:M [0 1 0 1 0 1 1 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 2], :rate 1.0, :m :m3, :job 1368, :indx 89}
+log =  {:clk 2018.345, :act :m3-start-job, :m :m3, :mjpact :sm, :bf :b2, :n 2, :j 1369, :line 90}
+matched =  {:M [1 1 0 1 0 0 1 2], :fire :m3-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m3, :job 1369, :indx 90}
+log =  {:clk 2018.4593, :act :m1-complete-job, :m :m1, :mjpact :bj, :bf :b1, :n 1, :j 1373, :line 91}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 1], :rate 1.0, :m :m1, :job 1373, :indx 91}
+log =  {:clk 2018.4593, :act :m1-start-job, :m :m1, :mjpact :aj, :jt :jobType1, :ends 2019.4593, :j 1374, :line 92}
+matched =  {:M [0 0 1 1 0 1 1 1], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 1], :rate 1.0, :m :m1, :job 1374, :indx 92}
+log =  {:clk 2019.345, :act :m3-complete-job, :m :m3, :mjpact :ej, :ent 2012.4593, :j 1369, :line 93}
+matched =  {:M [0 1 0 1 0 1 2 1], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 2 1], :rate 1.0, :m :m3, :job 1369, :indx 93}
+log =  {:clk 2019.345, :act :m3-start-job, :m :m3, :mjpact :sm, :bf :b2, :n 1, :j 1370, :line 94}
+matched =  {:M [1 1 0 1 0 0 2 1], :fire :m3-start-job, :Mp [0 1 0 1 0 1 2 0], :rate 1.0, :m :m3, :job 1370, :indx 94}
+log =  {:clk 2019.3525, :act :m2-complete-job, :m :m2, :mjpact :bj, :bf :b2, :n 0, :j 1371, :line 95}
+matched =  {:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 0], :rate 1.0, :m :m2, :job 1371, :indx 95}
+log =  {:clk 2019.3525, :act :m2-start-job, :m :m2, :mjpact :sm, :bf :b1, :n 2, :j 1372, :line 96}
+matched =  {:M [0 1 0 0 1 1 2 0], :fire :m2-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m2, :job 1372, :indx 96}
+log =  {:clk 2019.4593, :act :m1-complete-job, :m :m1, :mjpact :bj, :bf :b1, :n 1, :j 1374, :line 97}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 1], :rate 1.0, :m :m1, :job 1374, :indx 97}
+log =  {:clk 2019.4593, :act :m1-start-job, :m :m1, :mjpact :aj, :jt :jobType1, :ends 2020.4593, :j 1375, :line 98}
+matched =  {:M [0 0 1 1 0 1 1 1], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 1], :rate 1.0, :m :m1, :job 1375, :indx 98}
+log =  {:clk 2020.3525, :act :m2-complete-job, :m :m2, :mjpact :bj, :bf :b2, :n 1, :j 1372, :line 99}
+matched =  {:M [0 1 0 1 0 1 2 1], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 1], :rate 1.0, :m :m2, :job 1372, :indx 99}
+log =  {:clk 2020.3525, :act :m2-start-job, :m :m2, :mjpact :sm, :bf :b1, :n 2, :j 1373, :line 100}
+matched =  {:M [0 1 0 0 1 1 2 1], :fire :m2-start-job, :Mp [0 1 0 1 0 1 1 2], :rate 1.0, :m :m2, :job 1373, :indx 100}
+log =  {:clk 2020.4593, :act :m1-complete-job, :m :m1, :mjpact :bj, :bf :b1, :n 1, :j 1375, :line 101}
+matched =  {:M [0 1 0 1 0 1 1 2], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 2], :rate 1.0, :m :m1, :job 1375, :indx 101}
+log =  {:clk 2020.4593, :act :m1-start-job, :m :m1, :mjpact :aj, :jt :jobType1, :ends 2021.4593, :j 1376, :line 102}
+matched =  {:M [0 0 1 1 0 1 1 2], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 2], :rate 1.0, :m :m1, :job 1376, :indx 102}
+log =  {:clk 2020.845, :act :m3-complete-job, :m :m3, :mjpact :ej, :ent 2013.4593, :j 1370, :line 103}
+matched =  {:M [0 1 0 1 0 1 2 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 2 2], :rate 1.0, :m :m3, :job 1370, :indx 103}
+log =  {:clk 2020.845, :act :m3-start-job, :m :m3, :mjpact :sm, :bf :b2, :n 2, :j 1371, :line 104}
+matched =  {:M [1 1 0 1 0 0 2 2], :fire :m3-start-job, :Mp [0 1 0 1 0 1 2 1], :rate 1.0, :m :m3, :job 1371, :indx 104}
+log =  {:clk 2021.3525, :act :m2-complete-job, :m :m2, :mjpact :bj, :bf :b2, :n 1, :j 1373, :line 105}
+matched =  {:M [0 1 0 1 0 1 2 1], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 1], :rate 1.0, :m :m2, :job 1373, :indx 105}
+log =  {:clk 2021.3525, :act :m2-start-job, :m :m2, :mjpact :sm, :bf :b1, :n 2, :j 1374, :line 106}
+matched =  {:M [0 1 0 0 1 1 2 1], :fire :m2-start-job, :Mp [0 1 0 1 0 1 1 2], :rate 1.0, :m :m2, :job 1374, :indx 106}
+log =  {:clk 2021.4593, :act :m1-complete-job, :m :m1, :mjpact :bj, :bf :b1, :n 1, :j 1376, :line 107}
+matched =  {:M [0 1 0 1 0 1 1 2], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 2], :rate 1.0, :m :m1, :job 1376, :indx 107}
+log =  {:clk 2021.4593, :act :m1-start-job, :m :m1, :mjpact :aj, :jt :jobType2, :ends 2022.9593, :j 1377, :line 108}
+matched =  {:M [0 0 1 1 0 1 1 2], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 2], :rate 1.0, :m :m1, :job 1377, :indx 108}
+log =  {:clk 2022.345, :act :m3-complete-job, :m :m3, :mjpact :ej, :ent 2014.9593, :j 1371, :line 109}
+matched =  {:M [0 1 0 1 0 1 2 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 2 2], :rate 1.0, :m :m3, :job 1371, :indx 109}
+log =  {:clk 2022.345, :act :m3-start-job, :m :m3, :mjpact :sm, :bf :b2, :n 2, :j 1372, :line 110}
+matched =  {:M [1 1 0 1 0 0 2 2], :fire :m3-start-job, :Mp [0 1 0 1 0 1 2 1], :rate 1.0, :m :m3, :job 1372, :indx 110}
+log =  {:clk 2022.3525, :act :m2-complete-job, :m :m2, :mjpact :bj, :bf :b2, :n 1, :j 1374, :line 111}
+matched =  {:M [0 1 0 1 0 1 2 1], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 1], :rate 1.0, :m :m2, :job 1374, :indx 111}
+log =  {:clk 2022.3525, :act :m2-start-job, :m :m2, :mjpact :sm, :bf :b1, :n 2, :j 1375, :line 112}
+matched =  {:M [0 1 0 0 1 1 2 1], :fire :m2-start-job, :Mp [0 1 0 1 0 1 1 2], :rate 1.0, :m :m2, :job 1375, :indx 112}
+log =  {:clk 2022.9593, :act :m1-complete-job, :m :m1, :mjpact :bj, :bf :b1, :n 1, :j 1377, :line 113}
+matched =  {:M [0 1 0 1 0 1 1 2], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 2], :rate 1.0, :m :m1, :job 1377, :indx 113}
+log =  {:clk 2022.9593, :act :m1-start-job, :m :m1, :mjpact :aj, :jt :jobType2, :ends 2024.4593, :j 1378, :line 114}
+matched =  {:M [0 0 1 1 0 1 1 2], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 2], :rate 1.0, :m :m1, :job 1378, :indx 114}
+log =  {:clk 2023.345, :act :m3-complete-job, :m :m3, :mjpact :ej, :ent 2016.4593, :j 1372, :line 115}
+matched =  {:M [0 1 0 1 0 1 2 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 2 2], :rate 1.0, :m :m3, :job 1372, :indx 115}
+log =  {:clk 2023.345, :act :m3-start-job, :m :m3, :mjpact :sm, :bf :b2, :n 2, :j 1373, :line 116}
+matched =  {:M [1 1 0 1 0 0 2 2], :fire :m3-start-job, :Mp [0 1 0 1 0 1 2 1], :rate 1.0, :m :m3, :job 1373, :indx 116}
+log =  {:clk 2023.3525, :act :m2-complete-job, :m :m2, :mjpact :bj, :bf :b2, :n 1, :j 1375, :line 117}
+matched =  {:M [0 1 0 1 0 1 2 1], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 1], :rate 1.0, :m :m2, :job 1375, :indx 117}
+log =  {:clk 2023.3525, :act :m2-start-job, :m :m2, :mjpact :sm, :bf :b1, :n 2, :j 1376, :line 118}
+matched =  {:M [0 1 0 0 1 1 2 1], :fire :m2-start-job, :Mp [0 1 0 1 0 1 1 2], :rate 1.0, :m :m2, :job 1376, :indx 118}
+log =  {:clk 2024.345, :act :m3-complete-job, :m :m3, :mjpact :ej, :ent 2017.4593, :j 1373, :line 119}
+matched =  {:M [0 1 0 1 0 1 1 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 2], :rate 1.0, :m :m3, :job 1373, :indx 119}
+log =  {:clk 2024.345, :act :m3-start-job, :m :m3, :mjpact :sm, :bf :b2, :n 2, :j 1374, :line 120}
+matched =  {:M [1 1 0 1 0 0 1 2], :fire :m3-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m3, :job 1374, :indx 120}
+log =  {:clk 2024.3525, :act :m2-complete-job, :m :m2, :mjpact :bj, :bf :b2, :n 1, :j 1376, :line 121}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 1 1], :rate 1.0, :m :m2, :job 1376, :indx 121}
+log =  {:clk 2024.3525, :act :m2-start-job, :m :m2, :mjpact :sm, :bf :b1, :n 1, :j 1377, :line 122}
+matched =  {:M [0 1 0 0 1 1 1 1], :fire :m2-start-job, :Mp [0 1 0 1 0 1 0 2], :rate 1.0, :m :m2, :job 1377, :indx 122}
+log =  {:clk 2024.4593, :act :m1-complete-job, :m :m1, :mjpact :bj, :bf :b1, :n 0, :j 1378, :line 123}
+matched =  {:M [0 1 0 1 0 1 0 2], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 0 2], :rate 1.0, :m :m1, :job 1378, :indx 123}
+log =  {:clk 2024.4593, :act :m1-start-job, :m :m1, :mjpact :aj, :jt :jobType2, :ends 2025.9593, :j 1379, :line 124}
+matched =  {:M [0 0 1 1 0 1 0 2], :fire :m1-start-job, :Mp [0 1 0 1 0 1 1 2], :rate 1.0, :m :m1, :job 1379, :indx 124}
+log =  {:clk 2025.345, :act :m3-complete-job, :m :m3, :mjpact :ej, :ent 2018.4593, :j 1374, :line 125}
+matched =  {:M [0 1 0 1 0 1 1 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 2], :rate 1.0, :m :m3, :job 1374, :indx 125}
+log =  {:clk 2025.345, :act :m3-start-job, :m :m3, :mjpact :sm, :bf :b2, :n 2, :j 1375, :line 126}
+matched =  {:M [1 1 0 1 0 0 1 2], :fire :m3-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m3, :job 1375, :indx 126}
+log =  {:clk 2025.8525, :act :m2-complete-job, :m :m2, :mjpact :bj, :bf :b2, :n 1, :j 1377, :line 127}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 1 1], :rate 1.0, :m :m2, :job 1377, :indx 127}
+log =  {:clk 2025.8525, :act :m2-start-job, :m :m2, :mjpact :sm, :bf :b1, :n 1, :j 1378, :line 128}
+matched =  {:M [0 1 0 0 1 1 1 1], :fire :m2-start-job, :Mp [0 1 0 1 0 1 0 2], :rate 1.0, :m :m2, :job 1378, :indx 128}
+log =  {:clk 2025.9593, :act :m1-complete-job, :m :m1, :mjpact :bj, :bf :b1, :n 0, :j 1379, :line 129}
+matched =  {:M [0 1 0 1 0 1 0 2], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 0 2], :rate 1.0, :m :m1, :job 1379, :indx 129}
+log =  {:clk 2025.9593, :act :m1-start-job, :m :m1, :mjpact :aj, :jt :jobType1, :ends 2026.9593, :j 1380, :line 130}
+matched =  {:M [0 0 1 1 0 1 0 2], :fire :m1-start-job, :Mp [0 1 0 1 0 1 1 2], :rate 1.0, :m :m1, :job 1380, :indx 130}
+log =  {:clk 2026.345, :act :m3-complete-job, :m :m3, :mjpact :ej, :ent 2019.4593, :j 1375, :line 131}
+matched =  {:M [0 1 0 1 0 1 1 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 2], :rate 1.0, :m :m3, :job 1375, :indx 131}
+log =  {:clk 2026.345, :act :m3-start-job, :m :m3, :mjpact :sm, :bf :b2, :n 2, :j 1376, :line 132}
+matched =  {:M [1 1 0 1 0 0 1 2], :fire :m3-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m3, :job 1376, :indx 132}
+log =  {:clk 2026.9593, :act :m1-complete-job, :m :m1, :mjpact :bj, :bf :b1, :n 1, :j 1380, :line 133}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 1], :rate 1.0, :m :m1, :job 1380, :indx 133}
+log =  {:clk 2026.9593, :act :m1-start-job, :m :m1, :mjpact :aj, :jt :jobType2, :ends 2028.4593, :j 1381, :line 134}
+matched =  {:M [0 0 1 1 0 1 1 1], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 1], :rate 1.0, :m :m1, :job 1381, :indx 134}
+log =  {:clk 2027.345, :act :m3-complete-job, :m :m3, :mjpact :ej, :ent 2020.4593, :j 1376, :line 135}
+matched =  {:M [0 1 0 1 0 1 2 1], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 2 1], :rate 1.0, :m :m3, :job 1376, :indx 135}
+log =  {:clk 2027.345, :act :m3-start-job, :m :m3, :mjpact :sm, :bf :b2, :n 1, :j 1377, :line 136}
+matched =  {:M [1 1 0 1 0 0 2 1], :fire :m3-start-job, :Mp [0 1 0 1 0 1 2 0], :rate 1.0, :m :m3, :job 1377, :indx 136}
+log =  {:clk 2027.3525, :act :m2-complete-job, :m :m2, :mjpact :bj, :bf :b2, :n 0, :j 1378, :line 137}
+matched =  {:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 0], :rate 1.0, :m :m2, :job 1378, :indx 137}
+log =  {:clk 2027.3525, :act :m2-start-job, :m :m2, :mjpact :sm, :bf :b1, :n 2, :j 1379, :line 138}
+matched =  {:M [0 1 0 0 1 1 2 0], :fire :m2-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m2, :job 1379, :indx 138}
+log =  {:clk 2028.4593, :act :m1-complete-job, :m :m1, :mjpact :bj, :bf :b1, :n 1, :j 1381, :line 139}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 1], :rate 1.0, :m :m1, :job 1381, :indx 139}
+log =  {:clk 2028.4593, :act :m1-start-job, :m :m1, :mjpact :aj, :jt :jobType1, :ends 2029.4593, :j 1382, :line 140}
+matched =  {:M [0 0 1 1 0 1 1 1], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 1], :rate 1.0, :m :m1, :job 1382, :indx 140}
+log =  {:clk 2028.8525, :act :m2-complete-job, :m :m2, :mjpact :bj, :bf :b2, :n 1, :j 1379, :line 141}
+matched =  {:M [0 1 0 1 0 1 2 1], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 1], :rate 1.0, :m :m2, :job 1379, :indx 141}
+log =  {:clk 2028.8525, :act :m2-start-job, :m :m2, :mjpact :sm, :bf :b1, :n 2, :j 1380, :line 142}
+matched =  {:M [0 1 0 0 1 1 2 1], :fire :m2-start-job, :Mp [0 1 0 1 0 1 1 2], :rate 1.0, :m :m2, :job 1380, :indx 142}
+log =  {:clk 2029.4593, :act :m1-complete-job, :m :m1, :mjpact :bj, :bf :b1, :n 1, :j 1382, :line 143}
+matched =  {:M [0 1 0 1 0 1 1 2], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 2], :rate 1.0, :m :m1, :job 1382, :indx 143}
+log =  {:clk 2029.4593, :act :m1-start-job, :m :m1, :mjpact :aj, :jt :jobType1, :ends 2030.4593, :j 1383, :line 144}
+matched =  {:M [0 0 1 1 0 1 1 2], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 2], :rate 1.0, :m :m1, :job 1383, :indx 144}
+log =  {:clk 2029.8525, :act :m2-blocked, :m :m2, :mjpact :bl, :line 145}
+
+*** Deep dive 2: Log where things get botched up
+matched =  {:act :m2-blocked, :prev-act :m1-start-job, :Mp [0 1 0 1 0 1 2 2], :state [0 1 0 1 0 1 2 2], :job 1383, :indx 145}
+log =  {:clk 2030.4593, :act :m1-blocked, :m :m1, :mjpact :bl, :line 146}
+matched =  {:act :m1-blocked, :prev-act nil, :Mp [0 1 0 1 0 1 2 2], :state [0 1 0 1 0 1 2 2], :job 1383, :indx 146}
+log =  {:clk 2031.8367, :act :m3-complete-job, :m :m3, :mjpact :ej, :ent 2021.4593, :j 1377, :line 147}
+**** Both buffers are full, :m2 and :m1 blocked. 
+
+matched =  {:M [0 1 0 1 0 1 2 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 2 2], :rate 1.0, :m :m3, :job 1377, :indx 147}
+log =  {:clk 2031.8367, :act :m3-start-job, :m :m3, :mjpact :sm, :bf :b2, :n 2, :j 1378, :line 148}
+matched =  {:M [1 1 0 1 0 0 2 2], :fire :m3-start-job, :Mp [0 1 0 1 0 1 2 1], :rate 1.0, :m :m3, :job 1378, :indx 148}
+**** :m3 pulls a job, :b2 n: 2->1 ...
+log =  {:clk 2031.8367, :act :m2-unblocked, :m :m2, :mjpact :ub, :line 149}
+matched =  {:act :m2-unblocked, :prev-act :m3-start-job, :Mp [0 1 0 1 0 1 2 1], :state [0 1 0 1 0 1 2 1], :job 1378, :indx 149}
+****  ...unblocking :m2.
+
+log =  {:clk 2031.8367, :act :m2-complete-job, :m :m2, :mjpact :bj, :bf :b2, :n 1, :j 1380, :line 150}
+matched =  {:M [0 1 0 1 0 1 2 1], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 1], :rate 1.0, :m :m2, :job 1380, :indx 150}
+**** ...weirdness noted above about unblocking/complete-job with BAS, place-5:0->1 place-4:1->0
+
+log =  {:clk 2031.8367, :act :m2-start-job, :m :m2, :mjpact :sm, :bf :b1, :n 2, :j 1381, :line 151}
+matched =  {:M [0 1 0 0 1 1 2 1], :fire :m2-start-job, :Mp [0 1 0 1 0 1 1 2], :rate 1.0, :m :m2, :job 1381, :indx 151}
+**** ...m2 gets busy. b1 n:2->1
+
+log =  {:clk 2031.8367, :act :m1-unblocked, :m :m1, :mjpact :ub, :line 152}
+matched =  {:act :m1-unblocked, :prev-act :m2-start-job, :Mp [0 1 0 1 0 1 1 2], :state [0 1 0 1 0 1 1 2], :job 1381, :indx 152}
+**** ...unblocking :m1. 
+
+log =  {:clk 2031.8367, :act :m1-complete-job, :m :m1, :mjpact :bj, :bf :b1, :n 1, :j 1383, :line 153}
+matched =  {:M [0 1 0 1 0 1 1 2], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 2], :rate 1.0, :m :m1, :job 1383, :indx 153}
+**** :place-2:1->0 :place-3:0->1.
+
+log =  {:clk 2031.8367, :act :m1-start-job, :m :m1, :mjpact :aj, :jt :jobType1, :ends 2033.4168, :j 1384, :line 154}
+matched =  {:M [0 0 1 1 0 1 1 2], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 2], :rate 1.0, :m :m1, :job 1384, :indx 154}
+**** :place-2:0->1 :place-3:1->0.
+
+log =  {:clk 2033.3367, :act :m2-complete-job, :m :m2, :mjpact :bj, :bf :b2, :n 1, :j 1381, :line 155}
+matched =  {:M [0 1 0 1 0 1 2 2], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 2], :rate 1.0, :m :m2, :job 1381, :indx 155}
+**** At :M m1, m2, m3 are busy. At :Mp m2 goes into blocking (place-5 = 1). 
+
+log =  {:clk 2033.3367, :act :m2-start-job, :m :m2, :mjpact :sm, :bf :b1, :n 2, :j 1382, :line 156}
+matched =  nil
+
+Problem: ====> :m2-start-job would place another part in :b2 (:Place-178), exceeding max-k. 
+Question: Is the contemporaneous ordering wrong/not helpful?
+
+{:clk 2033.3367 :act :m2-complete-job :m :m2 :mjpact :bj :bf :b2 :n 1 :j 1381 :line 155}
+{:clk 2033.3367 :act :m2-start-job :m :m2 :mjpact :sm :bf :b1 :n 2 :j 1382 :line 156}
+{:clk 2033.3367 :act :m3-complete-job :m :m3 :mjpact :ej :ent 2022.9593 :j 1378 :line 157}
+{:clk 2033.3367 :act :m3-start-job :m :m3 :mjpact :sm :bf :b2 :n 2 :j 1379 :line 158}
+
+It could have done: <==================================================================== CONTEMPORANEOUS
+- m3-complete-job 
+- m3-start-job
+- m2-start-job
+- m2-complete-job
+
+I don't know whether in general I'll be able to get this right in MJPdes, so 
+I'm going to keep a atom buffer in find-interpretation for all messages and pick from them. 
+
+({:M [0 1 0 0 1 1 2 2],
+  :fire :m3-complete-job,
+  :Mp [1 1 0 0 1 0 2 2],
+  :rate 1.0}
+ {:M [0 1 0 0 1 1 2 2],
+  :fire :m1-complete-job,
+  :Mp [0 0 1 0 1 1 2 2],
+  :rate 1.0})
+
+***** {:clk 2033.3367 :act :m2-start-job :m :m2 :mjpact :sm :bf :b1 :n 2 :j 1382 :line 156}
+***** {:clk 2033.3367 :act :m3-complete-job :m :m3 :mjpact :ej :ent 2022.9593 :j 1378 :line 157}
+***** {:clk 2033.3367 :act :m3-start-job :m :m3 :mjpact :sm :bf :b2 :n 2 :j 1379 :line 158}
+***** {:clk 2033.4168 :act :m1-complete-job :m :m1 :mjpact :bj :bf :b1 :n 1 :j 1384 :line 159}
+***** {:clk 2033.4168 :act :m1-start-job :m :m1 :mjpact :aj :jt :jobType2 :ends 2034.9168 :j 1385 :line 160}
+
+(defn foo [pn]
+  (let [starts (:rgraph pn)
+        log (-> (app-info) :problem :scada-log)]
+    (doall (map #(interpret-scada pn log (assoc % :indx 0, :job 1356))
+                starts))))
+
+(defn foo1 [n]
+  (let [log (-> (app-info) :problem :scada-log)]
+    (interpret-scada pnpn1 log (nth starts n)))
+  true)
+
+
+
+
+*** The problem is that I should be looking at all contemporaneous messages for the match. 
+I wrote the code to do that. 
+
+** <2017-12-21 Thu>
+
+*** Meeting with Charles
+
+UPR Architectural Decision -- re-architect, 
+  "commercial implementation" --> "industrial pilot."  
+
+
+** <2018-01-04 Thu>
+I started cleaning up the 3-machine test, which before the break I had started an implementation
+of selecting a message from all contemporaneous messages. 
+
+I did not save the PN so I'm going to have to start with that on Friday. 
+** <2018-01-05 Fri>
+
+From a long time back, I had a [[file:~/TwoDrive/OneDrive/Repo/mindmaps/images/m3-serial-line.jpg][complete 3-machine description (with starve/block on m2)]].  
+What the code is capable of now is just to add the two buffers. 
+I will call this 'hopeful-pn-2'
+
+*** Note that I had to hit it a few times with (mutate iii :force :add-buffer) to get both buffers. Is that what I want? 
+*** hopeful-pn-2
+
+[[file:~/TwoDrive/OneDrive/Repo/mindmaps/images/m3-hopeful.jpg][m3-hopeful.jpg]]
+
+{:places
+ [{:name :place-1, :pid 7, :initial-tokens 1, :visible? true}
+  {:name :place-2, :pid 8, :initial-tokens 0, :visible? true}
+  {:name :place-3, :pid 9, :initial-tokens 0, :visible? true}
+  {:name :place-4, :pid 10, :initial-tokens 0, :visible? true}
+  {:name :place-5, :pid 11, :initial-tokens 0, :visible? true}
+  {:name :place-6, :pid 12, :initial-tokens 0, :visible? true}
+  {:name :Place-13, :pid 13, :initial-tokens 0}
+  {:name :Place-14, :pid 14, :initial-tokens 0}],
+ :transitions
+ [{:name :m1-start-job,
+   :tid 7,
+   :type :exponential,
+   :rate 1.0,
+   :rep {:clk 2447.3391, :act :m1-start-job, :m :m1, :mjpact :aj, :jt :jobType1, :ends 2448.3391, :j 1667, :line 2060},
+   :visible? true}
+  {:name :m1-complete-job,
+   :tid 8,
+   :type :exponential,
+   :rate 1.0,
+   :rep {:clk 2448.3391, :act :m1-complete-job, :m :m1, :mjpact :bj, :bf :b1, :n 1, :j 1667, :line 2063},
+   :visible? true}
+  {:name :m2-start-job,
+   :tid 9,
+   :type :exponential,
+   :rate 1.0,
+   :rep {:clk 2449.4604, :act :m2-start-job, :m :m2, :mjpact :sm, :bf :b1, :n 2, :j 1667, :line 2072},
+   :visible? true}
+  {:name :m2-complete-job,
+   :tid 10,
+   :type :exponential,
+   :rate 1.0,
+   :rep {:clk 2450.4604, :act :m2-complete-job, :m :m2, :mjpact :bj, :bf :b2, :n 1, :j 1667, :line 2077},
+   :visible? true}
+  {:name :m3-start-job,
+   :tid 11,
+   :type :exponential,
+   :rate 1.0,
+   :rep {:clk 2452.4604, :act :m3-start-job, :m :m3, :mjpact :sm, :bf :b2, :n 2, :j 1667, :line 2088},
+   :visible? true}
+  {:name :m3-complete-job,
+   :tid 12,
+   :type :exponential,
+   :rate 1.0,
+   :rep {:clk 2453.5276, :act :m3-complete-job, :m :m3, :mjpact :ej, :ent 2447.3391, :j 1667, :line 2092},
+   :visible? true}],
+ :arcs
+ [{:aid 13, :source :place-1, :target :m3-start-job, :name :aa-13, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+  {:aid 14, :source :m1-start-job, :target :place-2, :name :aa-14, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 15, :source :place-2, :target :m1-complete-job, :name :aa-15, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+  {:aid 16, :source :m1-complete-job, :target :place-3, :name :aa-16, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 17, :source :place-3, :target :m1-start-job, :name :aa-17, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+  {:aid 18, :source :m2-start-job, :target :place-4, :name :aa-18, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 19, :source :place-4, :target :m2-complete-job, :name :aa-19, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+  {:aid 20, :source :m2-complete-job, :target :place-5, :name :aa-20, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 21, :source :place-5, :target :m2-start-job, :name :aa-21, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+  {:aid 22, :source :m3-start-job, :target :place-6, :name :aa-22, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 23, :source :place-6, :target :m3-complete-job, :name :aa-23, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+  {:aid 24, :source :m3-complete-job, :target :place-1, :name :aa-24, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 25, :source :m1-start-job, :target :Place-13, :name :aa-25, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 2}
+  {:aid 26, :source :Place-13, :target :m2-start-job, :name :aa-26, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
+  {:aid 27, :source :m2-start-job, :target :Place-14, :name :aa-27, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 2}
+  {:aid 28, :source :Place-14, :target :m3-start-job, :name :aa-28, :type :normal, :multiplicity 1, :bind {:jtype :blue}}]}
+
+
+6.98 secs before I switch to transient pn (but things aren't working any way). 
+7.52 afterwards! (job 1356)
+These are much faster if I don't go to N=4! 
+
+*** Since :max-max-k is 3 and in fact the MJPdes model has N=2 for each buffer, how is 
+    it that I'm seeing a rgraph like with 4 in some places? ... Fixed. 
+
+Ugh! job 1356 is line 0!
+
+*** Best result is only 51 lines. What was it before I started? Answer: Line 155. Thus I'm not even back to normal yet!
+start =  {:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 0], :rate 1.0, :line 0, :job 1356}
+
+I don't seem to have data about the starting point for one that went 155 lines. Can I get it back? 
+Answer: Yes!
+
+*** Goes to 155 SAME START (GOOD!)
+start =  {:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 0], :rate 1.0, :indx 0, :job 1356}
+matched =  {:M [0 1 0 0 1 1 2 0], :fire :m2-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m2, :job 1357, :indx 1}
+matched =  {:act :m1-unblocked, :prev-act :m2-start-job, :Mp [0 1 0 1 0 1 1 1], :state [0 1 0 1 0 1 1 1], :job 1357, :indx 2}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 1], :rate 1.0, :m :m1, :job 1359, :indx 3}
+matched =  {:M [0 0 1 1 0 1 1 1], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 1], :rate 1.0, :m :m1, :job 1360, :indx 4}
+matched =  {:M [0 1 0 1 0 1 2 1], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 2 1], :rate 1.0, :m :m3, :job 1355, :indx 5}
+matched =  {:M [1 1 0 1 0 0 2 1], :fire :m3-start-job, :Mp [0 1 0 1 0 1 2 0], :rate 1.0, :m :m3, :job 1356, :indx 6}
+matched =  {:act :m1-blocked, :prev-act :m3-start-job, :Mp [0 1 0 1 0 1 2 0], :state [0 1 0 1 0 1 2 0], :job 1356, :indx 7}
+matched =  {:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 0], :rate 1.0, :m :m2, :job 1357, :indx 8}
+matched =  {:M [0 1 0 0 1 1 2 0], :fire :m2-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m2, :job 1358, :indx 9}
+matched =  {:act :m1-unblocked, :prev-act :m2-start-job, :Mp [0 1 0 1 0 1 1 1], :state [0 1 0 1 0 1 1 1], :job 1358, :indx 10}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 1], :rate 1.0, :m :m1, :job 1360, :indx 11}
+matched =  {:M [0 0 1 1 0 1 1 1], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 1], :rate 1.0, :m :m1, :job 1361, :indx 12}
+matched =  {:M [0 1 0 1 0 1 2 1], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 2 1], :rate 1.0, :m :m3, :job 1356, :indx 13}
+matched =  {:M [1 1 0 1 0 0 2 1], :fire :m3-start-job, :Mp [0 1 0 1 0 1 2 0], :rate 1.0, :m :m3, :job 1357, :indx 14}
+matched =  {:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 0], :rate 1.0, :m :m2, :job 1358, :indx 15}
+matched =  {:M [0 1 0 0 1 1 2 0], :fire :m2-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m2, :job 1359, :indx 16}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 1], :rate 1.0, :m :m1, :job 1361, :indx 17}
+matched =  {:M [0 0 1 1 0 1 1 1], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 1], :rate 1.0, :m :m1, :job 1362, :indx 18}
+matched =  {:M [0 1 0 1 0 1 2 1], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 2 1], :rate 1.0, :m :m3, :job 1357, :indx 19}
+matched =  {:M [1 1 0 1 0 0 2 1], :fire :m3-start-job, :Mp [0 1 0 1 0 1 2 0], :rate 1.0, :m :m3, :job 1358, :indx 20}
+matched =  {:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 0], :rate 1.0, :m :m2, :job 1359, :indx 21}
+matched =  {:M [0 1 0 0 1 1 2 0], :fire :m2-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m2, :job 1360, :indx 22}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 1], :rate 1.0, :m :m3, :job 1358, :indx 23}
+matched =  {:M [1 1 0 1 0 0 1 1], :fire :m3-start-job, :Mp [0 1 0 1 0 1 1 0], :rate 1.0, :m :m3, :job 1359, :indx 24}
+matched =  {:M [0 1 0 1 0 1 1 0], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 0], :rate 1.0, :m :m1, :job 1362, :indx 25}
+matched =  {:M [0 0 1 1 0 1 1 0], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 0], :rate 1.0, :m :m1, :job 1363, :indx 26}
+matched =  {:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 0], :rate 1.0, :m :m2, :job 1360, :indx 27}
+matched =  {:M [0 1 0 0 1 1 2 0], :fire :m2-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m2, :job 1361, :indx 28}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 1], :rate 1.0, :m :m3, :job 1359, :indx 29}
+matched =  {:M [1 1 0 1 0 0 1 1], :fire :m3-start-job, :Mp [0 1 0 1 0 1 1 0], :rate 1.0, :m :m3, :job 1360, :indx 30}
+matched =  {:M [0 1 0 1 0 1 1 0], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 0], :rate 1.0, :m :m1, :job 1363, :indx 31}
+matched =  {:M [0 0 1 1 0 1 1 0], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 0], :rate 1.0, :m :m1, :job 1364, :indx 32}
+matched =  {:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 0], :rate 1.0, :m :m2, :job 1361, :indx 33}
+matched =  {:M [0 1 0 0 1 1 2 0], :fire :m2-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m2, :job 1362, :indx 34}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 1], :rate 1.0, :m :m3, :job 1360, :indx 35}
+matched =  {:M [1 1 0 1 0 0 1 1], :fire :m3-start-job, :Mp [0 1 0 1 0 1 1 0], :rate 1.0, :m :m3, :job 1361, :indx 36}
+matched =  {:M [0 1 0 1 0 1 1 0], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 0], :rate 1.0, :m :m1, :job 1364, :indx 37}
+matched =  {:M [0 0 1 1 0 1 1 0], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 0], :rate 1.0, :m :m1, :job 1365, :indx 38}
+matched =  {:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 0], :rate 1.0, :m :m2, :job 1362, :indx 39}
+matched =  {:M [0 1 0 0 1 1 2 0], :fire :m2-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m2, :job 1363, :indx 40}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 1], :rate 1.0, :m :m3, :job 1361, :indx 41}
+matched =  {:M [1 1 0 1 0 0 1 1], :fire :m3-start-job, :Mp [0 1 0 1 0 1 1 0], :rate 1.0, :m :m3, :job 1362, :indx 42}
+matched =  {:M [0 1 0 1 0 1 1 0], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 0], :rate 1.0, :m :m1, :job 1365, :indx 43}
+matched =  {:M [0 0 1 1 0 1 1 0], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 0], :rate 1.0, :m :m1, :job 1366, :indx 44}
+matched =  {:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 0], :rate 1.0, :m :m2, :job 1363, :indx 45}
+matched =  {:M [0 1 0 0 1 1 2 0], :fire :m2-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m2, :job 1364, :indx 46}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 1], :rate 1.0, :m :m3, :job 1362, :indx 47}
+matched =  {:M [1 1 0 1 0 0 1 1], :fire :m3-start-job, :Mp [0 1 0 1 0 1 1 0], :rate 1.0, :m :m3, :job 1363, :indx 48}
+matched =  {:M [0 1 0 1 0 1 1 0], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 0], :rate 1.0, :m :m1, :job 1366, :indx 49}
+matched =  {:M [0 0 1 1 0 1 1 0], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 0], :rate 1.0, :m :m1, :job 1367, :indx 50}
+matched =  {:M [0 1 0 1 0 1 2 0], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 2 0], :rate 1.0, :m :m3, :job 1363, :indx 51}
+matched =  {:act :m3-starved, :prev-act :m3-complete-job, :Mp [1 1 0 1 0 0 2 0], :state [1 1 0 1 0 0 2 0], :job 1363, :indx 52}
+matched =  {:M [1 1 0 1 0 0 2 0], :fire :m2-complete-job, :Mp [1 1 0 0 1 0 2 0], :rate 1.0, :m :m2, :job 1364, :indx 53}
+matched =  {:M [1 1 0 0 1 0 2 0], :fire :m2-start-job, :Mp [1 1 0 1 0 0 1 1], :rate 1.0, :m :m2, :job 1365, :indx 54}
+matched =  {:act :m3-unstarved, :prev-act :m2-start-job, :Mp [1 1 0 1 0 0 1 1], :state [1 1 0 1 0 0 1 1], :job 1365, :indx 55}
+matched =  {:M [1 1 0 1 0 0 1 1], :fire :m3-start-job, :Mp [0 1 0 1 0 1 1 0], :rate 1.0, :m :m3, :job 1364, :indx 56}
+matched =  {:M [0 1 0 1 0 1 1 0], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 0], :rate 1.0, :m :m1, :job 1367, :indx 57}
+matched =  {:M [0 0 1 1 0 1 1 0], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 0], :rate 1.0, :m :m1, :job 1368, :indx 58}
+matched =  {:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 0], :rate 1.0, :m :m2, :job 1365, :indx 59}
+matched =  {:M [0 1 0 0 1 1 2 0], :fire :m2-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m2, :job 1366, :indx 60}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 1], :rate 1.0, :m :m3, :job 1364, :indx 61}
+matched =  {:M [1 1 0 1 0 0 1 1], :fire :m3-start-job, :Mp [0 1 0 1 0 1 1 0], :rate 1.0, :m :m3, :job 1365, :indx 62}
+matched =  {:M [0 1 0 1 0 1 1 0], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 0], :rate 1.0, :m :m1, :job 1368, :indx 63}
+matched =  {:M [0 0 1 1 0 1 1 0], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 0], :rate 1.0, :m :m1, :job 1369, :indx 64}
+matched =  {:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 0], :rate 1.0, :m :m2, :job 1366, :indx 65}
+matched =  {:M [0 1 0 0 1 1 2 0], :fire :m2-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m2, :job 1367, :indx 66}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 1], :rate 1.0, :m :m3, :job 1365, :indx 67}
+matched =  {:M [1 1 0 1 0 0 1 1], :fire :m3-start-job, :Mp [0 1 0 1 0 1 1 0], :rate 1.0, :m :m3, :job 1366, :indx 68}
+matched =  {:M [0 1 0 1 0 1 1 0], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 0], :rate 1.0, :m :m1, :job 1369, :indx 69}
+matched =  {:M [0 0 1 1 0 1 1 0], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 0], :rate 1.0, :m :m1, :job 1370, :indx 70}
+matched =  {:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 0], :rate 1.0, :m :m2, :job 1367, :indx 71}
+matched =  {:M [0 1 0 0 1 1 2 0], :fire :m2-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m2, :job 1368, :indx 72}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 1], :rate 1.0, :m :m3, :job 1366, :indx 73}
+matched =  {:M [1 1 0 1 0 0 1 1], :fire :m3-start-job, :Mp [0 1 0 1 0 1 1 0], :rate 1.0, :m :m3, :job 1367, :indx 74}
+matched =  {:M [0 1 0 1 0 1 1 0], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 0], :rate 1.0, :m :m1, :job 1370, :indx 75}
+matched =  {:M [0 0 1 1 0 1 1 0], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 0], :rate 1.0, :m :m1, :job 1371, :indx 76}
+matched =  {:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 0], :rate 1.0, :m :m2, :job 1368, :indx 77}
+matched =  {:M [0 1 0 0 1 1 2 0], :fire :m2-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m2, :job 1369, :indx 78}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 1 1], :rate 1.0, :m :m2, :job 1369, :indx 79}
+matched =  {:M [0 1 0 0 1 1 1 1], :fire :m2-start-job, :Mp [0 1 0 1 0 1 0 2], :rate 1.0, :m :m2, :job 1370, :indx 80}
+matched =  {:M [0 1 0 1 0 1 0 2], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 0 2], :rate 1.0, :m :m1, :job 1371, :indx 81}
+matched =  {:M [0 0 1 1 0 1 0 2], :fire :m1-start-job, :Mp [0 1 0 1 0 1 1 2], :rate 1.0, :m :m1, :job 1372, :indx 82}
+matched =  {:M [0 1 0 1 0 1 1 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 2], :rate 1.0, :m :m3, :job 1367, :indx 83}
+matched =  {:M [1 1 0 1 0 0 1 2], :fire :m3-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m3, :job 1368, :indx 84}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 1], :rate 1.0, :m :m1, :job 1372, :indx 85}
+matched =  {:M [0 0 1 1 0 1 1 1], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 1], :rate 1.0, :m :m1, :job 1373, :indx 86}
+matched =  {:M [0 1 0 1 0 1 2 1], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 1], :rate 1.0, :m :m2, :job 1370, :indx 87}
+matched =  {:M [0 1 0 0 1 1 2 1], :fire :m2-start-job, :Mp [0 1 0 1 0 1 1 2], :rate 1.0, :m :m2, :job 1371, :indx 88}
+matched =  {:M [0 1 0 1 0 1 1 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 2], :rate 1.0, :m :m3, :job 1368, :indx 89}
+matched =  {:M [1 1 0 1 0 0 1 2], :fire :m3-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m3, :job 1369, :indx 90}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 1], :rate 1.0, :m :m1, :job 1373, :indx 91}
+matched =  {:M [0 0 1 1 0 1 1 1], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 1], :rate 1.0, :m :m1, :job 1374, :indx 92}
+matched =  {:M [0 1 0 1 0 1 2 1], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 2 1], :rate 1.0, :m :m3, :job 1369, :indx 93}
+matched =  {:M [1 1 0 1 0 0 2 1], :fire :m3-start-job, :Mp [0 1 0 1 0 1 2 0], :rate 1.0, :m :m3, :job 1370, :indx 94}
+matched =  {:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 0], :rate 1.0, :m :m2, :job 1371, :indx 95}
+matched =  {:M [0 1 0 0 1 1 2 0], :fire :m2-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m2, :job 1372, :indx 96}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 1], :rate 1.0, :m :m1, :job 1374, :indx 97}
+matched =  {:M [0 0 1 1 0 1 1 1], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 1], :rate 1.0, :m :m1, :job 1375, :indx 98}
+matched =  {:M [0 1 0 1 0 1 2 1], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 1], :rate 1.0, :m :m2, :job 1372, :indx 99}
+matched =  {:M [0 1 0 0 1 1 2 1], :fire :m2-start-job, :Mp [0 1 0 1 0 1 1 2], :rate 1.0, :m :m2, :job 1373, :indx 100}
+matched =  {:M [0 1 0 1 0 1 1 2], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 2], :rate 1.0, :m :m1, :job 1375, :indx 101}
+matched =  {:M [0 0 1 1 0 1 1 2], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 2], :rate 1.0, :m :m1, :job 1376, :indx 102}
+matched =  {:M [0 1 0 1 0 1 2 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 2 2], :rate 1.0, :m :m3, :job 1370, :indx 103}
+matched =  {:M [1 1 0 1 0 0 2 2], :fire :m3-start-job, :Mp [0 1 0 1 0 1 2 1], :rate 1.0, :m :m3, :job 1371, :indx 104}
+matched =  {:M [0 1 0 1 0 1 2 1], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 1], :rate 1.0, :m :m2, :job 1373, :indx 105}
+matched =  {:M [0 1 0 0 1 1 2 1], :fire :m2-start-job, :Mp [0 1 0 1 0 1 1 2], :rate 1.0, :m :m2, :job 1374, :indx 106}
+matched =  {:M [0 1 0 1 0 1 1 2], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 2], :rate 1.0, :m :m1, :job 1376, :indx 107}
+matched =  {:M [0 0 1 1 0 1 1 2], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 2], :rate 1.0, :m :m1, :job 1377, :indx 108}
+matched =  {:M [0 1 0 1 0 1 2 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 2 2], :rate 1.0, :m :m3, :job 1371, :indx 109}
+matched =  {:M [1 1 0 1 0 0 2 2], :fire :m3-start-job, :Mp [0 1 0 1 0 1 2 1], :rate 1.0, :m :m3, :job 1372, :indx 110}
+matched =  {:M [0 1 0 1 0 1 2 1], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 1], :rate 1.0, :m :m2, :job 1374, :indx 111}
+matched =  {:M [0 1 0 0 1 1 2 1], :fire :m2-start-job, :Mp [0 1 0 1 0 1 1 2], :rate 1.0, :m :m2, :job 1375, :indx 112}
+matched =  {:M [0 1 0 1 0 1 1 2], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 2], :rate 1.0, :m :m1, :job 1377, :indx 113}
+matched =  {:M [0 0 1 1 0 1 1 2], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 2], :rate 1.0, :m :m1, :job 1378, :indx 114}
+matched =  {:M [0 1 0 1 0 1 2 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 2 2], :rate 1.0, :m :m3, :job 1372, :indx 115}
+matched =  {:M [1 1 0 1 0 0 2 2], :fire :m3-start-job, :Mp [0 1 0 1 0 1 2 1], :rate 1.0, :m :m3, :job 1373, :indx 116}
+matched =  {:M [0 1 0 1 0 1 2 1], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 1], :rate 1.0, :m :m2, :job 1375, :indx 117}
+matched =  {:M [0 1 0 0 1 1 2 1], :fire :m2-start-job, :Mp [0 1 0 1 0 1 1 2], :rate 1.0, :m :m2, :job 1376, :indx 118}
+matched =  {:M [0 1 0 1 0 1 1 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 2], :rate 1.0, :m :m3, :job 1373, :indx 119}
+matched =  {:M [1 1 0 1 0 0 1 2], :fire :m3-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m3, :job 1374, :indx 120}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 1 1], :rate 1.0, :m :m2, :job 1376, :indx 121}
+matched =  {:M [0 1 0 0 1 1 1 1], :fire :m2-start-job, :Mp [0 1 0 1 0 1 0 2], :rate 1.0, :m :m2, :job 1377, :indx 122}
+matched =  {:M [0 1 0 1 0 1 0 2], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 0 2], :rate 1.0, :m :m1, :job 1378, :indx 123}
+matched =  {:M [0 0 1 1 0 1 0 2], :fire :m1-start-job, :Mp [0 1 0 1 0 1 1 2], :rate 1.0, :m :m1, :job 1379, :indx 124}
+matched =  {:M [0 1 0 1 0 1 1 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 2], :rate 1.0, :m :m3, :job 1374, :indx 125}
+matched =  {:M [1 1 0 1 0 0 1 2], :fire :m3-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m3, :job 1375, :indx 126}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 1 1], :rate 1.0, :m :m2, :job 1377, :indx 127}
+matched =  {:M [0 1 0 0 1 1 1 1], :fire :m2-start-job, :Mp [0 1 0 1 0 1 0 2], :rate 1.0, :m :m2, :job 1378, :indx 128}
+matched =  {:M [0 1 0 1 0 1 0 2], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 0 2], :rate 1.0, :m :m1, :job 1379, :indx 129}
+matched =  {:M [0 0 1 1 0 1 0 2], :fire :m1-start-job, :Mp [0 1 0 1 0 1 1 2], :rate 1.0, :m :m1, :job 1380, :indx 130}
+matched =  {:M [0 1 0 1 0 1 1 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 2], :rate 1.0, :m :m3, :job 1375, :indx 131}
+matched =  {:M [1 1 0 1 0 0 1 2], :fire :m3-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m3, :job 1376, :indx 132}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 1], :rate 1.0, :m :m1, :job 1380, :indx 133}
+matched =  {:M [0 0 1 1 0 1 1 1], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 1], :rate 1.0, :m :m1, :job 1381, :indx 134}
+matched =  {:M [0 1 0 1 0 1 2 1], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 2 1], :rate 1.0, :m :m3, :job 1376, :indx 135}
+matched =  {:M [1 1 0 1 0 0 2 1], :fire :m3-start-job, :Mp [0 1 0 1 0 1 2 0], :rate 1.0, :m :m3, :job 1377, :indx 136}
+matched =  {:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 0], :rate 1.0, :m :m2, :job 1378, :indx 137}
+matched =  {:M [0 1 0 0 1 1 2 0], :fire :m2-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m2, :job 1379, :indx 138}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 1], :rate 1.0, :m :m1, :job 1381, :indx 139}
+matched =  {:M [0 0 1 1 0 1 1 1], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 1], :rate 1.0, :m :m1, :job 1382, :indx 140}
+matched =  {:M [0 1 0 1 0 1 2 1], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 1], :rate 1.0, :m :m2, :job 1379, :indx 141}
+matched =  {:M [0 1 0 0 1 1 2 1], :fire :m2-start-job, :Mp [0 1 0 1 0 1 1 2], :rate 1.0, :m :m2, :job 1380, :indx 142}
+matched =  {:M [0 1 0 1 0 1 1 2], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 2], :rate 1.0, :m :m1, :job 1382, :indx 143}
+matched =  {:M [0 0 1 1 0 1 1 2], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 2], :rate 1.0, :m :m1, :job 1383, :indx 144}
+matched =  {:act :m2-blocked, :prev-act :m1-start-job, :Mp [0 1 0 1 0 1 2 2], :state [0 1 0 1 0 1 2 2], :job 1383, :indx 145}
+matched =  {:act :m1-blocked, :prev-act nil, :Mp [0 1 0 1 0 1 2 2], :state [0 1 0 1 0 1 2 2], :job 1383, :indx 146}
+matched =  {:M [0 1 0 1 0 1 2 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 2 2], :rate 1.0, :m :m3, :job 1377, :indx 147}
+matched =  {:M [1 1 0 1 0 0 2 2], :fire :m3-start-job, :Mp [0 1 0 1 0 1 2 1], :rate 1.0, :m :m3, :job 1378, :indx 148}
+matched =  {:act :m2-unblocked, :prev-act :m3-start-job, :Mp [0 1 0 1 0 1 2 1], :state [0 1 0 1 0 1 2 1], :job 1378, :indx 149}
+matched =  {:M [0 1 0 1 0 1 2 1], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 1], :rate 1.0, :m :m2, :job 1380, :indx 150}
+matched =  {:M [0 1 0 0 1 1 2 1], :fire :m2-start-job, :Mp [0 1 0 1 0 1 1 2], :rate 1.0, :m :m2, :job 1381, :indx 151}
+matched =  {:act :m1-unblocked, :prev-act :m2-start-job, :Mp [0 1 0 1 0 1 1 2], :state [0 1 0 1 0 1 1 2], :job 1381, :indx 152}
+matched =  {:M [0 1 0 1 0 1 1 2], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 1 2], :rate 1.0, :m :m1, :job 1383, :indx 153}
+matched =  {:M [0 0 1 1 0 1 1 2], :fire :m1-start-job, :Mp [0 1 0 1 0 1 2 2], :rate 1.0, :m :m1, :job 1384, :indx 154}
+matched =  {:M [0 1 0 1 0 1 2 2], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 2], :rate 1.0, :m :m2, :job 1381, :indx 155}
+matched =  nil
+
+*** NEXT STEP: Run the new msg-buf version and see where it goes wrong. 
+
+** <2018-01-06 Sat>
+
+** Continuing with debug; here's from the msg-buf approach
+
+start =  {:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 0], :rate-fn #function[gov.nist.spntools.util.reach/next-links/fn--32658/fn--32663], :rate 1.0, :line 0, :job 1356}
+matched =  {:fire :m2-complete-job, :M [0 1 0 1 0 1 1 1], :Mp [0 1 0 0 1 1 1 1], :m :m2, :rate 1.0, :relax? :active, :line 0, :job 1356}
+matched =  {:M [0 1 0 0 1 1 1 1], :fire :m2-start-job, :Mp [0 1 0 1 0 1 0 2], :rate 1.0, :m :m2, :job 1357, :line 1}
+matched =  {:act :m1-unblocked, :prev-act :m2-start-job, :Mp [0 1 0 1 0 1 0 2], :state [0 1 0 1 0 1 0 2], :job 1357, :line 2}
+matched =  {:M [0 1 0 1 0 1 0 2], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 0 2], :rate 1.0, :m :m1, :job 1359, :line 3}
+matched =  {:M [0 0 1 1 0 1 0 2], :fire :m1-start-job, :Mp [0 1 0 1 0 1 1 2], :rate 1.0, :m :m1, :job 1360, :line 4}
+matched =  {:M [0 1 0 1 0 1 1 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 2], :rate 1.0, :m :m3, :job 1355, :line 5}
+matched =  {:M [1 1 0 1 0 0 1 2], :fire :m3-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m3, :job 1356, :line 6}
+matched =  {:act :m1-blocked, :prev-act :m3-start-job, :Mp [0 1 0 1 0 1 1 1], :state [0 1 0 1 0 1 1 1], :job 1356, :line 7}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 1 1], :rate 1.0, :m :m2, :job 1357, :line 8}
+matched =  {:M [0 1 0 0 1 1 1 1], :fire :m2-start-job, :Mp [0 1 0 1 0 1 0 2], :rate 1.0, :m :m2, :job 1358, :line 9}
+matched =  {:act :m1-unblocked, :prev-act :m2-start-job, :Mp [0 1 0 1 0 1 0 2], :state [0 1 0 1 0 1 0 2], :job 1358, :line 10}
+matched =  {:M [0 1 0 1 0 1 0 2], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 0 2], :rate 1.0, :m :m1, :job 1360, :line 11}
+matched =  {:M [0 0 1 1 0 1 0 2], :fire :m1-start-job, :Mp [0 1 0 1 0 1 1 2], :rate 1.0, :m :m1, :job 1361, :line 12}
+matched =  {:M [0 1 0 1 0 1 1 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 2], :rate 1.0, :m :m3, :job 1356, :line 13}
+matched =  {:M [1 1 0 1 0 0 1 2], :fire :m3-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m3, :job 1357, :line 14}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 1 1], :rate 1.0, :m :m2, :job 1358, :line 15}
+matched =  {:M [0 1 0 0 1 1 1 1], :fire :m2-start-job, :Mp [0 1 0 1 0 1 0 2], :rate 1.0, :m :m2, :job 1359, :line 16}
+matched =  {:M [0 1 0 1 0 1 0 2], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 0 2], :rate 1.0, :m :m1, :job 1361, :line 17}
+matched =  {:M [0 0 1 1 0 1 0 2], :fire :m1-start-job, :Mp [0 1 0 1 0 1 1 2], :rate 1.0, :m :m1, :job 1362, :line 18}
+matched =  {:M [0 1 0 1 0 1 1 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 2], :rate 1.0, :m :m3, :job 1357, :line 19}
+matched =  {:M [1 1 0 1 0 0 1 2], :fire :m3-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m3, :job 1358, :line 20}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 1 1], :rate 1.0, :m :m2, :job 1359, :line 21}
+matched =  {:M [0 1 0 0 1 1 1 1], :fire :m2-start-job, :Mp [0 1 0 1 0 1 0 2], :rate 1.0, :m :m2, :job 1360, :line 22}
+matched =  {:M [0 1 0 1 0 1 0 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 0 2], :rate 1.0, :m :m3, :job 1358, :line 23}
+matched =  {:M [1 1 0 1 0 0 0 2], :fire :m3-start-job, :Mp [0 1 0 1 0 1 0 1], :rate 1.0, :m :m3, :job 1359, :line 24}
+matched =  {:M [0 1 0 1 0 1 0 1], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 0 1], :rate 1.0, :m :m1, :job 1362, :line 25}
+matched =  {:M [0 0 1 1 0 1 0 1], :fire :m1-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m1, :job 1363, :line 26}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 1 1], :rate 1.0, :m :m2, :job 1360, :line 27}
+matched =  {:M [0 1 0 0 1 1 1 1], :fire :m2-start-job, :Mp [0 1 0 1 0 1 0 2], :rate 1.0, :m :m2, :job 1361, :line 28}
+matched =  {:M [0 1 0 1 0 1 0 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 0 2], :rate 1.0, :m :m3, :job 1359, :line 29}
+matched =  {:M [1 1 0 1 0 0 0 2], :fire :m3-start-job, :Mp [0 1 0 1 0 1 0 1], :rate 1.0, :m :m3, :job 1360, :line 30}
+matched =  {:M [0 1 0 1 0 1 0 1], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 0 1], :rate 1.0, :m :m1, :job 1363, :line 31}
+matched =  {:M [0 0 1 1 0 1 0 1], :fire :m1-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m1, :job 1364, :line 32}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 1 1], :rate 1.0, :m :m2, :job 1361, :line 33}
+matched =  {:M [0 1 0 0 1 1 1 1], :fire :m2-start-job, :Mp [0 1 0 1 0 1 0 2], :rate 1.0, :m :m2, :job 1362, :line 34}
+matched =  {:M [0 1 0 1 0 1 0 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 0 2], :rate 1.0, :m :m3, :job 1360, :line 35}
+matched =  {:M [1 1 0 1 0 0 0 2], :fire :m3-start-job, :Mp [0 1 0 1 0 1 0 1], :rate 1.0, :m :m3, :job 1361, :line 36}
+matched =  {:M [0 1 0 1 0 1 0 1], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 0 1], :rate 1.0, :m :m1, :job 1364, :line 37}
+matched =  {:M [0 0 1 1 0 1 0 1], :fire :m1-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m1, :job 1365, :line 38}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 1 1], :rate 1.0, :m :m2, :job 1362, :line 39}
+matched =  {:M [0 1 0 0 1 1 1 1], :fire :m2-start-job, :Mp [0 1 0 1 0 1 0 2], :rate 1.0, :m :m2, :job 1363, :line 40}
+matched =  {:M [0 1 0 1 0 1 0 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 0 2], :rate 1.0, :m :m3, :job 1361, :line 41}
+matched =  {:M [1 1 0 1 0 0 0 2], :fire :m3-start-job, :Mp [0 1 0 1 0 1 0 1], :rate 1.0, :m :m3, :job 1362, :line 42}
+matched =  {:M [0 1 0 1 0 1 0 1], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 0 1], :rate 1.0, :m :m1, :job 1365, :line 43}
+matched =  {:M [0 0 1 1 0 1 0 1], :fire :m1-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m1, :job 1366, :line 44}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 1 1], :rate 1.0, :m :m2, :job 1363, :line 45}
+matched =  {:M [0 1 0 0 1 1 1 1], :fire :m2-start-job, :Mp [0 1 0 1 0 1 0 2], :rate 1.0, :m :m2, :job 1364, :line 46}
+matched =  {:M [0 1 0 1 0 1 0 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 0 2], :rate 1.0, :m :m3, :job 1362, :line 47}
+matched =  {:M [1 1 0 1 0 0 0 2], :fire :m3-start-job, :Mp [0 1 0 1 0 1 0 1], :rate 1.0, :m :m3, :job 1363, :line 48}
+matched =  {:M [0 1 0 1 0 1 0 1], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 0 1], :rate 1.0, :m :m1, :job 1366, :line 49}
+matched =  {:M [0 0 1 1 0 1 0 1], :fire :m1-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m1, :job 1367, :line 50}
+matched =  {:M [0 1 0 1 0 1 1 1], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 1], :rate 1.0, :m :m3, :job 1363, :line 51}
+matched =  nil
+
+
+*** It goes wrong very quickly!
+**** good
+start =    {:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 0], :rate 1.0, :indx 0, :job 1356}
+matched =  {:M [0 1 0 0 1 1 2 0], :fire :m2-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m2, :job 1357, :indx 1}
+matched =  {:act :m1-unblocked, :prev-act :m2-start-job, :Mp [0 1 0 1 0 1 1 1], :state [0 1 0 1 0 1 1 1], :job 1357, :indx 2}
+**** bad
+start =    {:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 0], :rate 1.0, :line 0, :job 1356}
+matched =  {:fire :m2-complete-job, :M [0 1 0 1 0 1 1 1], :Mp [0 1 0 0 1 1 1 1], :m :m2, :rate 1.0, :relax? :active, :line 0, :job 1356}
+matched =  {:M [0 1 0 0 1 1 1 1], :fire :m2-start-job, :Mp [0 1 0 1 0 1 0 2], :rate 1.0, :m :m2, :job 1357, :line 1}
+matched =  {:exceptional :m1-unblocked, :prev-act :m2-start-job, :Mp [0 1 0 1 0 1 0 2], :state [0 1 0 1 0 1 0 2], :job 1357, :line 2}
+
+The weird {:fire... comes from next-match (5), which is just saying that something is starting a job that we don't
+know about because we are starting up. 
+
+
+[
+{:clk 1999.6152 :act :m2-complete-job :m :m2 :mjpact :bj :bf :b2 :n 0 :j 1356 :line 0}
+{:clk 1999.6152 :act :m2-start-job :m :m2 :mjpact :sm :bf :b1 :n 2 :j 1357 :line 1}
+{:clk 1999.6152 :act :m1-unblocked :m :m1 :mjpact :ub :line 2}
+
+;;; (5) If job not= current job but on :active-jobs and rgraph matches on that history,
+;;;     no problem (add to interp with a note).
+
+But why would 1357 be on active jobs? 
+
+*** Reworking interpretation!
+I added scada/active jobs, and now I'm looking back at the link-match stuff wondering how
+I decided to use loom! (There is nothing in the notes about this.) It says it relaxes
+requirement to match rgraph. Why is this necessary?  This isn't going to work for colored PNs, I think. 
+
+Do I have a test case for interpretation?  YES!
+
