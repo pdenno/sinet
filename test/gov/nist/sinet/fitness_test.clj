@@ -70,6 +70,9 @@
 (def hopeful-pn (-> (load-file "data/PNs/hopeful-pn.clj")
                     (assoc :pulls-from {:m1 [], :m2 [:Place-103]})))
 
+(def hopeful-pn-2 (-> (load-file "data/PNs/hopeful-pn-2.clj")
+                      (assoc :pulls-from {:m1 [], :m2 [:Place-13], :m3 [:Place-14]})))
+
 (defn m2-inhib-bas-workflow-fit
   "Setup the m2-inhib-bas PN for a fitness test"
   [steps]    
@@ -100,7 +103,7 @@
   (testing "that the starved? predicate works."
     (is (not (fit/starved?
               {:M [0 1 0 1 1], :fire :m2-complete-job, :Mp [1 1 0 0 1], :m :m2, :indx 224}
-              {:act :m2-starved, :prev-act :m2-complete-job, :Mp [1 1 0 0 1], :state [1 1 0 0 1], :indx 225}
+              {:act :m2-starved, :m :m2, :prev-act :m2-complete-job, :Mp [1 1 0 0 1], :state [1 1 0 0 1], :indx 225}
               hopeful-pn)))
     (is (fit/starved? 
          {:M [0 1 0 1 0], :fire :m2-complete-job, :Mp [1 1 0 0 0] :m :m2, :indx 224}

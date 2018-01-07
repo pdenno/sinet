@@ -47,6 +47,7 @@
 ** Clojure.core is one file of about 8000 lines. Worth a read! Includes futures, etc. 
 
 * Sinet/MJPdes/SPNtools TODOs
+** TODO Investigate the relative accuracy of the new interpretation. Update fitness_test.clj. See notes <2018-01-06 Sat> 
 ** TODO Decide whether setting all transitions to timed makes sense for simple-reach. See discussion <2017-10-15 Sun>
 ** TODO Investigate possible bugs with MJPdes 'coordination' and create more 'deterministic' test cases.
 ** DONE Conceive of a strategy for using exceptional fitness
@@ -4005,7 +4006,6 @@ Does this just not get loaded?
 
 
 
-
 ** <2017-12-18 Mon>
 
 I worked on:
@@ -4550,7 +4550,6 @@ I wrote the code to do that.
 UPR Architectural Decision -- re-architect, 
   "commercial implementation" --> "industrial pilot."  
 
-
 ** <2018-01-04 Thu>
 I started cleaning up the 3-machine test, which before the break I had started an implementation
 of selecting a message from all contemporaneous messages. 
@@ -4567,69 +4566,8 @@ I will call this 'hopeful-pn-2'
 
 [[file:~/TwoDrive/OneDrive/Repo/mindmaps/images/m3-hopeful.jpg][m3-hopeful.jpg]]
 
-{:places
- [{:name :place-1, :pid 7, :initial-tokens 1, :visible? true}
-  {:name :place-2, :pid 8, :initial-tokens 0, :visible? true}
-  {:name :place-3, :pid 9, :initial-tokens 0, :visible? true}
-  {:name :place-4, :pid 10, :initial-tokens 0, :visible? true}
-  {:name :place-5, :pid 11, :initial-tokens 0, :visible? true}
-  {:name :place-6, :pid 12, :initial-tokens 0, :visible? true}
-  {:name :Place-13, :pid 13, :initial-tokens 0}
-  {:name :Place-14, :pid 14, :initial-tokens 0}],
- :transitions
- [{:name :m1-start-job,
-   :tid 7,
-   :type :exponential,
-   :rate 1.0,
-   :rep {:clk 2447.3391, :act :m1-start-job, :m :m1, :mjpact :aj, :jt :jobType1, :ends 2448.3391, :j 1667, :line 2060},
-   :visible? true}
-  {:name :m1-complete-job,
-   :tid 8,
-   :type :exponential,
-   :rate 1.0,
-   :rep {:clk 2448.3391, :act :m1-complete-job, :m :m1, :mjpact :bj, :bf :b1, :n 1, :j 1667, :line 2063},
-   :visible? true}
-  {:name :m2-start-job,
-   :tid 9,
-   :type :exponential,
-   :rate 1.0,
-   :rep {:clk 2449.4604, :act :m2-start-job, :m :m2, :mjpact :sm, :bf :b1, :n 2, :j 1667, :line 2072},
-   :visible? true}
-  {:name :m2-complete-job,
-   :tid 10,
-   :type :exponential,
-   :rate 1.0,
-   :rep {:clk 2450.4604, :act :m2-complete-job, :m :m2, :mjpact :bj, :bf :b2, :n 1, :j 1667, :line 2077},
-   :visible? true}
-  {:name :m3-start-job,
-   :tid 11,
-   :type :exponential,
-   :rate 1.0,
-   :rep {:clk 2452.4604, :act :m3-start-job, :m :m3, :mjpact :sm, :bf :b2, :n 2, :j 1667, :line 2088},
-   :visible? true}
-  {:name :m3-complete-job,
-   :tid 12,
-   :type :exponential,
-   :rate 1.0,
-   :rep {:clk 2453.5276, :act :m3-complete-job, :m :m3, :mjpact :ej, :ent 2447.3391, :j 1667, :line 2092},
-   :visible? true}],
- :arcs
- [{:aid 13, :source :place-1, :target :m3-start-job, :name :aa-13, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
-  {:aid 14, :source :m1-start-job, :target :place-2, :name :aa-14, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
-  {:aid 15, :source :place-2, :target :m1-complete-job, :name :aa-15, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
-  {:aid 16, :source :m1-complete-job, :target :place-3, :name :aa-16, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
-  {:aid 17, :source :place-3, :target :m1-start-job, :name :aa-17, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
-  {:aid 18, :source :m2-start-job, :target :place-4, :name :aa-18, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
-  {:aid 19, :source :place-4, :target :m2-complete-job, :name :aa-19, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
-  {:aid 20, :source :m2-complete-job, :target :place-5, :name :aa-20, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
-  {:aid 21, :source :place-5, :target :m2-start-job, :name :aa-21, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
-  {:aid 22, :source :m3-start-job, :target :place-6, :name :aa-22, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
-  {:aid 23, :source :place-6, :target :m3-complete-job, :name :aa-23, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
-  {:aid 24, :source :m3-complete-job, :target :place-1, :name :aa-24, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
-  {:aid 25, :source :m1-start-job, :target :Place-13, :name :aa-25, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 2}
-  {:aid 26, :source :Place-13, :target :m2-start-job, :name :aa-26, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
-  {:aid 27, :source :m2-start-job, :target :Place-14, :name :aa-27, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 2}
-  {:aid 28, :source :Place-14, :target :m3-start-job, :name :aa-28, :type :normal, :multiplicity 1, :bind {:jtype :blue}}]}
+[[file:~/Documents/git/sinet/data/PNs/hopeful-pn-2.clj::%3B%3B%3B%20A%20three-machine%20system%20with%20two%20buffers%20(mutate%20:add-buffer)-ed%20in.][hopeful-pn-2.clj in data/PNs]]. It is also used in fitness_test.clj
+(def pnpn (load-file "data/PNs/hopeful-pn-2.clj"))
 
 
 6.98 secs before I switch to transient pn (but things aren't working any way). 
@@ -4810,7 +4748,7 @@ matched =  nil
 
 ** <2018-01-06 Sat>
 
-** Continuing with debug; here's from the msg-buf approach
+*** Continuing with debug; here's from the msg-buf approach
 
 start =  {:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 0], :rate-fn #function[gov.nist.spntools.util.reach/next-links/fn--32658/fn--32663], :rate 1.0, :line 0, :job 1356}
 matched =  {:fire :m2-complete-job, :M [0 1 0 1 0 1 1 1], :Mp [0 1 0 0 1 1 1 1], :m :m2, :rate 1.0, :relax? :active, :line 0, :job 1356}
@@ -4867,7 +4805,6 @@ matched =  {:M [0 0 1 1 0 1 0 1], :fire :m1-start-job, :Mp [0 1 0 1 0 1 1 1], :r
 matched =  {:M [0 1 0 1 0 1 1 1], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 1], :rate 1.0, :m :m3, :job 1363, :line 51}
 matched =  nil
 
-
 *** It goes wrong very quickly!
 **** good
 start =    {:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 0], :rate 1.0, :indx 0, :job 1356}
@@ -4894,9 +4831,206 @@ know about because we are starting up.
 But why would 1357 be on active jobs? 
 
 *** Reworking interpretation!
-I added scada/active jobs, and now I'm looking back at the link-match stuff wondering how
+I added scada/active-jobs, and now I'm looking back at the link-match stuff wondering how
 I decided to use loom! (There is nothing in the notes about this.) It says it relaxes
 requirement to match rgraph. Why is this necessary?  This isn't going to work for colored PNs, I think. 
 
 Do I have a test case for interpretation?  YES!
+
+**** fitness-test/full-winner-process 
+ I *think* that because I'm now using scada/active-jobs I'm picking up more message. 
+ Testing that hypothesis....
+ Nope! However:
+gov.nist.sinet.fitness-test> (apply + (vals (:ordinary msg-table)))
+2818
+gov.nist.sinet.fitness-test> (apply + (vals (:ordinary old-msg-table)))
+2818
+
+***** I am temporarily living with a new msg-table and trans-count for testing. 
+The new stuff *may* be better; *may* be worse. I'm adding a TODO to investigate it *later*. 
+
+**** Back to the 3-machine case
+Now all 4 starting links stop at line 51. Interesting!
+First starved (:m3-starved) happens at line 52. Investigating fit/starved? ...  Check the output :Mp values for 
+
+None of the interpretations have m3-starving at this point. This means it is stopping correctly
+because the :Mp values for :place-14 should be 0. 
+
+So either: 
+  (1) The starting points aren't good (not all of them). 
+  (2) Stepping through the rgraph is wrong.
+  (3) ???
+
+Some starting-points do have zero in place-14. (Not that after 51 steps that should matter). 
+Will have to study *log* to see whether it looks funky. 
+
+***** One bug in starved? fixed: The previous message has to agree on machine!
+** <2018-01-07 Sun>
+
+*** I verified with fitness_test that the starved? predicate didn't need/shouldn't have a machine test.
+*** Commenting out loom code in link-match is not itself a solution. (Fails fitt/full-winner-process.)
+ I am going to try a quick-and-dirty version of permutation path search on contemporary to see if I can get it to go. 
+ BTW: Regarding last night's question about why I even used the loom code for interpretation, I think it was due to 
+      the need for re-ordering of log messages (which is what I'm addressing with permutations). 
+
+*** The use of loom might not have been for permutations.
+It was for new jobs and early jobs that need to disappear?
+Thus :relax? :add-job and :relax? :active.   
+
+:relax? :add-job is executed twice. 
+
+Q: What if I can get things to work without loom? Should I punt on this morning's work to do permutations?
+A: I don't think permutations is going to be costly, provided original ordering is tried first. 
+   I'll at least keep the code around for a while. 
+
+*** I'm exploring the loom-based solution (see new notes in link-match) and the possibility of finessing things somewhat.
+
+**** No even message lines except exceptional (which occur by themselves, others occur in twos). 
+Ah, this is no big deal; it is just that the print statement needs to go elsewhere.
+
+**** Infinite loop on :line 3000. Seems like it should be able to stop!
+     This problem only occurs when the :Mp test on (3) and (5) is used. 
+
+I think I'm finally beginning to understand transient/persistent! It seems it keeps track of what 
+you are doing and produced an error : IllegalAccessError Transient used after persistent!
+
+{:clk 2838.0093 :act :m2-start-job :m :m2 :mjpact :sm :bf :b1 :n 3 :j 2399 :line 2998}
+{:clk 2838.0093 :act :m1-unblocked :m :m1 :mjpact :ub :line 2999}
+{:clk 2838.0093 :act :m1-complete-job :m :m1 :mjpact :bj :bf :b1 :n 2 :j 2402 :line 3000}
+{:clk 2838.0093 :act :m1-start-job :m :m1 :mjpact :aj :jt :jobType1 :ends 2839.0093 :j 2403 :line 3001}
+
+graph-link =  {:M [1 0 1 0 3], :fire :m2-start-job, :Mp [0 0 1 1 2], :rate 1.0, :m :m2, :job 2399, :clk 2838.0093, :line 2998}
+graph-link =  {:M [0 0 1 1 2], :fire :m1-start-job, :Mp [0 1 0 1 3], :rate 1.0, :m :m1, :job 2403, :clk 2838.0093, :line 3001}
+
+---> With the old code it just returns nil (doesn't get stuck). 
+
+;;; Does this make sense? 
+
+m =  {:M [0 1 0 1 0 1 0 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 0 2], :rate 1.0, :m :m3, :job 1361, :clk 2007.6007, :line 41}
+m =  {:M [1 1 0 1 0 0 0 2], :fire :m3-start-job,    :Mp [0 1 0 1 0 1 0 1], :rate 1.0, :m :m3, :job 1362, :clk 2007.6007, :line 42}
+m =  {:M [0 1 0 1 0 1 0 1], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 0 1], :rate 1.0, :m :m1, :job 1365, :clk 2008.1152, :line 43}
+m =  {:M [0 0 1 1 0 1 0 1], :fire :m1-start-job,    :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m1, :job 1366, :clk 2008.1152, :line 44}
+m =  {:M [0 1 0 1 0 1 1 1], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 1 1], :rate 1.0, :m :m2, :job 1363, :clk 2008.6152, :line 45}
+m =  {:M [0 1 0 0 1 1 1 1], :fire :m2-start-job,    :Mp [0 1 0 1 0 1 0 2], :rate 1.0, :m :m2, :job 1364, :clk 2008.6152, :line 46}
+m =  {:M [0 1 0 1 0 1 0 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 0 2], :rate 1.0, :m :m3, :job 1362, :clk 2009.1007, :line 47}
+m =  {:M [1 1 0 1 0 0 0 2], :fire :m3-start-job,    :Mp [0 1 0 1 0 1 0 1], :rate 1.0, :m :m3, :job 1363, :clk 2009.1007, :line 48}
+m =  {:M [0 1 0 1 0 1 0 1], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 0 1], :rate 1.0, :m :m1, :job 1366, :clk 2009.1152, :line 49}
+m =  {:M [0 0 1 1 0 1 0 1], :fire :m1-start-job,    :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m1, :job 1367, :clk 2009.1152, :line 50}
+m =  {:M [0 1 0 1 0 1 1 1], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 1], :rate 1.0, :m :m3, :job 1363, :clk 2010.6007, :line 51}
+
+If so, maybe new way of calculating start-links, based on k. 
+
+*** I'm implementing a new way to create start-links. The old way was cheezy and not working.
+
+**** I'm giving up on writing an analytical method, below
+(defn all-marks-by-k
+  "Return a vector of all states given k."
+  [pn k]
+  (let [pn (pnr/renumber-pids pn)
+        machines (util/machines-of pn)
+        pulls-from (zipmap machines (map #(util/pulls-from pn %) machines))
+        related-places (util/related-places pn)
+        mkey (:marking-key pn)
+        n-machine-states (apply * (map #(count %) (vals related-places)))
+        n-buffer-states (Math/pow (inc k) (count (util/buffers-of pn)))
+        size (* n-machine-states (int n-buffer-states))
+        ;; POD probably a silly implementation, but no sleep last night!
+        states (mapv vec (repeat size (repeat (count mkey) :x)))]
+    (reduce (fn [states [pos v]]
+
+
+
+There are 4 starting links originally. There are 36 (half of rgraph!) in the new one. 
+
+starting links =  
+[{:M [0 1 0 1 0 1 1 1], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 1 1], :rate 1.0, :line 0, :job 1356} 
+ {:M [0 1 0 1 0 1 1 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 1 0], :rate 1.0, :line 0, :job 1356} 
+ {:M [0 1 0 1 0 1 2 1], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 1], :rate 1.0, :line 0, :job 1356} 
+ {:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 0], :rate 1.0, :line 0, :job 1356}]
+
+**** All this old starting-links stuff gone:
+;;; POD no test on index okay? 
+(defn next-ordinary
+  "Return the next ordinary message, at index n or later."
+  [pn log n]
+  (let [last-ix (-> log last :line)]
+    (loop [indx n]
+      (if (> indx last-ix)
+        nil
+        (if-let [msg (ordinary? (nth log indx))]
+          msg
+          (recur (inc indx)))))))
+
+(defn next-paths
+  "Extend or eliminate paths depending on the PN's reachability graph."
+  [pn log paths msg-indx]
+  (let [next-msg (next-ordinary pn log msg-indx)
+        from (-> paths first last :Mp) ; current state along first path
+        all-steps  (filter #(= (:M %) from) (:rgraph pn))
+        good-steps (filter #(= (:fire %) (:act next-msg)) all-steps)   ; matches a msg
+        good-steps (map #(assoc % :line (:line next-msg)) good-steps)] ; track where you found it.
+    (if (empty? good-steps) ; This path is a dead end. 
+      (rest paths)
+      (into (mapv #(conj (first paths) %) good-steps) (rest paths))))) ; depth-first
+
+(defn starting-links
+  "Return all links (containing reference scada log line) that interpret 
+   the SCADA log well from start-indx (usually 0)."
+  [pn log start-indx & {:keys [diag-path]}]
+  (let [rgraph (:rgraph pn)
+        winners (atom [])]
+    (loop [paths
+           (or diag-path
+               (mapv
+                vector
+                (mapv #(assoc % :line start-indx)
+                      (filter #(= (:act (next-ordinary pn log start-indx))
+                                  (:fire %))
+                              rgraph))))]
+      (let [new-paths (if (> (-> paths first count) 50)
+                        (do
+                          (swap! winners #(conj % (-> paths first first)))
+                          (rest paths))
+                        paths)]
+        (when (not-empty new-paths) 
+          (recur (next-paths pn log new-paths (-> new-paths first last :line inc))))))
+    (let [job (:j (nth log start-indx))]
+      (mapv #(assoc % :job job) @winners))))
+
+
+**** Old starved?
+#_(defn starved?
+  "Return true if the argument machine (in msg) is starved."
+  [llink msg pn]
+  (let [^clojure.lang.PersistentVector mkey (:marking-key pn)]
+    (let [bufs ((:m msg) (:pulls-from pn))]
+      (if (= 0 (nth (:Mp llink)
+                    (.indexOf mkey (first bufs))))
+        true
+        false))))
+
+
+
+**** It looks like it never tries after the first iteration. 
+***** Bug I'm using reduce where I should be iterating. 
+                   (reduce (fn [pn start]
+                             (if (full-interp? pn log)
+                               pn
+                               (interpret-scada pn log start)))
+                           ?pn
+                           (starting-links ?pn log))))
+FIXED. 
+**** Still no good, but this one looks wrong:
+m =  {:M [1 1 0 1 0 0 0 1], :fire :m3-start-job, :Mp [0 1 0 1 0 1 0 0], :rate 1.0, :m :m3, :job 1363, :clk 2009.1007, :line 48}
+m =  {:M [0 1 0 1 0 1 0 0], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 0 0], :rate 1.0, :m :m1, :job 1366, :clk 2009.1152, :line 49}
+m =  {:M [0 0 1 1 0 1 0 0], :fire :m1-start-job, :Mp [0 1 0 1 0 1 1 0], :rate 1.0, :m :m1, :job 1367, :clk 2009.1152, :line 50}
+m =  {:M [0 1 0 1 0 1 1 0], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 0], :rate 1.0, :m :m3, :job 1363, :clk 2010.6007, :line 51}
+STARVED IS INCONSISTENT...................
+
+I got it with this AM's algorithm. Do I get it with the straight one? 
+
+m =  {:M [1 1 0 1 0 0 0 1], :fire :m3-start-job, :Mp [0 1 0 1 0 1 0 0], :rate 1.0, :m :m3, :job 1363, :clk 2009.1007, :line 48}
+m =  {:M [0 1 0 1 0 1 0 0], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 0 0], :rate 1.0, :m :m1, :job 1366, :clk 2009.1152, :line 49}
+m =  {:M [0 0 1 1 0 1 0 0], :fire :m1-start-job, :Mp [0 1 0 1 0 1 1 0], :rate 1.0, :m :m1, :job 1367, :clk 2009.1152, :line 50}
+m =  {:M [0 1 0 1 0 1 1 0], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 0], :rate 1.0, :m :m3, :job 1363, :clk 2010.6007, :line 51}
 

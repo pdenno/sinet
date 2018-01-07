@@ -328,4 +328,15 @@
             []
             candidate-machines)))
 
+(defn buffers-of
+  "Return a list of all the things that look like buffers."
+  [pn]
+  (let [machines (machines-of pn)
+        betweens (combo/combinations machines 2)]
+    (dedupe
+     (flatten
+      (filter identity (into (map (fn [[m1 m2]] (buffers-between pn m1 m2)) betweens)
+                             (map (fn [[m1 m2]] (buffers-between pn m2 m1)) betweens)))))))
+
+
 
