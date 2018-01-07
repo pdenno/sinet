@@ -67,7 +67,8 @@
                {:act :aj, :tkns [{:type :a, :id 23} {:type :a, :id 22}]}
                {:act :sm, :tkns [{:type :a, :id 22}]}]))))))
 
-(def hopeful-pn (load-file "data/PNs/hopeful-pn.clj"))
+(def hopeful-pn (-> (load-file "data/PNs/hopeful-pn.clj")
+                    (assoc :pulls-from {:m1 [], :m2 [:Place-103]})))
 
 (defn m2-inhib-bas-workflow-fit
   "Setup the m2-inhib-bas PN for a fitness test"
@@ -156,6 +157,24 @@
    :m2-unstarved {[1 1 0 0 1] 32},
    :m1-blocked   {[0 1 0 1 3] 60},
    :m1-unblocked {[0 1 0 1 2] 60},
+   :ordinary     {[0 0 1 1 1] 192,
+                  [0 1 0 1 0] 235,
+                  [1 1 0 0 2] 192, ; 194
+                  [0 1 0 1 3] 278, ; 275
+                  [1 1 0 0 3] 276, ; 274
+                  [0 1 0 1 1] 395, ; 398
+                  [1 1 0 0 0] 32,
+                  [0 0 1 1 0] 203,
+                  [0 0 1 1 2] 279, ; 276
+                  [1 1 0 0 1] 235,
+                  [0 1 0 1 2] 469,
+                  [1 0 1 0 0] 32}})
+
+(def old-msg-table
+  {:m2-starved   {[1 1 0 0 0] 32},
+   :m2-unstarved {[1 1 0 0 1] 32},
+   :m1-blocked   {[0 1 0 1 3] 60},
+   :m1-unblocked {[0 1 0 1 2] 60},
    :ordinary     {[0 0 1 1 1] 195,
                   [0 1 0 1 0] 235,
                   [1 1 0 0 2] 194,
@@ -169,7 +188,7 @@
                   [0 1 0 1 2] 469,
                   [1 0 1 0 0] 32}})
 
-(def trans-counts
+(def old-trans-counts
   {[0 0 1 1 1] {[0 1 0 1 2] 195},
    [0 1 0 1 0] {[0 0 1 1 0] 203, [1 1 0 0 0] 32},
    [1 1 0 0 2] {[0 1 0 1 1] 194},
@@ -183,7 +202,21 @@
    [0 1 0 1 2] {[1 1 0 0 2] 194, [0 0 1 1 2] 275},
    [1 0 1 0 0] {[1 1 0 0 1] 32}})
 
-(def loom-prob  (fit/rgraph2loom-probability rgraph trans-counts))
+(def trans-counts
+  {[0 0 1 1 1] {[0 1 0 1 2] 192},
+   [0 1 0 1 0] {[0 0 1 1 0] 203, [1 1 0 0 0] 32},
+   [1 1 0 0 2] {[0 1 0 1 1] 192},
+   [0 1 0 1 3] {[1 1 0 0 3] 276, [0 0 1 1 3] 2},
+   [1 1 0 0 3] {[0 1 0 1 2] 276},
+   [0 1 0 1 1] {[0 0 1 1 1] 192, [1 1 0 0 1] 203},
+   [1 1 0 0 0] {[1 0 1 0 0] 32},
+   [0 0 1 1 0] {[0 1 0 1 1] 203},
+   [0 0 1 1 2] {[0 1 0 1 3] 279},
+   [1 1 0 0 1] {[0 1 0 1 0] 235},
+   [0 1 0 1 2] {[0 0 1 1 2] 277, [1 1 0 0 2] 192},
+   [1 0 1 0 0] {[1 1 0 0 1] 32}})
+
+(def loom-prob  (fit/rgraph2loom-probability rgraph old-trans-counts))
 (def loom-steps (fit/rgraph2loom-steps rgraph))
 (def norm-factors (fit/normalize-marking-factors rgraph))
 
@@ -197,31 +230,11 @@
 (deftest msg-table-test
   (testing "that the message table looks good"
     (is (= msg-table
-           (let [log (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj")]
+           (let [log (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj")
+                 patterns (scada/scada-patterns log)
+                 msg-types (conj (scada/exceptional-msgs patterns log) :ordinary)]
              (as-> (fit/find-interpretation hopeful-pn log 3 3) ?pn
-               (fit/compute-msg-table ?pn)))))))
-
-(defn tryme []
-  (let [log (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj")
-        patterns (scada/scada-patterns log)
-        msg-types (conj (scada/exceptional-msgs patterns log) :ordinary)
-        foo (println "msg-types =" msg-types)
-        pn (as-> (fit/find-interpretation hopeful-pn log 3 3) ?pn
-             (assoc  ?pn :msg-table (fit/compute-msg-table ?pn msg-types))
-             (assoc  ?pn :norm-factors (fit/normalize-marking-factors (:rgraph ?pn)))
-             (assoc  ?pn :trans-counts (fit/trans-counts (:interp ?pn)))
-             (dissoc ?pn :interp)
-             (assoc  ?pn :sigma 0.35)
-             (assoc  ?pn :loom-prob (fit/rgraph2loom-probability (:rgraph ?pn) (:trans-counts ?pn)))
-             (assoc  ?pn :distance-fn (fit/dist-fn-6 (:loom-prob ?pn) (:norm-factors ?pn)))
-             (assoc  ?pn :pdf-fns
-                     (zipmap (-> ?pn :msg-table keys)
-                             (map #(fit/parzen-pdf-msg ?pn %)
-                                  (-> ?pn :msg-table keys)))))]
-    pn))
-
-    
-
+               (fit/compute-msg-table ?pn msg-types)))))))
 
 (deftest full-winner-process
   (testing "that the process works to winners and that intermediate test data is in sync."
@@ -241,22 +254,34 @@
                                (map #(fit/parzen-pdf-msg ?pn %)
                                     (-> ?pn :msg-table keys)))))]
       (is (= (:norm-factors pn) norm-factors))
-      (is (= (mapv #(dissoc % :rate-fn) (:rgraph pn)) rgraph))
+      (is (= (set (mapv #(dissoc % :rate-fn) (:rgraph pn))) (set rgraph)))
       (is (= (:msg-table pn) msg-table))
       (is (= (:trans-counts pn) trans-counts))
       (is (= (fit/choose-winners pn)
-             {[0 0 1 1 1] [:ordinary 0.07035003350586438],
-              [0 1 0 1 0] [:ordinary 0.08612941888443124],
-              [1 1 0 0 2] [:ordinary 0.06977395019946811],
-              [0 1 0 1 3] [:m1-blocked 1.0000000000000002],
-              [1 1 0 0 3] [:ordinary 0.09753131509940632],
-              [0 1 0 1 1] [:ordinary 0.14762935943771455],
-              [1 1 0 0 0] [:m2-starved 1.0],
-              [0 0 1 1 0] [:ordinary 0.0721420233904942],
-              [0 0 1 1 2] [:ordinary 0.0996944685574537],
-              [1 1 0 0 1] [:m2-unstarved 1.0],
-              [0 1 0 1 2] [:m1-unblocked 1.0000000000000002],
-              [1 0 1 0 0] [:ordinary 0.01139091655954467]})))))
+               {[0 0 1 1 1] [:ordinary 0.06926012645906687],
+                [0 1 0 1 0] [:ordinary 0.0861611605866425],
+                [1 1 0 0 2] [:ordinary 0.06903940661712754],
+                [0 1 0 1 3] [:m1-blocked 1.0000000000000002],
+                [1 1 0 0 3] [:ordinary 0.09823806789529875],
+                [0 1 0 1 1] [:ordinary 0.14650927091957497],
+                [1 1 0 0 0] [:m2-starved 1.0],
+                [0 0 1 1 0] [:ordinary 0.07214200509900281],
+                [0 0 1 1 2] [:ordinary 0.10076188335098175],
+                [1 1 0 0 1] [:m2-unstarved 1.0],
+                [0 1 0 1 2] [:m1-unblocked 1.0000000000000002],
+                [1 0 1 0 0] [:ordinary 0.01139091655954467]}
+               #_{[0 0 1 1 1] [:ordinary 0.07035003350586438],
+                  [0 1 0 1 0] [:ordinary 0.08612941888443124],
+                  [1 1 0 0 2] [:ordinary 0.06977395019946811],
+                  [0 1 0 1 3] [:m1-blocked 1.0000000000000002],
+                  [1 1 0 0 3] [:ordinary 0.09753131509940632],
+                  [0 1 0 1 1] [:ordinary 0.14762935943771455],
+                  [1 1 0 0 0] [:m2-starved 1.0],
+                  [0 0 1 1 0] [:ordinary 0.0721420233904942],
+                  [0 0 1 1 2] [:ordinary 0.0996944685574537],
+                  [1 1 0 0 1] [:m2-unstarved 1.0],
+                  [0 1 0 1 2] [:m1-unblocked 1.0000000000000002],
+                  [1 0 1 0 0] [:ordinary 0.01139091655954467]})))))
 
 ;;; In all tests that use 'distance' on markings, markings are normalized.
 ;;; I think this is necessary if sigma is going to mean anything. 
@@ -266,9 +291,9 @@
                (assoc ?pn :sigma 0.35)
                (assoc ?pn :rgraph rgraph)
                (assoc ?pn :distance-fn (fit/dist-fn-1 norm-factors))
-               (assoc ?pn :msg-table msg-table)
+               (assoc ?pn :msg-table old-msg-table)
                (assoc ?pn :pdf-fns
-                      (zipmap (keys msg-table) 
+                      (zipmap (keys old-msg-table)
                               (map #(fit/parzen-pdf-msg ?pn %)
                                    (-> ?pn :msg-table keys)))))]
       ;; Not so good values, even with medium sigma.
@@ -293,9 +318,9 @@
                (assoc ?pn :sigma 0.35)
                (assoc ?pn :rgraph rgraph)
                (assoc ?pn :distance-fn (fit/dist-fn-2 loom-steps norm-factors))
-               (assoc ?pn :msg-table msg-table)
+               (assoc ?pn :msg-table old-msg-table)
                (assoc ?pn :pdf-fns
-                      (zipmap (keys msg-table) 
+                      (zipmap (keys old-msg-table)
                               (map #(fit/parzen-pdf-msg ?pn %)
                                    (-> ?pn :msg-table keys)))))]
       (is (winners-ok?
@@ -318,10 +343,10 @@
     (let [pn (as-> {} ?pn
                (assoc ?pn :sigma 0.35)
                (assoc ?pn :rgraph rgraph)
-               (assoc ?pn :msg-table msg-table)
-               (assoc ?pn :distance-fn (fit/dist-fn-3 trans-counts loom-prob))
+               (assoc ?pn :msg-table old-msg-table)
+               (assoc ?pn :distance-fn (fit/dist-fn-3 old-trans-counts loom-prob))
                (assoc ?pn :pdf-fns
-                      (zipmap (-> ?pn :msg-table keys)
+                      (zipmap (-> ?pn :msg-table keys) ;
                               (map #(fit/parzen-pdf-msg ?pn %)
                                    (-> ?pn :msg-table keys)))))]
       (is (winners-ok?
@@ -344,7 +369,7 @@
     (let [pn (as-> {} ?pn
                (assoc ?pn :sigma 0.35)
                (assoc ?pn :rgraph rgraph)
-               (assoc ?pn :msg-table msg-table)
+               (assoc ?pn :msg-table old-msg-table)
                (assoc ?pn :distance-fn (fit/dist-fn-4 loom-steps loom-prob norm-factors))
                (assoc ?pn :pdf-fns
                       (zipmap (-> ?pn :msg-table keys)
@@ -369,7 +394,7 @@
   (testing "Distance = the sum of 1/p steps along shortest path."
     (let [pn (as-> {} ?pn
                (assoc ?pn :sigma 0.35)
-               (assoc ?pn :msg-table msg-table)
+               (assoc ?pn :msg-table old-msg-table)
                (assoc ?pn :distance-fn (fit/dist-fn-5 loom-prob))
                (assoc ?pn :pdf-fns
                       (zipmap (-> ?pn :msg-table keys)
@@ -394,7 +419,7 @@
   (testing "Distance = the sum of 1/p steps along shortest path times euclidean distance."
     (let [pn (as-> {} ?pn
                (assoc ?pn :sigma 0.35)
-               (assoc ?pn :msg-table msg-table)
+               (assoc ?pn :msg-table old-msg-table)
                (assoc ?pn :distance-fn (fit/dist-fn-6 loom-prob norm-factors))
                (assoc ?pn :pdf-fns
                       (zipmap (-> ?pn :msg-table keys)

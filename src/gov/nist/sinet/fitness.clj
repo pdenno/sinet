@@ -28,7 +28,8 @@
 ;;;         4) Perhaps do the workflow analysis after I do the SCADA analysis
 ;;;            (and maybe reconceive its implementation to exploit lax interpretation work. 
 
-(def ^:private diag (atom nil))
+#_(def ^:private diag (atom nil))
+(def diag (atom nil))
 ;;;===========================================
 ;;; QPN
 ;;;===========================================
@@ -342,7 +343,6 @@
 ;;;   (1.2) If not starvation, no problem. <========= POD we know k-bounded, could we check blocked? too?
 ;;; (2) If the rgraph step matches, no problem.
 ;;; (3) If job is new and rgraph step matches no problem, update :active-jobs
-;;; xxxx (4) If job not= current job but prior to first job, ignore message.
 ;;; (5) If job not= current job but on :active-jobs and rgraph matches on that history,
 ;;;     no problem (add to interp with a note).
 ;;; (6) Otherwise interpretation failed.  (return nil)
@@ -361,7 +361,7 @@
                        (not (starved? llink msg pn)))
                 nil
                 {:matched 
-                 {:exceptional (:act msg) :prev-act (:fire llink) :Mp (:Mp llink) 
+                 {:act (:act msg) :prev-act (:fire llink) :Mp (:Mp llink) :exceptional true 
                   :state (:Mp llink) :clk (:clk msg) :job old-job :line (:line msg)}}),
               
               (reset! slink (link-match pn :link llink msg))   ; (2)
@@ -372,9 +372,6 @@
               (when-let [link (link-match pn :aj nil msg)]     
                 {:matched link
                  :graph-link link}),
-              
-;              (< (:j msg) (:job1 pn))                          ; (4)
-;              {:matched {:ignore? true :line (:line msg) :job job}},
               
               (contains? (:active-jobs pn) job)
               (when-let [link (link-match pn :active job msg)] ; (5)
@@ -442,13 +439,12 @@
     (let [last-indx (-> log last :line)]
       (loop [pn (as-> pn ?pn
                   (transient ?pn)
-                  ;(assoc! ?pn :job1 (:job start-link))
                   (assoc! ?pn :msg-buf (contemp-msgs log (-> start-link :line inc)))
-                  (assoc! ?pn :active-jobs (scada/active-jobs log)) ; (vector (:job start-link)))
+                  (assoc! ?pn :active-jobs (scada/active-jobs log))
                   (assoc! ?pn :graph-link start-link)
                   (assoc! ?pn :last-link  start-link)
                   (assoc! ?pn :loom-steps (rgraph2loom-steps (:rgraph ?pn))) ; Used in link-match
-                  (assoc! ?pn :interp (transient [] #_(vector start-link))))]
+                  (assoc! ?pn :interp (transient [])))]
         (let [pn (cond-> pn 
                    (empty? (:msg-buf pn))
                    (assoc! :msg-buf (contemp-msgs log
@@ -560,7 +556,8 @@
   ([pn msg-types] 
    (let [markings (map :M (:rgraph pn))]
      (when-let [interp (not-empty (:interp pn))]
-       (let [report (reduce (fn [sum msg] 
+       (let [report (reduce (fn [sum msg]
+                              (reset! diag {:sum sum :msg msg})
                               (if (contains? msg :act)
                                 (update-in sum [(:act msg) (:Mp msg)] inc)
                                 (update-in sum [:ordinary (:M msg)] inc)))
