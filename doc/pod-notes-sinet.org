@@ -48,6 +48,8 @@
 
 * Sinet/MJPdes/SPNtools TODOs
 ** TODO Investigate the relative accuracy of the new interpretation. Update fitness_test.clj. See notes <2018-01-06 Sat> 
+** TODO Can I halt interpretation when it looks like pulling from an empty buffer?
+        Yeah, but if "start-job" means what we want it to mean, that will never happen in the rgraph.
 ** TODO Decide whether setting all transitions to timed makes sense for simple-reach. See discussion <2017-10-15 Sun>
 ** TODO Investigate possible bugs with MJPdes 'coordination' and create more 'deterministic' test cases.
 ** DONE Conceive of a strategy for using exceptional fitness
@@ -4997,7 +4999,6 @@ starting links =
     (let [job (:j (nth log start-indx))]
       (mapv #(assoc % :job job) @winners))))
 
-
 **** Old starved?
 #_(defn starved?
   "Return true if the argument machine (in msg) is starved."
@@ -5008,7 +5009,6 @@ starting links =
                     (.indexOf mkey (first bufs))))
         true
         false))))
-
 
 
 **** It looks like it never tries after the first iteration. 
@@ -5033,4 +5033,492 @@ m =  {:M [1 1 0 1 0 0 0 1], :fire :m3-start-job, :Mp [0 1 0 1 0 1 0 0], :rate 1.
 m =  {:M [0 1 0 1 0 1 0 0], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 0 0], :rate 1.0, :m :m1, :job 1366, :clk 2009.1152, :line 49}
 m =  {:M [0 0 1 1 0 1 0 0], :fire :m1-start-job, :Mp [0 1 0 1 0 1 1 0], :rate 1.0, :m :m1, :job 1367, :clk 2009.1152, :line 50}
 m =  {:M [0 1 0 1 0 1 1 0], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 0], :rate 1.0, :m :m3, :job 1363, :clk 2010.6007, :line 51}
+
+typo in starved....
+.... Still dead (not at line 307 regardless). (no better with AM's method). 
+**** Next thing to do is look at the :n value of buffers in log at line 307. 
+
+m =  {:M [0 0 1 1 0 1 0 1], :fire :m1-start-job,    :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m1, :job 1404, :clk 2065.6827, :line 300}
+m =  {:M [0 1 0 1 0 1 1 1], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 1 1], :rate 1.0, :m :m2, :job 1401, :clk 2066.1827, :line 301}
+m =  {:M [0 1 0 0 1 1 1 1], :fire :m2-start-job,    :Mp [0 1 0 1 0 1 0 2], :rate 1.0, :m :m2, :job 1402, :clk 2066.1827, :line 302}
+m =  {:M [0 1 0 1 0 1 0 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 0 2], :rate 1.0, :m :m3, :job 1400, :clk 2066.6153, :line 303}
+m =  {:M [1 1 0 1 0 0 0 2], :fire :m3-start-job,    :Mp [0 1 0 1 0 1 0 1], :rate 1.0, :m :m3, :job 1401, :clk 2066.6153, :line 304}
+m =  {:M [0 1 0 1 0 1 0 1], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 0 1], :rate 1.0, :m :m1, :job 1404, :clk 2067.1827, :line 305}
+m =  {:M [0 0 1 1 0 1 0 1], :fire :m1-start-job,    :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m1, :job 1405, :clk 2067.1827, :line 306}
+m =  {:M [0 1 0 1 0 1 1 1], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 1], :rate 1.0, :m :m3, :job 1401, :clk 2067.6153, :line 307}
+STARVED IS INCONSISTENT...................
+llink =  {:M [0 1 0 1 0 1 1 1], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 1], :rate 1.0, :m :m3, :job 1401, :clk 2067.6153, :line 307}
+msg =  {:clk 2067.6153, :act :m3-starved, :m :m3, :mjpact :st, :line 308}
+marking-key =  [:place-1 :place-2 :place-3 :place-4 :place-5 :place-6 :Place-13 :Place-14]
+buf =  :Place-14
+...................
+
+- 304: m3 starts a job with at 304 with one in the buffer, leaving none in the buffer. 
+- 307: m3 finishes job. Yup, it's legit. 
+- 307: Yup, it's legit. 
+- 301: THIS looks wrong. :m2-complete-job doesn't result in addition to :place-14. 
+  But that is what the PN does. It doesn't add the token until m2-start-job. Since there
+  is nothing in :Place-13, it isn't happening. 
+
+
+{:clk 2066.1827 :act :m2-complete-job :m :m2 :mjpact :bj :bf :b2 :n 0 :j 1401 :line 301}
+{:clk 2066.1827 :act :m2-start-job :m :m2 :mjpact :sm :bf :b1 :n 2 :j 1402 :line 302}
+{:clk 2066.6153 :act :m3-complete-job :m :m3 :mjpact :ej :ent 2056.0373 :j 1400 :line 303}
+{:clk 2066.6153 :act :m3-start-job :m :m3 :mjpact :sm :bf :b2 :n 1 :j 1401 :line 304}
+{:clk 2067.1827 :act :m1-complete-job :m :m1 :mjpact :bj :bf :b1 :n 1 :j 1404 :line 305}
+{:clk 2067.1827 :act :m1-start-job :m :m1 :mjpact :aj :jt :jobType1 :ends 2068.1827 :j 1405 :line 306}
+{:clk 2067.6153 :act :m3-complete-job :m :m3 :mjpact :ej :ent 2057.0373 :j 1401 :line 307}
+{:clk 2067.6153 :act :m3-starved :m :m3 :mjpact :st :line 308}
+
+*** hopeful-pn-2 is not good enough. m3-for-causal.jpg would work, but it is too complicated.
+hopeful-pn-3 is hopeful-pn-2 with one arc moved:
+Move arc from [:m2-start-job :Place-14] to [:m2-end-job :Place-14]
+
+*** code: tryme for 2-machine / hope-pn testcase (also in fitness_test.clj)
+(declare find-interpretation compute-msg-table)
+(defn tryme []
+  (let [log (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj")
+        hopeful-pn (-> (load-file "data/PNs/hopeful-pn.clj")
+                       (assoc :pulls-from {:m1 [], :m2 [:Place-103]}))
+        patterns (scada/scada-patterns log)
+        msg-types (conj (scada/exceptional-msgs patterns log) :ordinary)
+        pn (find-interpretation hopeful-pn log 3 3)]
+    (compute-msg-table pn msg-types)))
+
+(def diag-start-link {:M [0 1 0 1 0 1 1 1], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 1 1], :rate 1.0, :line 0, :job 1356})
+      
+
+**** Thus far, hopeful-pn-3 didn't solve anything. 
+
+m =  {:M [0 0 1 1 0 1 0 1], :fire :m1-start-job,    :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m1, :job 1404, :clk 2065.6827, :line 300}
+m =  {:M [0 1 0 1 0 1 1 1], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 1 2], :rate 1.0, :m :m2, :job 1401, :clk 2066.1827, :line 301}
+m =  {:M [0 1 0 0 1 1 1 2], :fire :m2-start-job,    :Mp [0 1 0 1 0 1 0 2], :rate 1.0, :m :m2, :job 1402, :clk 2066.1827, :line 302}
+m =  {:M [0 1 0 1 0 1 0 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 0 2], :rate 1.0, :m :m3, :job 1400, :clk 2066.6153, :line 303}
+m =  {:M [1 1 0 1 0 0 0 2], :fire :m3-start-job,    :Mp [0 1 0 1 0 1 0 1], :rate 1.0, :m :m3, :job 1401, :clk 2066.6153, :line 304}
+m =  {:M [0 1 0 1 0 1 0 1], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 0 1], :rate 1.0, :m :m1, :job 1404, :clk 2067.1827, :line 305}
+m =  {:M [0 0 1 1 0 1 0 1], :fire :m1-start-job,    :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m1, :job 1405, :clk 2067.1827, :line 306}
+m =  {:M [0 1 0 1 0 1 1 1], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 1], :rate 1.0, :m :m3, :job 1401, :clk 2067.6153, :line 307}
+STARVED IS INCONSISTENT...................
+llink =  {:M [0 1 0 1 0 1 1 1], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 1], :rate 1.0, :m :m3, :job 1401, :clk 2067.6153, :line 307}
+msg =  {:clk 2067.6153, :act :m3-starved, :m :m3, :mjpact :st, :line 308}
+marking-key =  [:place-1 :place-2 :place-3 :place-4 :place-5 :place-6 :Place-13 :Place-14]
+buf =  :Place-14
+
+- 301 :m2-complete-job now does indeed result in a part in the buffer earlier BUT THIS ISN'T HELPFUL! After all, 
+  things are as there were before, except that for 1 additional link the buffer is correct. 
+  The buffer has too much, not too little!
+
+**** Next thing, write some code to put buffer occupancies in the message, so for diagnostics you can test them against markers.
+(def pnpn1 (-> (load-file "data/PNs/hopeful-pn-3.clj")
+               (assoc :pulls-from {:m1 [], :m2 [:Place-13], :m3 [:Place-14]})
+               (assoc :place-map {:b1 :Place-13 :b2 :Place-14})
+               (assoc :start-occupy {:Place-13 2 :Place-14 0})))
+
+** <2018-01-08 Mon>
+
+I'm writing the diagnostic stuff.
+
+*** code: weirdness in contemp-search
+
+  (if (:last-link pn) ; POD makes no sense to me that this doesn't work!
+    (next-match-contemp-2 pn msg)
+    pn)
+  #_(if (:failed? pn) 
+      pn
+      (if (not (:last-link pn))
+        (assoc! pn :failed? true)
+        (next-match-contemp-2 pn msg))))
+
+*** code: the Sunday AM project to try all permutations of contemporary messages
+
+;;;========start====================================================
+(defn next-match-contemp-2
+  "next-match msg and update pn."
+  [pn msg]
+  (let [match-info (next-match pn msg)]
+    (let [matched (dissoc (:matched match-info) :rate-fn)
+          line (:line matched)]
+      (println "m = " matched)
+      (-> pn ; update! would be nice here!
+          (assoc! :active-jobs (:active-jobs match-info))
+          (assoc! :graph-link (:graph-link match-info))
+          (assoc! :interp (conj! (:interp pn) matched))
+          (assoc! :last-link matched)))))
+
+(defn order-buf
+  "Return a vector of messages ordered according to the 
+   argument vector ORDER, which contains line numbers."
+  [buf order]
+  (let [result (mapv (fn [line-num] (some #(when (== (:line %) line-num) %) buf)) order)]
+    (when-not (every? identity result) (ex-info "order-buf" {:order order}))
+    result))
+
+(defn contemp-search
+  "Look for a path through the contemporary messages;
+   when one is found, update pn appropriately."
+  [pn]
+  (let [pn (persistent! pn)
+        mutes (combo/permutations (map :line (:msg-buf pn)))]
+    (loop [order mutes]
+      (let [msgs (order-buf (:msg-buf pn) (first order))
+            result (reduce (fn [pn msg]
+                             (if (:last-link pn) ; POD makes no sense to me that this doesn't work!
+                               (next-match-contemp-2 pn msg)
+                               pn)
+                             #_(if (:failed? pn) 
+                                 pn
+                                 (if (not (:last-link pn))
+                                   (assoc! pn :failed? true)
+                                   (next-match-contemp-2 pn msg))))
+                           (transient pn)
+                           msgs)]
+        (cond (:last-link result)    (assoc! result :msg-buf []),
+              (empty? (rest order))  (assoc! result :last-link nil),
+              true (recur (vec (rest order))))))))
+;;;=======end=====================================================
+
+
+*** code: workflow fitness !!!
+
+;;;===========================================
+;;; Fitness measure
+;;;===========================================
+(defn act2trans
+  "Return the transition (its name) responsible for the argument act."
+  [pn act]
+  (some #(when (= act (-> % :rep :act)) (:name %))
+        (:transitions pn)))
+
+(defn violates?
+  "Return true if the qpn-job violates the argument relation."
+  [qpn-job relation]
+  (not (relation qpn-job)))
+
+(defn avg-scada-process-steps
+  "Calculate the weighted average number of steps in a SCADA pattern."
+  [patterns]
+  (let [npat (count patterns)]
+    (when (zero? npat)
+      (throw (ex-info "Insufficient data to find a pattern" {})))
+    (let [njobs (apply + (map #(:njobs %) patterns))]
+      (/ (apply + (map #(* (/ (:njobs %) njobs) (count (:form %))) patterns))
+         npat))))
+
+;;; +1 for every precedence constraint violated. +1 for each act not manifest in the QPN log. 
+;;; Will need something more for loops, but we'll get to that later.
+(defn calc-process-disorder
+  "For a single QPN job-trace, return a map {:score <> :pattern-id <>} indicating the 
+   score and pattern-id from the best matching SCADA patterns. Note that in assembly lines,
+   there is only one SCADA pattern."
+  [job-trace patterns]
+  (loop [pats patterns
+         best {:score 99999 :pattern-id -1}]
+    (let [pat (first pats)
+          ;; How many of the pattern actions are represented in this QPN trace?
+          ;; POD Should this also consider acts in the qpn job trace but not in the pattern?
+          nact-diff (Math/abs (- (count job-trace)
+                                 (count (set/intersection (set (map :act (:form pat)))
+                                                          (set (map :act job-trace))))))
+          nviolates (reduce (fn [score rel] (if (violates? job-trace rel) (inc score) score))
+                            0
+                            (:relations pat))
+          this-score (+ nact-diff nviolates) ; POD Add here to force failure.
+          best  (if (< this-score (:score best))
+                  {:score this-score :pattern-id (:id pat)}
+                  best)]
+      (cond (== this-score 0) {:score 0 :pattern-id (:id pat)}
+            (empty? (next pats)) best
+            true (recur (next pats) best)))))
+
+(defn trunc-qpn-log-at-cycle
+  "Return a log that stops when it sees the same message a second time on the same job."
+  [qpn-log]
+  (loop [log qpn-log
+         short-log []]
+    (let [msg (first log)]
+      (if (or (empty? log) (some #(= msg %) short-log))
+        short-log
+        (recur (next log) (conj short-log msg))))))
+
+;;; SCADA log processes produces multiple patterns. There is one pattern per colour for
+;;; a transfer/flow or assembly line. Associated with each colour-tagged
+;;; pattern are sojourn times and breakdown/repair rates. (POD, that is a ToDo!)
+;;; workflow-fitness looks at a range (tkn-range) of qpn jobs, finding the error in each relative
+;;; to the (typically one) SCADA log pattern, producing the average error relative to this pattern.
+
+;;; What is the GP doing?
+;;;   1) It is finding a PN that best matches the log. That PN has colour. SCADA logs
+;;;      also have colour. The PNs could have multiple paths for different job types or
+;;;      could combine paths where that makes more sense. 
+
+;;; The individuals have to cope with all job types. I will keep scores on how well
+;;; the PN does against each SCADA job type (colour). Then I can use crossover to combine
+;;; the best of multiple colour paths. (One Inv does well on blue, another does well on red...)
+;;; Maybe the GP is two-phase, where the first phase optimises for individual colours (no crossover)
+;;; and the second phase predominantly does crossover on these individuals. Maybe they aren't
+;;; so much phases as a function that increases the portion of crossovers as the colour-wise
+;;; scores increase. Early on, perhaps scoring is about being good at one color, and later about
+;;; being good at all of them. Maybe in addition to increasing cross-over, I penalize more for
+;;; not handling multiple types (and do this by weighting, according to the proportion of each job
+;;; type seen).
+
+;;; So that's all good, but what do I mean by "does well on blue" etc.? With the SCADA log
+;;; I'll have information about workstation reliability, colour of jobs, and time spent on
+;;; at each workstation. I can keep patterns for each color. Indeed, it is not even necessary
+;;; that something is reported at each workstation -- some workstations in the line could
+;;; "disappear" and there would be a different section of path for some color where this occurs.
+;;; I don't think there is a challenge here except in finding buffer sizes. Maybe that is a good
+;;; thing. Do the ANN on the buffer size and be done with it. (BTW, maybe there are similar
+;;; problems such as not having sufficient carriers, etc.)
+
+;;; A problem here is that I don't have anything in the GP fitness measurement currently that
+;;; would encourage the introduction of inhibitor arcs (and their multiplicity) as means of
+;;; specifying buffer capacity. Should I just explicitly edit the PN according to the results
+;;; of the ANN classification? (And how exactly do you I get the ANN to tell me that it is
+;;; focusing on the quantity of tokens in place x?) [2017-10-07 That should not be hard.]
+
+;;; The steady-state and dynamic analyses are looking more and more like validation activities.
+;;; Maybe I translate to DES to do these. (Do I feed back the results? How? What?)
+
+;;; A potentially negative aspect of the above is that it may completely separates jobs of
+;;; different types. Can this be fixed with flexible cross-over? For example, I could 
+;;; make some part of the red/blue, another part of the path separate red and blue. 
+
+
+;;; (workflow-fitness (:pn i1) (:scada-patterns +problem+)) ; i1 is in the file data/test-m2-bas.clj
+;;; Problem here is to run enough steps to get enough jobs to be able to trim some.
+;;; POD Note that this treats jobs that return to workstation as damaged. 
+(defn workflow-fitness
+  "Generate a QPN log for the PN and return the score WRT SCADA patterns. The disorder score is the
+   average (across a range of complete QPN jobs) of the process disorder of the best matched process.
+   If there are very few jobs (perhaps because :elim :intro weirdness), then just score them.
+   The total disorder score is number of violations of event orderings."
+  [inv]
+  (handling-evolve [inv]
+    (let [patterns (-> (util/app-info) :problem :scada-patterns)
+          pn (sim/simulate (:pn inv) :max-steps (* 50 (avg-scada-process-steps patterns)))
+          max-tkn (-> pn :sim :max-tkn) ; max-tkn is number of tokens generated by sim.
+          warm-up (-> (util/app-info) :gp-params :aqpn-warm-up)
+          disorder ;; Calculate disorder
+          (if (> max-tkn 20)
+            (let [tkn-range (range warm-up (- (-> pn :sim :max-tkn) warm-up))
+                  sum-error (reduce (fn [sum tkn-id] ; sum disorder on simulation job.
+                                      ;; POD I am not using :pattern-id yet. Needs thought. 
+                                      (+ sum (:score (calc-process-disorder (qpn-log-about pn tkn-id) patterns))))
+                                    0
+                                    tkn-range)]
+              ;; Average over all the jobs. 
+              (double (/ sum-error (count tkn-range))))
+            ;; Otherwise at most just a few jobs. It is either not eliminating jobs-ids, or 
+            ;; not even creating a log. 
+            (let [tkn-id (max (Math/round (/ (-> pn :sim :max-tkn) 2.0)) 1)
+                  qpn-log (qpn-log-about pn tkn-id)]
+              (+ (-> (util/app-info) :gp-params :no-new-jobs-penalty)
+                 (if (empty? qpn-log)
+                   (-> (util/app-info) :gp-params :no-qpn-log-penalty)
+                   (:score (calc-process-disorder
+                            (trunc-qpn-log-at-cycle qpn-log)
+                            patterns))))))]
+      (assoc inv :disorder disorder))))
+
+
+
+*** code: workflow fitness testing !!!
+ 
+#_(load-file "data/SCADA-logs/scada-f0.clj") ; defines fit/scada-log-f0
+#_(load-file "data/test-individuals/test-m2-bas.clj") ; defines (in .gp) test-m2-bas individual (a perfect individual for scada-log-f0)
+#_(load-file "data/QPN-logs/qpn-m2-bas.clj") ; defines fit/qpn-m2-bas (a log for the perfect individual above)
+
+#_(deftest scada-pattern-disorder
+  (testing "scada-pattern-generation-and-qpn-disorder"
+    (let [pats (as-> (:log fit/scada-log-f0) ?pats
+                 (fit/scada-patterns ?pats)
+                 (map #(dissoc % :jobs) ?pats))]
+      (is (= (count pats) 1))
+      (is (= (dissoc (first pats) :relations)
+             {:id 3, :form
+              [{:act :aj, :jt \*}
+               {:act :bj, :bf \*, :n \*}
+               {:act :sm, :bf \*, :n \*}
+             {:act :ej, :m \*}]}))
+      (is (= 0
+             (fit/calc-process-disorder (fit/qpn-log-about gp/test-m2-bas 22) 22)
+             gp/test-m2-bas ; pod I'm guessing
+              (first pats)
+              22
+              (fit/qpn-gather-tkn fit/qpn-m2-bas 22)))
+      (is (= 1
+             (fit/calc-process-disorder
+              gp/test-m2-bas
+              (first pats)
+              22
+              [{:act :bj, :tkns [{:type :a, :id 22}]}
+               {:act :aj, :tkns [{:type :a, :id 21} {:type :a, :id 22}]}
+               {:act :aj, :tkns [{:type :a, :id 23} {:type :a, :id 22}]}
+               {:act :sm, :tkns [{:type :a, :id 22}]}
+               {:act :ej, :tkns [{:type :a, :id 22}]}])))
+      (is (= 4
+             (fit/calc-process-disorder
+              gp/test-m2-bas
+              (first pats)
+              22
+              [{:act :ej, :tkns [{:type :a, :id 22}]}
+               {:act :bj, :tkns [{:type :a, :id 22}]}
+               {:act :aj, :tkns [{:type :a, :id 21} {:type :a, :id 22}]}
+               {:act :aj, :tkns [{:type :a, :id 23} {:type :a, :id 22}]}
+               {:act :sm, :tkns [{:type :a, :id 22}]}]))))))
+
+(defn m2-inhib-bas-workflow-fit
+  "Setup the m2-inhib-bas PN for a fitness test"
+  [steps]    
+  (let [pn (-> "data/PNs/m2-inhib-bas.xml" 
+               spn/run-ready
+               gp/add-color-binding
+               (gp/diag-force-priority [{:source :m1-start-job, :target :buffer :priority 2}])
+               (sim/simulate :max-steps steps))]
+    (fit/workflow-fitness (map->Inv {:pn pn}))))
+
+(deftest perfect-fitness-scores-zero
+  (testing "That a PN matching the log scores zero."
+    (is true (=* 0.0 (:disorder (m2-inhib-bas-workflow-fit 200)) 0.01))))
+
+
+
+;;;(alias 'gp 'gov.nist.sinet.gp)
+;;;;(alias 'scada 'gov.nist.sinet.scada)
+;;; These are useful to understanding how things work. 
+;;; This one for an Eden INV:
+#_(def eee
+    (let [pn (->> (scada/random-job-trace)
+                  (gp/initial-individual-pn))]
+      (-> (gp/map->Inv {:pn pn})
+           gp/add-scada-report-fns
+           gp/add-color-binding
+          (update :pn
+                  (fn [pn]
+                    (reduce (fn [pn trans] (gp/assign-flow-priorities pn trans))
+                            pn
+                            (->> pn :transitions (map :name))))))))
+
+;;; This one to show it on the client: (not working; I don't know why.)
+#_(-> eee
+      gp/clean-inv-for-transmit
+      gp/diag-push-pn)
+
+;;; This one for a typical-job:
+;;;(def jjj (-> eee :pn (sim/simulate :max-steps 50) (fit/qpn-log-about 1) trunc-qpn-log-at-cycle))
+;;; ==> 
+;;;[{:tkns [{:jtype :blue, :id 1}], :rep {:name :m1-start-job, :act :aj, :m :m1}}
+;;; {:tkns [{:jtype :blue, :id 1}], :rep {:name :m1-complete-job, :act :bj, :m :m1, :bf :b1}}
+;;; {:tkns [{:jtype :blue, :id 1}], :rep {:name :m2-start-job, :act :sm, :m :m2, :bf :b1}}
+;;; {:tkns [{:jtype :blue, :id 1}], :rep {:name :m2-complete-job, :act :ej, :m :m2}}]
+
+;;; This one (finally!) to calculate job disorder:
+;;; (calc-process-disorder jjj (-> (util/app-info) :problem :scada-patterns))
+;;; ==> 0 (but of course it is going to get hit for not introducing a new token.
+
+#_(defn diag-one-that-runs
+  "Return the first PN that can generate at least modest amount of log!"
+  []
+  (some #(let [pn (sim/simulate (:pn %) :max-steps 100)]
+           (when (> (-> pn :sim :log count) 20) %))
+        (-> (util/app-info) :pop)))
+
+;;; POD NYI    
+#_(defn diag-process-disorder
+  "Report how messed up this PN is." 
+  [inv]
+  (let [patterns (-> (app-info) :problem :scada-patterns)
+        sim (-> inv :pn (sim/simulate :max-steps (* 50 (avg-scada-process-steps patterns))))]))
+
+;;; This needs to be commented out. (load order)
+#_(defn m2-inhib-bas
+  "Setup the m2-inhib-bas PN for a fitness test"
+  [steps]
+  (let [pn (-> "data/PNs/m2-inhib-bas.xml" 
+               gov.nist.spntools.core/run-ready
+               gp/add-color-binding
+               (gp/diag-force-priority [{:source :m1-start-job, :target :buffer :priority 2}])
+               #_(sim/simulate :max-steps steps))]
+    #_(workflow-fitness (util/map->Inv {:pn pn}))
+    pn))
+
+
+*** code: fitness_test fixture
+
+;;; POD Better than this would be to use the new MJPdes output directly. (Don't mess with app-info.)
+#_(defn problem-setting-fixture
+  "Set the 'problem' (the log we look at) to the m2-inhib-bas problem."
+  [f]
+  (let [orig-scada (-> (app-info) :problem :scada-data-file)]
+    (swap! app/problem #(assoc % :scada-data-file "data/SCADA-logs/scada-m2-inhib-bas.clj"))
+    (util/big-reset) ;; POD need something less extreme than this! stop and start app!
+    (f) ; The canonical fixture function, in this case called using the 'once' procedure
+    (swap! app/problem #(assoc % :scada-data-file orig-scada))
+    (util/big-reset)))
+
+#_(use-fixtures :once problem-setting-fixture)
+
+
+*** code: scada ordering relations
+(defn ordering-fn
+  "Return a function : trace -> boolean indicating whether the ordering relationship 
+   is violated by the argument QPN process trace. If one or both of the arguments 
+   does not even appear in the trace, it is considered violated."
+  [x y]
+  (fn [trace]
+    (let [pos-x (pos-in-trace trace x)
+          pos-y (pos-in-trace trace y)]
+      (if (and pos-x pos-y)
+        (<= (pos-in-trace trace x) (pos-in-trace trace y))
+        true))))
+
+(defn scada-ordering-relations
+  "Calculate ordering functions for a SCADA pattern."
+  [p]
+  (loop [events (:form p)
+         ordering []]
+    (if (empty? (rest events))
+      ordering
+      (recur
+       (next events)
+       (into ordering
+             (reduce (fn [m s] (conj m (ordering-fn (:act (first events)) (:act s))))
+                     []
+                     (rest events)))))))
+
+(defn pos-in-trace
+  "Return the position of the argument action in the argument QPN process trace."
+  [trace act]
+  (let [^clojure.lang.PersistentVector acts (vec (map :act trace))
+        idx (.indexOf acts act)]
+    (if (< idx 0) false idx)))
+
+
+
+
+*** A graph of calls
+
+ find-interpretation ==> interpret-scada ==>  next-match-contemp            ==> next-match        ==> diag-update-occupy
+                                             - move mathch-info to pn     - creates match-info        - update occupy map
+                                                                          - fails on starve            
+
+                                                                             link-match   
+                                                                          -  add occupy info
+*** Looking at the problem starting
+
+I think I should looking at log line 1, not 0. 0 is the start-link.
+start =  {:M [0 0 1 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 0 1 0 1 1 2 1], :line 0, :occupy {:Place-13 2, :Place-14 0}}
+m =  {:M [0 0 1 1 0 1 1 1], :Mp [0 0 1 0 1 1 1 2], :fire :m2-complete-job, :line 0, :occupy {:Place-13 2, :Place-14 1}, :relax? :active}
+
+--> Done. No better, (worse) but it make sense.
+
+start =  {:M [0 0 1 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 0 1 0 1 1 2 1], :line 0, :occupy {:Place-13 2, :Place-14 0}}
+m =  {:M [0 0 1 0 1 1 2 1], :Mp [0 0 1 1 0 1 1 1], :fire :m2-start-job, :line 1, :occupy {:Place-13 1, :Place-14 0}}
+=======>  Occupancy wrong on  :Place-13
+
+The diag looks wrong. In processing the llink :m2-complete-job, I should add to buffer :b2, instead this shows removing from :b1
+
+According to the log, we want to start at 
+
 

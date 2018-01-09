@@ -62,5 +62,5 @@
   {:aid 24, :source :m3-complete-job, :target :place-1, :name :aa-24, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
   {:aid 25, :source :m1-start-job, :target :Place-13, :name :aa-25, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 2}
   {:aid 26, :source :Place-13, :target :m2-start-job, :name :aa-26, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
-  {:aid 27, :source :m2-start-job, :target :Place-14, :name :aa-27, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 2}
+  {:aid 27, :source :m2-complete-job, :target :Place-14, :name :aa-27, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 2}
   {:aid 28, :source :Place-14, :target :m3-start-job, :name :aa-28, :type :normal, :multiplicity 1, :bind {:jtype :blue}}]}

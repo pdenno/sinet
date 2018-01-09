@@ -78,148 +78,6 @@
             (zipmap acts (repeat (count acts) 0))
             (filter #(contains? % :act) log))))
 
-;;;===========================================
-;;; Fitness measure
-;;;===========================================
-(defn act2trans
-  "Return the transition (its name) responsible for the argument act."
-  [pn act]
-  (some #(when (= act (-> % :rep :act)) (:name %))
-        (:transitions pn)))
-
-(defn violates?
-  "Return true if the qpn-job violates the argument relation."
-  [qpn-job relation]
-  (not (relation qpn-job)))
-
-(defn avg-scada-process-steps
-  "Calculate the weighted average number of steps in a SCADA pattern."
-  [patterns]
-  (let [npat (count patterns)]
-    (when (zero? npat)
-      (throw (ex-info "Insufficient data to find a pattern" {})))
-    (let [njobs (apply + (map #(:njobs %) patterns))]
-      (/ (apply + (map #(* (/ (:njobs %) njobs) (count (:form %))) patterns))
-         npat))))
-
-;;; +1 for every precedence constraint violated. +1 for each act not manifest in the QPN log. 
-;;; Will need something more for loops, but we'll get to that later.
-(defn calc-process-disorder
-  "For a single QPN job-trace, return a map {:score <> :pattern-id <>} indicating the 
-   score and pattern-id from the best matching SCADA patterns. Note that in assembly lines,
-   there is only one SCADA pattern."
-  [job-trace patterns]
-  (loop [pats patterns
-         best {:score 99999 :pattern-id -1}]
-    (let [pat (first pats)
-          ;; How many of the pattern actions are represented in this QPN trace?
-          ;; POD Should this also consider acts in the qpn job trace but not in the pattern?
-          nact-diff (Math/abs (- (count job-trace)
-                                 (count (set/intersection (set (map :act (:form pat)))
-                                                          (set (map :act job-trace))))))
-          nviolates (reduce (fn [score rel] (if (violates? job-trace rel) (inc score) score))
-                            0
-                            (:relations pat))
-          this-score (+ nact-diff nviolates) ; POD Add here to force failure.
-          best  (if (< this-score (:score best))
-                  {:score this-score :pattern-id (:id pat)}
-                  best)]
-      (cond (== this-score 0) {:score 0 :pattern-id (:id pat)}
-            (empty? (next pats)) best
-            true (recur (next pats) best)))))
-
-(defn trunc-qpn-log-at-cycle
-  "Return a log that stops when it sees the same message a second time on the same job."
-  [qpn-log]
-  (loop [log qpn-log
-         short-log []]
-    (let [msg (first log)]
-      (if (or (empty? log) (some #(= msg %) short-log))
-        short-log
-        (recur (next log) (conj short-log msg))))))
-
-;;; SCADA log processes produces multiple patterns. There is one pattern per colour for
-;;; a transfer/flow or assembly line. Associated with each colour-tagged
-;;; pattern are sojourn times and breakdown/repair rates. (POD, that is a ToDo!)
-;;; workflow-fitness looks at a range (tkn-range) of qpn jobs, finding the error in each relative
-;;; to the (typically one) SCADA log pattern, producing the average error relative to this pattern.
-
-;;; What is the GP doing?
-;;;   1) It is finding a PN that best matches the log. That PN has colour. SCADA logs
-;;;      also have colour. The PNs could have multiple paths for different job types or
-;;;      could combine paths where that makes more sense. 
-
-;;; The individuals have to cope with all job types. I will keep scores on how well
-;;; the PN does against each SCADA job type (colour). Then I can use crossover to combine
-;;; the best of multiple colour paths. (One Inv does well on blue, another does well on red...)
-;;; Maybe the GP is two-phase, where the first phase optimises for individual colours (no crossover)
-;;; and the second phase predominantly does crossover on these individuals. Maybe they aren't
-;;; so much phases as a function that increases the portion of crossovers as the colour-wise
-;;; scores increase. Early on, perhaps scoring is about being good at one color, and later about
-;;; being good at all of them. Maybe in addition to increasing cross-over, I penalize more for
-;;; not handling multiple types (and do this by weighting, according to the proportion of each job
-;;; type seen).
-
-;;; So that's all good, but what do I mean by "does well on blue" etc.? With the SCADA log
-;;; I'll have information about workstation reliability, colour of jobs, and time spent on
-;;; at each workstation. I can keep patterns for each color. Indeed, it is not even necessary
-;;; that something is reported at each workstation -- some workstations in the line could
-;;; "disappear" and there would be a different section of path for some color where this occurs.
-;;; I don't think there is a challenge here except in finding buffer sizes. Maybe that is a good
-;;; thing. Do the ANN on the buffer size and be done with it. (BTW, maybe there are similar
-;;; problems such as not having sufficient carriers, etc.)
-
-;;; A problem here is that I don't have anything in the GP fitness measurement currently that
-;;; would encourage the introduction of inhibitor arcs (and their multiplicity) as means of
-;;; specifying buffer capacity. Should I just explicitly edit the PN according to the results
-;;; of the ANN classification? (And how exactly do you I get the ANN to tell me that it is
-;;; focusing on the quantity of tokens in place x?) [2017-10-07 That should not be hard.]
-
-;;; The steady-state and dynamic analyses are looking more and more like validation activities.
-;;; Maybe I translate to DES to do these. (Do I feed back the results? How? What?)
-
-;;; A potentially negative aspect of the above is that it may completely separates jobs of
-;;; different types. Can this be fixed with flexible cross-over? For example, I could 
-;;; make some part of the red/blue, another part of the path separate red and blue. 
-
-
-;;; (workflow-fitness (:pn i1) (:scada-patterns +problem+)) ; i1 is in the file data/test-m2-bas.clj
-;;; Problem here is to run enough steps to get enough jobs to be able to trim some.
-;;; POD Note that this treats jobs that return to workstation as damaged. 
-(defn workflow-fitness
-  "Generate a QPN log for the PN and return the score WRT SCADA patterns. The disorder score is the
-   average (across a range of complete QPN jobs) of the process disorder of the best matched process.
-   If there are very few jobs (perhaps because :elim :intro weirdness), then just score them.
-   The total disorder score is number of violations of event orderings."
-  [inv]
-  (handling-evolve [inv]
-    (let [patterns (-> (util/app-info) :problem :scada-patterns)
-          pn (sim/simulate (:pn inv) :max-steps (* 50 (avg-scada-process-steps patterns)))
-          max-tkn (-> pn :sim :max-tkn) ; max-tkn is number of tokens generated by sim.
-          warm-up (-> (util/app-info) :gp-params :aqpn-warm-up)
-          disorder ;; Calculate disorder
-          (if (> max-tkn 20)
-            (let [tkn-range (range warm-up (- (-> pn :sim :max-tkn) warm-up))
-                  sum-error (reduce (fn [sum tkn-id] ; sum disorder on simulation job.
-                                      ;; POD I am not using :pattern-id yet. Needs thought. 
-                                      (+ sum (:score (calc-process-disorder (qpn-log-about pn tkn-id) patterns))))
-                                    0
-                                    tkn-range)]
-              ;; Average over all the jobs. 
-              (double (/ sum-error (count tkn-range))))
-            ;; Otherwise at most just a few jobs. It is either not eliminating jobs-ids, or 
-            ;; not even creating a log. 
-            (let [tkn-id (max (Math/round (/ (-> pn :sim :max-tkn) 2.0)) 1)
-                  qpn-log (qpn-log-about pn tkn-id)]
-              (+ (-> (util/app-info) :gp-params :no-new-jobs-penalty)
-                 (if (empty? qpn-log)
-                   (-> (util/app-info) :gp-params :no-qpn-log-penalty)
-                   (:score (calc-process-disorder
-                            (trunc-qpn-log-at-cycle qpn-log)
-                            patterns))))))]
-      (assoc inv :disorder disorder))))
-
-
 ;;;====================================================================================
 ;;; Exceptional Fitness
 ;;;====================================================================================
@@ -243,7 +101,7 @@
                          (dissoc :rate-fn :rate)
                          (assoc :line line))
                   (:rgraph pn)))))
-    (ex-info "Log has no ordinary messages" {})))
+    (throw (ex-info "Log has no ordinary messages" {}))))
 
 (defn link+msg
   "Return a map that augments link info with msg info."
@@ -267,7 +125,7 @@
             (link+msg link msg)),
           ;; This relaxes conformance to rgraph. I think the idea was that when 
           ;; (3) a job is added, or (5) a job at the front of the log is finishing up,
-          ;; there needs to be a way to account for these. (rgraph as FSM won't?)
+          ;; there needs to be a way to account for these. (rgraph as FSM won't???)
           ;; The loom method (use :graph-link to find which of the candidate state is nearest)
           ;; is good for this, I think, because it doesn't mess up the marking too much. 
           ;; POD Other methods might be faster! (Hint: use arc :priority to figure out adds/deletes.)
@@ -299,6 +157,39 @@
   (when buf 
     (= 0 (nth (:Mp llink) (.indexOf mkey buf)))))
 
+;;; Links carry :occupy information for diagnostics. 
+;;; next-match (directly and through link-match) puts :occupy into links (used as llink here). 
+;;; diag-update-occupy takes :occupy from the llink and updates it, returning an updated occupy map.
+;;; The updated :occupy info is placed in the match-info object by the caller, next-match.
+;;; It then gets moved into the link in match-contemp-block.
+;;; BTW 'link' here is a combination of spntools-like link info and MJPdes-like msg info. (see link+msg.)
+(def diag-occupy-ok? (atom true))
+(defn diag-update-occupy
+  "Update match-info's :occupy occupancy info from the log message -- diagnostic only.
+   (The point of interpretation is to figure this stuff out, but 
+   MJPdes messages happen to provide occupancy.) Return updated occupy map."
+  ([msg match-info pn] (diag-update-occupy msg match-info (:place-map pn) (:marking-key pn)))
+  ([msg match-info place-map ^clojure.lang.PersistentVector mkey]
+   (reset! diag {:msg msg :match-info match-info :place-map place-map :mkey mkey})
+   (when-not (-> match-info :llink :occupy) (throw (ex-info "no :occupy in llink" {})))
+   ;; Check consistency of occupy with :M
+   (when (and (not @diag-occupy-ok?)
+              (every? #(= (% (-> match-info :llink :occupy))
+                          (nth (-> match-info :matched :M) (.indexOf mkey %)))
+                      (-> match-info :llink :occupy keys)))
+     (reset! diag-occupy-ok? true)
+     (println "=======>  Occupancy back to correct"))
+   (doseq [key (-> match-info :llink :occupy keys)]
+     (when-not (= (key (-> match-info :llink :occupy))
+                  (nth (-> match-info :llink :M) (.indexOf mkey key)))
+       (when @diag-occupy-ok?
+         (reset! diag-occupy-ok? false)
+         (println "=======>  Occupancy wrong on " key))))
+   ;; Update :occupy info in match-info; it should now match :Mp (not checked).
+   (cond-> (-> match-info :llink :occupy)
+     (= :sm (:mjpact msg))   (update ((:bf msg) place-map) dec)
+     (= :bj (:mjpact msg))   (update ((:bf msg) place-map) inc))))
+
 
 ;;; Process msgs in strict log-order:
 ;;; (1) If the msg is not ordinary...
@@ -311,14 +202,13 @@
 ;;; (6) Otherwise interpretation failed.  (return nil)
 (defn next-match
   "If the argument msg is not ordinary, return information about it and the llink. 
-   If the argument msg can advance the rgraph (i.e. ordinary), return *the* 
-   corresponding link. Otherwise return nil."
+   If the argument msg can advance the rgraph (i.e. ordinary), return augmented
+   link information. Otherwise return nil."
   [pn msg] 
   (let [job (:j msg)
         llink (:last-link pn)
-        old-job (:job llink)
         slink (atom nil)
-        result
+        match-info
         (cond (not (ordinary? msg))                            ; (1)
               (if (and (= (:mjpact msg) :st)
                        (when-let [machine (:m msg)]
@@ -332,32 +222,36 @@
                     (println "...................")
                     (reset! diag {:llink llink :msg msg :mk (:marking-key pn) :buf (first ((:m msg) (:pulls-from pn)))})
                     (when (= 0 (nth (:Mp llink) 7))
-                      (ex-info "here" {}))
+                      (throw (ex-info "here" {})))
                     nil)
-                {:matched 
-                 {:act (:act msg) :prev-act (:fire llink) :Mp (:Mp llink) :exceptional true 
-                  :state (:Mp llink) :clk (:clk msg) :job old-job :line (:line msg)}}),
+                {:matched ; create a link
+                 {:act (:act msg) :prev-act (:fire llink) :Mp (:Mp llink) :exceptional true :occupy (:occupy llink)
+                  :state (:Mp llink) :clk (:clk msg) :job (:job llink) :line (:line msg)}}),
               
               (reset! slink (link-match pn :link llink msg))   ; (2)
               {:matched    @slink                              
                :graph-link @slink}  ; g-l tracks rgraph state change
               
               (= :aj (:mjpact msg))                            ; (3)
-              (when-let [link (link-match pn :aj nil msg)]     
+              (when-let [link (link-match pn :aj llink msg)]     
                 {:matched link
                  :graph-link link}),
               
               (contains? (:active-jobs pn) job)
-              (when-let [link (link-match pn :active job msg)] ; (5)
+              (when-let [link (link-match pn :active llink msg)] ; (5)
                 {:matched link
                  :graph-link link})
               
-              true nil)]                                       ; (6)
-    (cond-> result
-      (not (contains? result :graph-link)) (assoc :graph-link (:graph-link pn)),   ; POD ugh! 
-      true                                 (assoc :active-jobs (:active-jobs pn)), ; POD ugh! 
-      (= :aj (:mjpact msg))                (assoc :active-jobs (conj (:active-jobs pn) job)),
-      (= :ej (:mjpact msg))                (assoc :active-jobs (set/difference (:active-jobs pn) #{job})))))
+              true {:matched nil})]                            ; (6)
+
+    (as-> match-info ?m
+      (assoc ?m :llink llink)
+      (assoc ?m :occupy (diag-update-occupy msg ?m pn))
+      (cond-> ?m
+        (not (contains? ?m :graph-link)) (assoc :graph-link (:graph-link pn)), 
+        true                             (assoc :active-jobs (:active-jobs pn)),
+        (= :aj (:mjpact msg))            (assoc :active-jobs (conj (:active-jobs pn) job)),
+        (= :ej (:mjpact msg))            (assoc :active-jobs (set/difference (:active-jobs pn) #{job}))))))
 
 (defn contemp-msgs
   "Return all messages that occurred when the message at indx occurred."
@@ -387,108 +281,69 @@
             (> (:clk (nth log n)) time) n,
             :else (recur (inc n))))))
 
-(defn next-match-contemp
+(defn match-contemp-block
   "next-match any contemporary message; return pn updated."
   [pn]
-  (let [result (some #(when-let [r (next-match pn %)] r) (:msg-buf pn))]
-    (let [matched (dissoc (:matched result) :rate-fn)
-          line (:line matched)]
-      (println "m = " matched)
+  (let [match-info (some #(when-let [r (next-match pn %)] r) (:msg-buf pn))]
+    (when-not (:matched match-info)
+      (cl-format *out* "~%Failed on msg block: ~{~%    ~A~}" (:msg-buf pn)))
+    (let [link (when (:matched match-info)
+                   (-> (:matched match-info)
+                       (dissoc :rate-fn :clk :rate :job :m)
+                       (assoc  :occupy (:occupy match-info))))
+          line (:line link)]
+      (println "m = " (apply sorted-map (interleave (keys link) (vals link))))
       (-> pn ; update! would be nice here!
           (assoc! :msg-buf (remove #(= line (:line %)) (:msg-buf pn)))
-          (assoc! :active-jobs (:active-jobs result))
-          (assoc! :graph-link (:graph-link result))
-          (assoc! :interp (conj! (:interp pn) matched))
-          (assoc! :last-link matched)))))
-
-;;;========start====================================================
-(defn next-match-contemp-2
-  "next-match msg and update pn."
-  [pn msg]
-  (let [result (next-match pn msg)]
-    (let [matched (dissoc (:matched result) :rate-fn)
-          line (:line matched)]
-      (println "m = " matched)
-      (-> pn ; update! would be nice here!
-          (assoc! :active-jobs (:active-jobs result))
-          (assoc! :graph-link (:graph-link result))
-          (assoc! :interp (conj! (:interp pn) matched))
-          (assoc! :last-link matched)))))
-
-(defn order-buf
-  "Return a vector of messages ordered according to the 
-   argument vector ORDER, which contains line numbers."
-  [buf order]
-  (let [result (mapv (fn [line-num] (some #(when (== (:line %) line-num) %) buf)) order)]
-    (when-not (every? identity result) (ex-info "order-buf" {:order order}))
-    result))
-
-(defn contemp-search
-  "Look for a path through the contemporary messages;
-   when one is found, update pn appropriately."
-  [pn]
-  (let [pn (persistent! pn)
-        mutes (combo/permutations (map :line (:msg-buf pn)))]
-    (loop [order mutes]
-      (let [msgs (order-buf (:msg-buf pn) (first order))
-            result (reduce (fn [pn msg]
-                             (if (:last-link pn) ; POD makes no sense to me that this doesn't work!
-                               (next-match-contemp-2 pn msg)
-                               pn)
-                             #_(if (:failed? pn) 
-                                 pn
-                                 (if (not (:last-link pn))
-                                   (assoc! pn :failed? true)
-                                   (next-match-contemp-2 pn msg))))
-                           (transient pn)
-                           msgs)]
-        (cond (:last-link result)       (assoc! result :msg-buf []),
-              (empty? (rest order))  (assoc! result :last-link nil),
-              true (recur (vec (rest order))))))))
-;;;--------------------------------------------------
-    
-    
-
-
-
-
-;;;=======end=====================================================
+          (assoc! :active-jobs (:active-jobs match-info))
+          (assoc! :graph-link (:graph-link match-info))
+          (assoc! :interp (conj! (:interp pn) link))
+          (assoc! :last-link link)))))
 
 (declare rgraph2loom-steps)
+
+;;;(interpret-scada pnpn1 ; this for hopeful-3
+;;;                 (-> (app-info) :problem :scada-log)
+;;;                 {:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 1],
+;;;                  :line 0, :occupy {:Place-13 2, :Place-14 0}})
 (defn interpret-scada
   "Describe how the message stream could be accounted for by this PN. 
    Return pn with :interp set to a vector where an element is:
     - a link augmented with :line and :job (if an ordinary message is processed), or
     - a map naming an exceptional message (if an such a message is processed)."
   [pn log start-link]
-  (when start-link
+  (reset! diag-occupy-ok? true)
+  (let [last-indx (-> log last :line)
+        log (subvec log 1) ; start-link accounts for first log entry. 
+        start-link (cond-> start-link
+                     (contains? pn :start-occupy) (assoc :occupy (:start-occupy pn)))]
     (println "start = " start-link)
-    (let [last-indx (-> log last :line)]
-      (loop [pn (as-> pn ?pn
-                  (transient ?pn)
-                  (assoc! ?pn :msg-buf (contemp-msgs log (-> start-link :line inc)))
-                  (assoc! ?pn :active-jobs (scada/active-jobs log))
-                  (assoc! ?pn :graph-link start-link)
-                  (assoc! ?pn :last-link  start-link)
-                  (assoc! ?pn :loom-steps (rgraph2loom-steps (:rgraph ?pn))) ; Used in link-match
-                  (assoc! ?pn :interp (transient [])))]
-        (let [pn (cond-> pn 
-                   (empty? (:msg-buf pn))
-                   (assoc! :msg-buf (contemp-msgs log
-                                                  (next-time-line log (-> pn :last-link :line)))),
-                   true #_(contemp-search) (next-match-contemp))]
-          (cond (not (:last-link pn))
-                (-> pn ; failure
-                    (assoc! :interp [])
-                    (dissoc! :loom-steps :rgraph)
-                    persistent!)
-                (> (-> pn :last-link :line inc) last-indx)
-                (-> pn ; success
-                    (assoc! :interp (persistent! (:interp pn)))
-                    (dissoc! :msg-buf :active-jobs :graph-link :loom-steps)
-                    persistent!)
-                true   ; continue
-                (recur pn)))))))
+    (loop [pn (as-> pn ?pn
+                (transient ?pn)
+                (assoc! ?pn :msg-buf (contemp-msgs log (-> start-link :line inc)))
+                (assoc! ?pn :active-jobs (scada/active-jobs log))
+                (assoc! ?pn :graph-link start-link)
+                (assoc! ?pn :last-link  start-link) ; needed because no (-> pn :interp last) with transient)
+                (assoc! ?pn :loom-steps (rgraph2loom-steps (:rgraph ?pn))) ; Used in link-match
+                (assoc! ?pn :interp (transient [])))]
+      (let [pn (cond-> pn 
+                 (empty? (:msg-buf pn))
+                 (assoc! :msg-buf (contemp-msgs
+                                   log
+                                   (next-time-line log (-> pn :last-link :line)))),
+                 true (match-contemp-block))]
+        (cond (not (:last-link pn))
+              (-> pn ; failure
+                  (assoc! :interp [])
+                  (dissoc! :loom-steps #_:rgraph)
+                  persistent!)
+              (> (-> pn :last-link :line inc) last-indx)
+              (-> pn ; success
+                  (assoc! :interp (persistent! (:interp pn)))
+                  (dissoc! :msg-buf :active-jobs :graph-link :loom-steps)
+                  persistent!)
+              true   ; continue
+              (recur pn))))))
 
 (defn reasonably-marked-pn
   "Set PN marking so that things that look like machines have a state."
@@ -552,18 +407,6 @@
       (>= (count (set (mapcat (fn [[m1 m2]] (util/buffers-between pn m1 m2)) combos)))
           (dec (count m))))))
 
-(declare find-interpretation compute-msg-table)
-(defn tryme []
-  (let [log (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj")
-        hopeful-pn (-> (load-file "data/PNs/hopeful-pn.clj")
-                       (assoc :pulls-from {:m1 [], :m2 [:Place-103]}))
-        patterns (scada/scada-patterns log)
-        msg-types (conj (scada/exceptional-msgs patterns log) :ordinary)
-        pn (find-interpretation hopeful-pn log 3 3)]
-    (compute-msg-table pn msg-types)))
-
-(def diag-start-link {:M [0 1 0 1 0 1 1 1], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 1 1], :rate 1.0, :line 0, :job 1356})
-      
 (defn find-interpretation
   "At increasing values of max-k, find new starting links and try to interpret the entire log. 
    Return pn with :interp set to the first complete interpretation found, if any below max-max-k."
@@ -580,7 +423,10 @@
                 (when-let [pn (as-> (lax-reach pn max-k) ?pn
                                 (some #(let [pn (interpret-scada ?pn log %)]
                                          (when (full-interp? pn log) pn))
-                                      (starting-links ?pn log)))]
+                                      #_(starting-links ?pn log)
+                                      [{:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 1], :line 0,
+                                       :occupy {:Place-13 2, :Place-14 0}}]
+                                      ))]
                   pn))
               (range min-max-k (inc max-max-k))))
       ; failed to intepret

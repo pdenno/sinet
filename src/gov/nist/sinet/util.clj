@@ -284,9 +284,7 @@
                                       candidates)))]
         best))
              
-
-;;; POD Could probably use iface-places in the implementation of this. 
-(defn buffers-between
+#_(defn buffers-between
   "Return all (only one?) buffers between the argument machines. 
    (1) If m1 is not upstream from m2, return nil. 
    (2) The candidate place must not function as blocking (that is,
@@ -296,13 +294,20 @@
         arcs  (:arcs pn)]
     (when (upstream? pn m1 m2)
       (filterv (fn [p]
-                 (not (and (some #(and (= (:target %) p)
-                                       (= :bj (-> (pnu/name2obj pn (:source %)) :rep :mjpact)))
+                 (not (and (some #(and (= (:source %) p) ; an arc that has it as its source
+                                       (contains? #{:aj :bj :sm} (-> (pnu/name2obj pn (:target %)) :rep :mjpact)))
                                  arcs)
-                           (some #(and (= (:source %) p)
-                                       (contains? #{:aj :sm} (-> (pnu/name2obj pn (:target %)) :rep :mjpact)))
+                           (some #(and (= (:target %) p)
+                                       (= :bj (-> (pnu/name2obj pn (:source %)) :rep :mjpact)))
                                  arcs))))
                candidates))))
+
+;;; POD This is a heuristic, at best. 
+(defn buffers-between
+  "Return all (only one?) buffers between the argument machines. "
+  [pn m1 m2]
+  (when (upstream? pn m1 m2)
+    (get (iface-places pn) [m1 m2])))
 
 ;;; POD assembly scenarios (name*S*) NYT
 ;;; Find a place that is util/buffer-between and has an arc into a util/related-transition. 

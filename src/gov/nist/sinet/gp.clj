@@ -12,7 +12,7 @@
             [gov.nist.spntools.util.pnml :as pnml :refer (read-pnml)] ;  POD clean this up
             [gov.nist.sinet.util :as util :refer (log app-info map->Inv gp-param pr-param *debugging* handling-evolve)]
             [gov.nist.sinet.simulate :as sim :refer (simulate)]
-            [gov.nist.sinet.fitness :as fit :refer (workflow-fitness exceptional-fitness)]
+            [gov.nist.sinet.fitness :as fit :refer (exceptional-fitness)]
             [gov.nist.sinet.scada :as scada]
             [gov.nist.sinet.ws :as ws]
             [gov.nist.sinet.report :as rep]))
@@ -469,7 +469,6 @@
     (as-> inv ?i
       (assoc ?i :disorder nil)
       (assoc ?i :except nil)
-      ;;(fit/workflow-fitness ?i)
       (fit/exceptional-fitness ?i)
       (assoc ?i :err (:except ?i)#_(+ (:disorder ?i) (:except ?i))))))
 

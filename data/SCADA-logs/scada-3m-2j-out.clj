@@ -13,7 +13,24 @@
  :print nil,
  :number-of-simulations 1,
    :report {:log? true, :max-lines 3000}}
-;;; I think this is [0 1 0 1 0 1 2 0] 
+
+;;; [:place-1 :place-2 :place-3 :place-4 :place-5 :place-6 :Place-13 :Place-14]
+;;; place-1 :m3 starved
+;;; place-2 :m1 busy
+;;; place-3 :m1 starved - sort of
+;;; place-4 :m2 busy
+;;; place-5 :m2 starved
+;;; place-6 :m3 busy
+;;; place-13 :b1
+;;; place-14 :b2
+;;; I think this log starts at [0 1 0 1 0 1 2 0] 
+
+#_(def pnpn1 (-> (load-file "data/PNs/hopeful-pn-3.clj")
+                 reasonably-marked-pn
+                 (assoc :pulls-from {:m1 [], :m2 [:Place-13], :m3 [:Place-14]})
+                 (assoc :place-map {:b1 :Place-13 :b2 :Place-14})
+                 (assoc :start-occupy {:Place-13 2 :Place-14 0})))
+
 [
 {:clk 1999.6152 :act :m2-complete-job :m :m2 :mjpact :bj :bf :b2 :n 0 :j 1356 :line 0}
 {:clk 1999.6152 :act :m2-start-job :m :m2 :mjpact :sm :bf :b1 :n 2 :j 1357 :line 1}

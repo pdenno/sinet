@@ -24,48 +24,6 @@
   [v1 v2 tol]
   (< (- v1 tol) v2 (+ v1 tol)))
 
-#_(load-file "data/SCADA-logs/scada-f0.clj") ; defines fit/scada-log-f0
-#_(load-file "data/test-individuals/test-m2-bas.clj") ; defines (in .gp) test-m2-bas individual (a perfect individual for scada-log-f0)
-#_(load-file "data/QPN-logs/qpn-m2-bas.clj") ; defines fit/qpn-m2-bas (a log for the perfect individual above)
-
-#_(deftest scada-pattern-disorder
-  (testing "scada-pattern-generation-and-qpn-disorder"
-    (let [pats (as-> (:log fit/scada-log-f0) ?pats
-                 (fit/scada-patterns ?pats)
-                 (map #(dissoc % :jobs) ?pats))]
-      (is (= (count pats) 1))
-      (is (= (dissoc (first pats) :relations)
-             {:id 3, :form
-              [{:act :aj, :jt \*}
-               {:act :bj, :bf \*, :n \*}
-               {:act :sm, :bf \*, :n \*}
-             {:act :ej, :m \*}]}))
-      (is (= 0
-             (fit/calc-process-disorder (fit/qpn-log-about gp/test-m2-bas 22) 22)
-             gp/test-m2-bas ; pod I'm guessing
-              (first pats)
-              22
-              (fit/qpn-gather-tkn fit/qpn-m2-bas 22)))
-      (is (= 1
-             (fit/calc-process-disorder
-              gp/test-m2-bas
-              (first pats)
-              22
-              [{:act :bj, :tkns [{:type :a, :id 22}]}
-               {:act :aj, :tkns [{:type :a, :id 21} {:type :a, :id 22}]}
-               {:act :aj, :tkns [{:type :a, :id 23} {:type :a, :id 22}]}
-               {:act :sm, :tkns [{:type :a, :id 22}]}
-               {:act :ej, :tkns [{:type :a, :id 22}]}])))
-      (is (= 4
-             (fit/calc-process-disorder
-              gp/test-m2-bas
-              (first pats)
-              22
-              [{:act :ej, :tkns [{:type :a, :id 22}]}
-               {:act :bj, :tkns [{:type :a, :id 22}]}
-               {:act :aj, :tkns [{:type :a, :id 21} {:type :a, :id 22}]}
-               {:act :aj, :tkns [{:type :a, :id 23} {:type :a, :id 22}]}
-               {:act :sm, :tkns [{:type :a, :id 22}]}]))))))
 
 (def hopeful-pn (-> (load-file "data/PNs/hopeful-pn.clj")
                     (assoc :pulls-from {:m1 [], :m2 [:Place-103]})))
@@ -73,32 +31,9 @@
 (def hopeful-pn-2 (-> (load-file "data/PNs/hopeful-pn-2.clj")
                       (assoc :pulls-from {:m1 [], :m2 [:Place-13], :m3 [:Place-14]})))
 
-(defn m2-inhib-bas-workflow-fit
-  "Setup the m2-inhib-bas PN for a fitness test"
-  [steps]    
-  (let [pn (-> "data/PNs/m2-inhib-bas.xml" 
-               spn/run-ready
-               gp/add-color-binding
-               (gp/diag-force-priority [{:source :m1-start-job, :target :buffer :priority 2}])
-               (sim/simulate :max-steps steps))]
-    (fit/workflow-fitness (map->Inv {:pn pn}))))
+(def hopeful-pn-3 (-> (load-file "data/PNs/hopeful-pn-3.clj")
+                      (assoc :pulls-from {:m1 [], :m2 [:Place-13], :m3 [:Place-14]})))
 
-(deftest perfect-fitness-scores-zero
-  (testing "That a PN matching the log scores zero."
-    (is true (=* 0.0 (:disorder (m2-inhib-bas-workflow-fit 200)) 0.01))))
-
-;;; POD Better than this would be to use the new MJPdes output directly. (Don't mess with app-info.)
-#_(defn problem-setting-fixture
-  "Set the 'problem' (the log we look at) to the m2-inhib-bas problem."
-  [f]
-  (let [orig-scada (-> (app-info) :problem :scada-data-file)]
-    (swap! app/problem #(assoc % :scada-data-file "data/SCADA-logs/scada-m2-inhib-bas.clj"))
-    (util/big-reset) ;; POD need something less extreme than this! stop and start app!
-    (f) ; The canonical fixture function, in this case called using the 'once' procedure
-    (swap! app/problem #(assoc % :scada-data-file orig-scada))
-    (util/big-reset)))
-
-#_(use-fixtures :once problem-setting-fixture)
 (deftest starving-is-ok
   (testing "that the starved? predicate works."
     (is (not (fit/starved?
@@ -442,62 +377,3 @@
             [1 1 0 0 1] [:m2-unstarved 1.0],              ; next best is 0.0854
             [0 1 0 1 2] [:m1-unblocked 1.0000000000000002],   ; next best is 0.175
             [1 0 1 0 0] [:ordinary 0.01139091655954467]}))))) ; next best is 0.0031
-
-;;;(alias 'gp 'gov.nist.sinet.gp)
-;;;;(alias 'scada 'gov.nist.sinet.scada)
-;;; These are useful to understanding how things work. 
-;;; This one for an Eden INV:
-#_(def eee
-    (let [pn (->> (scada/random-job-trace)
-                  (gp/initial-individual-pn))]
-      (-> (gp/map->Inv {:pn pn})
-           gp/add-scada-report-fns
-           gp/add-color-binding
-          (update :pn
-                  (fn [pn]
-                    (reduce (fn [pn trans] (gp/assign-flow-priorities pn trans))
-                            pn
-                            (->> pn :transitions (map :name))))))))
-
-;;; This one to show it on the client: (not working; I don't know why.)
-#_(-> eee
-      gp/clean-inv-for-transmit
-      gp/diag-push-pn)
-
-;;; This one for a typical-job:
-;;;(def jjj (-> eee :pn (sim/simulate :max-steps 50) (fit/qpn-log-about 1) trunc-qpn-log-at-cycle))
-;;; ==> 
-;;;[{:tkns [{:jtype :blue, :id 1}], :rep {:name :m1-start-job, :act :aj, :m :m1}}
-;;; {:tkns [{:jtype :blue, :id 1}], :rep {:name :m1-complete-job, :act :bj, :m :m1, :bf :b1}}
-;;; {:tkns [{:jtype :blue, :id 1}], :rep {:name :m2-start-job, :act :sm, :m :m2, :bf :b1}}
-;;; {:tkns [{:jtype :blue, :id 1}], :rep {:name :m2-complete-job, :act :ej, :m :m2}}]
-
-;;; This one (finally!) to calculate job disorder:
-;;; (calc-process-disorder jjj (-> (util/app-info) :problem :scada-patterns))
-;;; ==> 0 (but of course it is going to get hit for not introducing a new token.
-
-#_(defn diag-one-that-runs
-  "Return the first PN that can generate at least modest amount of log!"
-  []
-  (some #(let [pn (sim/simulate (:pn %) :max-steps 100)]
-           (when (> (-> pn :sim :log count) 20) %))
-        (-> (util/app-info) :pop)))
-
-;;; POD NYI    
-#_(defn diag-process-disorder
-  "Report how messed up this PN is." 
-  [inv]
-  (let [patterns (-> (app-info) :problem :scada-patterns)
-        sim (-> inv :pn (sim/simulate :max-steps (* 50 (avg-scada-process-steps patterns))))]))
-
-;;; This needs to be commented out. (load order)
-#_(defn m2-inhib-bas
-  "Setup the m2-inhib-bas PN for a fitness test"
-  [steps]
-  (let [pn (-> "data/PNs/m2-inhib-bas.xml" 
-               gov.nist.spntools.core/run-ready
-               gp/add-color-binding
-               (gp/diag-force-priority [{:source :m1-start-job, :target :buffer :priority 2}])
-               #_(sim/simulate :max-steps steps))]
-    #_(workflow-fitness (util/map->Inv {:pn pn}))
-    pn))

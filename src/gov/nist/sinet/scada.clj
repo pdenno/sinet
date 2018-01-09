@@ -128,7 +128,7 @@
          (every? (fn [n] (match-msg? (nth msgs n) (nth form n)))
                  (range (count form))))))
 
-(declare all-scada-patterns trim-patterns scada-ordering-relations act2trans)
+(declare all-scada-patterns trim-patterns act2trans)
 (defn scada-patterns ; called from app.clj
   "Compute the problem's SCADA patterns. It is a vector of maps with keys
    (:id :form :njobs :relations). Run once per problem."
@@ -137,7 +137,6 @@
     (all-scada-patterns ?pats)
     (trim-patterns ?pats 5 5)
     (map #(as-> % ?pat
-            (assoc ?pat :relations (scada-ordering-relations %))
             (assoc ?pat :njobs (count (:jobs ?pat)))
             (dissoc ?pat :jobs)) ; POD don't think the actual job will be useful.
          ?pats)))
@@ -170,39 +169,6 @@
                   patterns)))
             patterns
             (into (range (- size ntrim) size) (range ntrim)))))
-
-(defn pos-in-trace
-  "Return the position of the argument action in the argument QPN process trace."
-  [trace act]
-  (let [^clojure.lang.PersistentVector acts (vec (map :act trace))
-        idx (.indexOf acts act)]
-    (if (< idx 0) false idx)))
-
-(defn ordering-fn
-  "Return a function : trace -> boolean indicating whether the ordering relationship 
-   is violated by the argument QPN process trace. If one or both of the arguments 
-   does not even appear in the trace, it is considered violated."
-  [x y]
-  (fn [trace]
-    (let [pos-x (pos-in-trace trace x)
-          pos-y (pos-in-trace trace y)]
-      (if (and pos-x pos-y)
-        (<= (pos-in-trace trace x) (pos-in-trace trace y))
-        true))))
-
-(defn scada-ordering-relations
-  "Calculate ordering functions for a SCADA pattern."
-  [p]
-  (loop [events (:form p)
-         ordering []]
-    (if (empty? (rest events))
-      ordering
-      (recur
-       (next events)
-       (into ordering
-             (reduce (fn [m s] (conj m (ordering-fn (:act (first events)) (:act s))))
-                     []
-                     (rest events)))))))
 
 (defn exceptional-msgs
   "Return the set of the exceptional messages found in the scada log."
