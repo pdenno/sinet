@@ -45,7 +45,7 @@
 (def problem
   (atom 
    {:keep-vs-ignore 0.8
-    :scada-data-file "data/SCADA-logs/scada-3m-2j-out.clj"
+    :scada-data-file "data/SCADA-logs/scada-3m-2j-bufs-out.clj"
     #_"data/SCADA-logs/m2-j1-n3-block-mild-out.clj"      
     #_"data/SCADA-logs/m2-j1-n3-block-out.clj"
     #_"data/SCADA-logs/scada-m2-j1-starve-m2-out.clj" ;"scada-f0-imbalanced.clj"

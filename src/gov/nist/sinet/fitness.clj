@@ -88,6 +88,8 @@
     false
     msg))
 
+;;; POD For easier debugging, instead of starting at line 0, try starting where the 
+;;;     last machine finishes a job. 
 (defn starting-links
   "Based only on the rgraph and message firing, return all 
    links that could start interpretation." 
@@ -171,17 +173,19 @@
   ([msg match-info pn] (diag-update-occupy msg match-info (:place-map pn) (:marking-key pn)))
   ([msg match-info place-map ^clojure.lang.PersistentVector mkey]
    (reset! diag {:msg msg :match-info match-info :place-map place-map :mkey mkey})
+   (println "msg =" msg)
    (when-not (-> match-info :llink :occupy) (throw (ex-info "no :occupy in llink" {})))
-   ;; Check consistency of occupy with :M
+   ;; When things are off, re-check consistency of occupy with :M
    (when (and (not @diag-occupy-ok?)
               (every? #(= (% (-> match-info :llink :occupy))
                           (nth (-> match-info :matched :M) (.indexOf mkey %)))
                       (-> match-info :llink :occupy keys)))
      (reset! diag-occupy-ok? true)
      (println "=======>  Occupancy back to correct"))
+   ;; Check PREVIOUS link
    (doseq [key (-> match-info :llink :occupy keys)]
      (when-not (= (key (-> match-info :llink :occupy))
-                  (nth (-> match-info :llink :M) (.indexOf mkey key)))
+                  (nth (-> match-info :llink :Mp) (.indexOf mkey key)))
        (when @diag-occupy-ok?
          (reset! diag-occupy-ok? false)
          (println "=======>  Occupancy wrong on " key))))
@@ -189,7 +193,6 @@
    (cond-> (-> match-info :llink :occupy)
      (= :sm (:mjpact msg))   (update ((:bf msg) place-map) dec)
      (= :bj (:mjpact msg))   (update ((:bf msg) place-map) inc))))
-
 
 ;;; Process msgs in strict log-order:
 ;;; (1) If the msg is not ordinary...
@@ -286,7 +289,7 @@
   [pn]
   (let [match-info (some #(when-let [r (next-match pn %)] r) (:msg-buf pn))]
     (when-not (:matched match-info)
-      (cl-format *out* "~%Failed on msg block: ~{~%    ~A~}" (:msg-buf pn)))
+      (cl-format *out* "~%Failed on msg block: ~{~%    ~A~}~%" (:msg-buf pn)))
     (let [link (when (:matched match-info)
                    (-> (:matched match-info)
                        (dissoc :rate-fn :clk :rate :job :m)
@@ -301,11 +304,40 @@
           (assoc! :last-link link)))))
 
 (declare rgraph2loom-steps)
+(defn prep-interp [pn log start-link]
+  "Prepare the PN for interpretation."
+  (as-> pn ?pn
+    (transient ?pn)
+    (assoc! ?pn :msg-buf (contemp-msgs log (-> start-link :line inc)))
+    (assoc! ?pn :active-jobs (scada/active-jobs log))
+    (assoc! ?pn :graph-link start-link)
+    (assoc! ?pn :last-link  start-link) ; needed because no (-> pn :interp last) with transient)
+    (assoc! ?pn :loom-steps (rgraph2loom-steps (:rgraph ?pn))) ; Used in link-match
+    (assoc! ?pn :interp (transient []))))
 
-;;;(interpret-scada pnpn1 ; this for hopeful-3
-;;;                 (-> (app-info) :problem :scada-log)
-;;;                 {:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 1],
-;;;                  :line 0, :occupy {:Place-13 2, :Place-14 0}})
+(def diag-pn (atom nil))
+(reset! diag-pn (-> (load-file "data/PNs/hopeful-pn-3.clj")
+                    reasonably-marked-pn
+                    (lax-reach 2)
+                    (assoc :pulls-from {:m1 [], :m2 [:Place-13], :m3 [:Place-14]})
+                    (assoc :place-map {:b1 :Place-13 :b2 :Place-14})
+                    (assoc :start-occupy {:Place-13 2 :Place-14 2})
+                    (prep-interp (-> (app-info) :problem :scada-log)
+                                 {:M [0 1 0 1 0 1 2 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 2 2], :line 0,
+                                   :occupy {:Place-13 2, :Place-14 2}})))
+
+(defn diag-step-interp!
+  []
+  "Interpret one message, updating the diag-pn."
+  (let [pn @diag-pn
+        log (-> (app-info) :problem :scada-log)]
+    (reset! diag-pn 
+            (cond-> pn
+              (empty? (:msg-buf pn))
+              (assoc!  :msg-buf (contemp-msgs log (next-time-line log (-> pn :last-link :line)))),
+              true (match-contemp-block)))
+    true))
+  
 (defn interpret-scada
   "Describe how the message stream could be accounted for by this PN. 
    Return pn with :interp set to a vector where an element is:
@@ -318,32 +350,24 @@
         start-link (cond-> start-link
                      (contains? pn :start-occupy) (assoc :occupy (:start-occupy pn)))]
     (println "start = " start-link)
-    (loop [pn (as-> pn ?pn
-                (transient ?pn)
-                (assoc! ?pn :msg-buf (contemp-msgs log (-> start-link :line inc)))
-                (assoc! ?pn :active-jobs (scada/active-jobs log))
-                (assoc! ?pn :graph-link start-link)
-                (assoc! ?pn :last-link  start-link) ; needed because no (-> pn :interp last) with transient)
-                (assoc! ?pn :loom-steps (rgraph2loom-steps (:rgraph ?pn))) ; Used in link-match
-                (assoc! ?pn :interp (transient [])))]
-      (let [pn (cond-> pn 
-                 (empty? (:msg-buf pn))
-                 (assoc! :msg-buf (contemp-msgs
-                                   log
-                                   (next-time-line log (-> pn :last-link :line)))),
-                 true (match-contemp-block))]
-        (cond (not (:last-link pn))
-              (-> pn ; failure
+    (loop [pn (prep-interp pn log start-link)]
+      (as-> pn ?pn
+        (cond-> ?pn
+          (empty? (:msg-buf ?pn)) 
+          (assoc! :msg-buf (contemp-msgs log (next-time-line log (-> ?pn :last-link :line)))),
+          true (match-contemp-block))
+        (cond (not (:last-link ?pn))
+              (-> ?pn ; failure
                   (assoc! :interp [])
                   (dissoc! :loom-steps #_:rgraph)
                   persistent!)
-              (> (-> pn :last-link :line inc) last-indx)
-              (-> pn ; success
-                  (assoc! :interp (persistent! (:interp pn)))
+              (> (-> ?pn :last-link :line inc) last-indx)
+              (-> ?pn ; success
+                  (assoc! :interp (persistent! (:interp ?pn)))
                   (dissoc! :msg-buf :active-jobs :graph-link :loom-steps)
                   persistent!)
               true   ; continue
-              (recur pn))))))
+              (recur ?pn))))))
 
 (defn reasonably-marked-pn
   "Set PN marking so that things that look like machines have a state."
@@ -407,6 +431,27 @@
       (>= (count (set (mapcat (fn [[m1 m2]] (util/buffers-between pn m1 m2)) combos)))
           (dec (count m))))))
 
+;;; POD written this way for easier debugging. 
+(defn interp-k-some-start-link
+  "Try to interpret the log where the rgraph reflects a given k-boundedness."
+  [pn log]
+  (as-> pn ?pn
+    (assoc ?pn :start-occupy {:Place-13 2, :Place-14 2})
+    (some #(let [result-pn (interpret-scada ?pn log %)]
+             (when (full-interp? result-pn log) result-pn))
+          (starting-links ?pn log))))
+  
+;;; POD written this way for easier debugging. 
+(defn interp-some-k
+  [pn log min-max-k max-max-k]
+  (as-> pn ?pn
+    (let [found (some (fn [max-k]
+                        (as-> (lax-reach ?pn max-k) ?pnk
+                          (when-let [success (interp-k-some-start-link ?pnk log)] success)))
+                      (range min-max-k (inc max-max-k)))]
+      (or found ?pn))))
+
+
 (defn find-interpretation
   "At increasing values of max-k, find new starting links and try to interpret the entire log. 
    Return pn with :interp set to the first complete interpretation found, if any below max-max-k."
@@ -415,22 +460,11 @@
                                  (-> (app-info) :gp-params :min-max-k)
                                  (-> (app-info) :gp-params :max-max-k)))
   ([pn log min-max-k max-max-k] 
-   (if (interp-possible? pn)
-     (or
-      (let [machines (util/machines-of pn) ; memoize util/pulls-from 
-            pn (assoc pn :pulls-from (zipmap machines (map #(util/pulls-from pn %) machines)))]
-        (some (fn [max-k]
-                (when-let [pn (as-> (lax-reach pn max-k) ?pn
-                                (some #(let [pn (interpret-scada ?pn log %)]
-                                         (when (full-interp? pn log) pn))
-                                      #_(starting-links ?pn log)
-                                      [{:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 1], :line 0,
-                                       :occupy {:Place-13 2, :Place-14 0}}]
-                                      ))]
-                  pn))
-              (range min-max-k (inc max-max-k))))
-      ; failed to intepret
-      pn))))
+   (when (interp-possible? pn)
+     (let [machines (util/machines-of pn)] 
+       (as-> pn ?pn ; memoize util/pulls-from
+         (assoc ?pn :pulls-from (zipmap machines (map #(util/pulls-from ?pn %) machines)))
+         (interp-some-k ?pn log min-max-k max-max-k))))))
 
 ;;; You can have the same marking associated with more than one class. The more times you have
 ;;; it associated with a class, the stronger the result will be for that class. To make
@@ -743,3 +777,8 @@
                      cmaps))))
             []
             blocking)))
+
+
+            
+
+  

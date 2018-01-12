@@ -6,7 +6,8 @@
             [cljs.pprint :refer (pprint)]))
   
 ;;; ToDo: * Replace pn-trans-point: review everything on the trans and distribute
-;;;         so that things are on the correct side, not overlapping, and spaced nicely. 
+;;;         so that things are on the correct side, not overlapping, and spaced nicely.
+;;;         Step 1: define crossed? DONE.
 ;;;       * Show :intro :elim acts (and their multiplicity).
 ;;;       * Integrate simulation stepping capability.  
   
@@ -85,7 +86,7 @@
 
 (declare nearest-elem ref-points draw-elem draw-arc draw-tokens)
 (declare arc-coords-trans-to-place! arrowhead-coords pt-from-head)
-(declare angle distance hilite-elem! handle-move! rotate-trans!)
+(declare angle distance cross? hilite-elem! handle-move! rotate-trans!)
 
 (defn draw-pn []
   (when-let [pn @+display-pn+]
@@ -531,3 +532,32 @@
                      elems)]
     (rescale geom (pn-graph-scale geom))))
 
+(defn eqn
+  "Return a vector [a,b,c] for line eqn  ax + by = c given two points."
+  [x1 y1 x2 y2]
+  (let [[x1 y1 x2 y2] (mapv double [x1 y1 x2 y2])
+        slope   (/ (- y2 y1) (- x2 x1))
+        y-cept  (- y1 (* slope x1))
+        a (- slope)
+        b 1 
+        c y-cept]
+    [a b c]))
+
+(defn crossed?
+  "Return true if the line segments defined by the points cross inside their length."
+  [x1 y1 x2 y2 x3 y3 x4 y4]
+  (let [[a b b1] (eqn x1 y1 x2 y2)
+        [c d b2] (eqn x3 y3 x4 y4)
+        det (- (* a d) (* b c))]
+    (if (< (Math/abs det) 0.00000001)
+      false
+      (let [aa (/ d det)
+            bb (- (/ b det))
+            cc (- (/ c det))
+            dd (/ a det)
+            x (+ (* aa b1) (* bb b2))
+            y (+ (* cc b1) (* dd b2))]
+        (and (< 0.0 (/ (- x x1) (- x2 x1)) 1.0)
+             (< 0.0 (/ (- x x3) (- x4 x3)) 1.0)
+             (< 0.0 (/ (- y y1) (- y2 y1)) 1.0)
+             (< 0.0 (/ (- y y3) (- y4 y3)) 1.0))))))

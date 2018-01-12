@@ -5521,4 +5521,147 @@ The diag looks wrong. In processing the llink :m2-complete-job, I should add to 
 
 According to the log, we want to start at 
 
+<2018-01-09 Tue>
 
+I only wrote the crossed? code in client/draw.clj I read Semyon's paper.
+
+<2018-01-10 Wed>
+
+I am picking up on the diag-update-occupy and the interpretation work (that has dragged on for two weeks now!) 
+
+
+start =  {:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 1], :line 0, :occupy {:Place-13 2, :Place-14 0}}
+    m =  {:M [0 1 0 0 1 1 2 1], :Mp [0 1 0 1 0 1 1 1], :fire :m2-start-job, :line 1, :occupy {:Place-13 1, :Place-14 0}}
+
+Need :Place-14 = 1 to account for the first complete job. As below:
+
+(def pnpn1 (-> (load-file "data/PNs/hopeful-pn-3.clj")
+                                       reasonably-marked-pn
+                                       (assoc :pulls-from {:m1 [], :m2 [:Place-13], :m3 [:Place-14]})
+                                       (assoc :place-map {:b1 :Place-13 :b2 :Place-14})
+                                       (assoc :start-occupy {:Place-13 2 :Place-14 1})))
+
+Now it looks like I am keeping the link :Mp in-sync with :occupy. 
+
+start =  {:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 1], :line 0, :occupy {:Place-13 2, :Place-14 1}}
+m =  {:M [0 1 0 0 1 1 2 1], :Mp [0 1 0 1 0 1 1 1], :fire :m2-start-job, :line 1, :occupy {:Place-13 1, :Place-14 1}}
+m =  {:Mp [0 1 0 1 0 1 1 1], :act :m1-unblocked, :exceptional true, :line 2, :occupy {:Place-13 1, :Place-14 1}, :prev-act :m2-start-job, :state [0 1 0 1 0 1 1 1]}
+m =  {:M [0 1 0 1 0 1 1 1], :Mp [0 0 1 1 0 1 1 1], :fire :m1-complete-job, :line 3, :occupy {:Place-13 2, :Place-14 1}}
+=======>  Occupancy wrong on  :Place-13
+m =  {:M [0 0 1 1 0 1 1 1], :Mp [0 1 0 1 0 1 2 1], :fire :m1-start-job, :line 4, :occupy {:Place-13 2, :Place-14 1}}
+
+This looks interesting. :m2-complete-job result in an update but :m1-complete-job does not. 
+
+start =  {:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 1], :line 0, :occupy {:Place-13 2, :Place-14 1}}
+m = {:M [0 1 0 0 1 1 2 1], :Mp [0 1 0 1 0 1 1 1], :fire :m2-start-job, :line 1, :occupy {:Place-13 1, :Place-14 1}}
+m = {:Mp [0 1 0 1 0 1 1 1], :act :m1-unblocked, :exceptional true, :line 2, :occupy {:Place-13 1, :Place-14 1}, :prev-act :m2-start-job, :state [0 1 0 1 0 1 1 1]}
+m = {:M [0 1 0 1 0 1 1 1], :Mp [0 0 1 1 0 1 1 1], :fire :m1-complete-job, :line 3, :occupy {:Place-13 2, :Place-14 1}}
+=======>  Occupancy wrong on  :Place-13
+
+It makes sense because :m2 connects directly to the buffer whereas :m1 does not. 
+The problem is with diag-update-occupy; In asserting that work moves to buffers 
+when it is complete, we assume too much. In fact, the machine could be blocked, as 
+it is here. Even if not blocked, there is the infinitessimal small period where 
+it goes through the blocked state. For the time being, I'll live with this. 
+
+**** The problem starting at line 32
+m =  {:M [0 0 1 1 0 1 1 2], :Mp [0 1 0 1 0 1 2 2], :fire :m1-start-job, :line 32, :occupy {:Place-13 3, :Place-14 2}}
+
+Failed on msg block: 
+    {:clk 2005.6152, :act :m2-complete-job, :m :m2, :mjpact :bj, :bf :b2, :n 0, :j 1361, :line 33}
+    {:clk 2005.6152, :act :m2-start-job, :m :m2, :mjpact :sm, :bf :b1, :n 2, :j 1362, :line 34}
+
+diag-update-occupy, despite all the work that went into it, is of limited value. 
+There still remains the task of understanding what is going on here.
+Even with :b1 set to 0, it runs up the buffer to where if fails on 
+
+[:place-1 :place-2 :place-3 :place-4 :place-5 :place-6 :Place-13 :Place-14]
+{:M [0 0 1 1 0 1 1 2], :Mp [0 1 0 1 0 1 2 2], :fire :m1-start-job, :line 32, :occupy {:Place-13 1, :Place-14 2}}
+
+:M :m1 is not busy, :Mp :m1 is busy 
+   :m1 is busy          :m2 is busy added to :b1. Okay. 
+
+Failed on msg block: 
+    {:clk 2005.6152, :act :m2-complete-job, :m :m2, :mjpact :bj, :bf :b2, :n 0, :j 1361, :line 33}
+    {:clk 2005.6152, :act :m2-start-job, :m :m2, :mjpact :sm, :bf :b1, :n 2, :j 1362, :line 34}
+
+Simple: m2 can't complete the job because the buffer is full. :line 34 is not possible yet. 
+
+Something must be very wrong because the log message says
+{:clk 2005.6152 :act :m2-complete-job :m :m2 :mjpact :bj :bf :b2 :n 0 :j 1361 :line 33}
+
+**** Now with :bufs
+
+I don't understand the MJP output here at all! m3 completes a job, 2 jobs in its input buffer.
+It starts one of those jobs; there is STILL 2 jobs in the buffer.
+m2 unblocks. WHY? There are STILL 2 jobs in the buffer!
+
+{:clk 1999.7179 :act :m3-complete-job :m :m3 :mjpact :ej :ent 1990.4389 :j 1323 :bufs {:b1 1, :b2 2} :line 0}
+{:clk 1999.7179 :act :m3-start-job :m :m3 :mjpact :sm :bf :b2 :n 2 :j 1324 :bufs {:b1 1, :b2 2} :line 1}
+{:clk 1999.7179 :act :m2-unblocked :m :m2 :mjpact :ub :bufs {:b1 1, :b2 2} :line 2}
+{:clk 1999.7179 :act :m2-complete-job :m :m2 :mjpact :bj :bf :b2 :n 1 :j 1326 :bufs {:b1 1, :b2 1} :line 3}
+
+** <2018-01-11 Thu>
+
+I'm continuing with MJPdes inspection, now with names of job running and in buffers.
+
+{:clk 1999.8745 :act :m3-complete-job :m :m3 :mjpact :ej :ent 1990.8793 :j 1307 
+ :dets {:run {:m1 1313, :m2 1310, :m3 1307}, :bufs {:b1 [1311 1312], :b2 [1308 1309]}} :line 0}
+
+{:clk 1999.8745 :act :m3-start-job :m :m3 :mjpact :sm :bf :b2 :n 2 :j 1308 
+ :dets {:run {:m1 1313, :m2 1310, :m3 nil},  :bufs {:b1 [1311 1312], :b2 [1308 1309]}} :line 1}
+
+{:clk 2000.8233 :act :m1-blocked :m :m1 :mjpact :bl 
+ :dets {:run {:m1 1313, :m2 1310, :m3 1308}, :bufs {:b1 [1311 1312], :b2 [1309]}} :line 2}
+
+**** As line 1 shows, when :m3-start-job j=1308, run=nil, and buf1=1308. <================
+**** In line 2 (m1 blocked) 1308 is out of the buffer and on the machine. 
+
+{:clk 2001.3233 :act :m2-complete-job :m :m2 :mjpact :bj :bf :b2 :n 1 :j 1310 
+ :dets {:run {:m1 1313, :m2 1310, :m3 1308}, :bufs {:b1 [1311 1312], :b2 [1309]}} :line 3}
+
+{:clk 2001.3233 :act :m2-start-job :m :m2 :mjpact :sm :bf :b1 :n 2 :j 1311 
+ :dets {:run {:m1 1313, :m2 nil, :m3 1308}, :bufs {:b1 [1311 1312], :b2 [1309 1310]}} :line 4}
+
+{:clk 2001.3233 :act :m1-unblocked :m :m1 :mjpact :ub 
+ :dets {:run {:m1 nil, :m2 1311, :m3 1308}, :bufs {:b1 [1312 1313], :b2 [1309 1310]}} :line 5}
+
+{:clk 2001.3233 :act :m1-complete-job :m :m1 :mjpact :bj :bf :b1 :n 1 :j 1313 
+ :dets {:run {:m1 1313, :m2 1311, :m3 1308}, :bufs {:b1 [1312], :b2 [1309 1310]}} :line 6}
+
+
+
+** <2018-01-12 Fri>
+
+I am continuing to refactor intepretation with the view of stepping through the interpretation. 
+
+
+#_(def pnpn1 (-> (load-file "data/PNs/hopeful-pn-3.clj")
+               reasonably-marked-pn
+	       (lax-reach 2)
+               (assoc :pulls-from {:m1 [], :m2 [:Place-13], :m3 [:Place-14]})
+               (assoc :place-map {:b1 :Place-13 :b2 :Place-14})
+               (assoc :start-occupy {:Place-13 2 :Place-14 2})))
+
+
+
+*** Rampage!
+    (loop [pn (prep-interp pn log start-link)]
+      (let [pn (cond-> pn 
+                 (empty? (:msg-buf pn))
+                 (assoc! :msg-buf (contemp-msgs
+                                   log
+                                   (next-time-line log (-> pn :last-link :line)))),
+                 true (match-contemp-block))]
+        (cond (not (:last-link pn))
+              (-> pn ; failure
+                  (assoc! :interp [])
+                  (dissoc! :loom-steps #_:rgraph)
+                  persistent!)
+              (> (-> pn :last-link :line inc) last-indx)
+              (-> pn ; success
+                  (assoc! :interp (persistent! (:interp pn)))
+                  (dissoc! :msg-buf :active-jobs :graph-link :loom-steps)
+                  persistent!)
+              true   ; continue
+              (recur pn))))))

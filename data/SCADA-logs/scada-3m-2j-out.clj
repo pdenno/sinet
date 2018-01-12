@@ -1,18 +1,18 @@
-#_{:line
- {:m1 {:lambda 0.1, :mu 0.9, :W 1.0},
-  :b1 {:N 2},
-  :m2 {:lambda 0.1, :mu 0.9, :W 1.0},
-  :b2 {:N 2},
-  :m3 {:lambda 0.1, :mu 0.9, :W 1.0}},
- :entry-point :m1,
- :jobmix
- {:jobType1 {:w {:m1 1.0, :m2 1.0, :m3 1.0}, :portion 0.5},
-  :jobType2 {:w {:m1 1.5, :m2 1.5, :m3 1.5}, :portion 0.5}},
- :params {:warm-up-time 2000, :run-to-time 10000},
- :topology [:m1 :b1 :m2 :b2 :m3],
- :print nil,
- :number-of-simulations 1,
-   :report {:log? true, :max-lines 3000}}
+#_(map->Model {:line
+               {:m1 (map->ExpoMachine {:lambda 0.1, :mu 0.9, :W 1.0}),
+                :b1 (map->Buffer {:N 2}),
+                :m2 (map->ExpoMachine {:lambda 0.1, :mu 0.9, :W 1.0}),
+                :b2 (map->Buffer {:N 2}),
+                :m3 (map->ExpoMachine {:lambda 0.1, :mu 0.9, :W 1.0})},
+                :entry-point :m1,
+                :jobmix
+                {:jobType1 (map->JobType {:w {:m1 1.0, :m2 1.0, :m3 1.0}, :portion 0.5}),
+                 :jobType2 (map->JobType {:w {:m1 1.5, :m2 1.5, :m3 1.5}, :portion 0.5})},
+                :params {:warm-up-time 2000, :run-to-time 10000},
+                :topology [:m1 :b1 :m2 :b2 :m3],
+                :print nil,
+                :number-of-simulations 1,
+                :report {:log? true, :max-lines 3000}})
 
 ;;; [:place-1 :place-2 :place-3 :place-4 :place-5 :place-6 :Place-13 :Place-14]
 ;;; place-1 :m3 starved
