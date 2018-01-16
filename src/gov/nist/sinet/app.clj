@@ -43,8 +43,8 @@
     :mutation-dist mutation-dist}))
 
 (def problem
-  (atom 
-   {:keep-vs-ignore 0.8
+  (atom ; :scada-log will be computed in app-start-body
+   {:keep-vs-ignore 0.8 
     :scada-data-file "data/SCADA-logs/scada-3m-2j-bufs-out.clj"
     #_"data/SCADA-logs/m2-j1-n3-block-mild-out.clj"      
     #_"data/SCADA-logs/m2-j1-n3-block-out.clj"

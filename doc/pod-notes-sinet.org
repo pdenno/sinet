@@ -4007,7 +4007,6 @@ Does this just not get loaded?
 
 
 
-
 ** <2017-12-18 Mon>
 
 I worked on:
@@ -5630,38 +5629,240 @@ I'm continuing with MJPdes inspection, now with names of job running and in buff
  :dets {:run {:m1 1313, :m2 1311, :m3 1308}, :bufs {:b1 [1312], :b2 [1309 1310]}} :line 6}
 
 
-
 ** <2018-01-12 Fri>
 
 I am continuing to refactor intepretation with the view of stepping through the interpretation. 
 
+(reset! diag-pn (-> (load-file "data/PNs/hopeful-pn-3.clj")
+                    reasonably-marked-pn
+                    (lax-reach 2)
+                    (assoc :pulls-from {:m1 [], :m2 [:Place-13], :m3 [:Place-14]})
+                    (assoc :place-map {:b1 :Place-13 :b2 :Place-14})
+                    (assoc :start-occupy {:Place-13 2 :Place-14 2})
+                    (prep-interp (-> (app-info) :problem :scada-log)
+                                 {:M [0 1 0 1 0 1 2 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 2 2], :line 0,
+                                   :occupy {:Place-13 2, :Place-14 2}})))
 
-#_(def pnpn1 (-> (load-file "data/PNs/hopeful-pn-3.clj")
-               reasonably-marked-pn
-	       (lax-reach 2)
-               (assoc :pulls-from {:m1 [], :m2 [:Place-13], :m3 [:Place-14]})
-               (assoc :place-map {:b1 :Place-13 :b2 :Place-14})
-               (assoc :start-occupy {:Place-13 2 :Place-14 2})))
+
+*** Check what sort of license we bought for SmartGit. Problem believing this https://www.syntevo.com/smartgit/purchase
+    Note that it isn't tailored to my prior purchase. 
+
+** <2018-01-13 Sat>
+
+Continuing with stepping through interpretation. 
 
 
+*** Another rampage!
+    (let [link (when (:matched match-info)
+                   (-> (:matched match-info)
+                       (dissoc :rate-fn :clk :rate :job :m)
+                       (assoc  :occupy (:occupy match-info))))
+          line (:line link)]
+      ;;(println "i = " (apply sorted-map (interleave (keys link) (vals link))))
+      (-> pn ; update! would be nice here!
 
-*** Rampage!
-    (loop [pn (prep-interp pn log start-link)]
-      (let [pn (cond-> pn 
-                 (empty? (:msg-buf pn))
-                 (assoc! :msg-buf (contemp-msgs
-                                   log
-                                   (next-time-line log (-> pn :last-link :line)))),
-                 true (match-contemp-block))]
-        (cond (not (:last-link pn))
-              (-> pn ; failure
-                  (assoc! :interp [])
-                  (dissoc! :loom-steps #_:rgraph)
-                  persistent!)
-              (> (-> pn :last-link :line inc) last-indx)
-              (-> pn ; success
-                  (assoc! :interp (persistent! (:interp pn)))
-                  (dissoc! :msg-buf :active-jobs :graph-link :loom-steps)
-                  persistent!)
-              true   ; continue
-              (recur pn))))))
+          (assoc! :active-jobs (:active-jobs match-info))
+          (assoc! :graph-link (:graph-link match-info))
+
+          (assoc! :last-link link)
+     
+** <2018-01-14 Sun>
+
+I'm still trying to get interpretation to single-step. Yesterday I eliminated match-info, 
+replacing its use with direct manipulation of the transient PN. Much simpler. 
+
+I added MELPA top the package repositories (prior just used MELPA-stable). I did this with the
+intention of picking up the 0.17.0-SNAPSHOT of CIDER in the hope that it would fix problems with 
+the inspector. The inspector under 0.16.0 is non-functional.  I had to bring in 0.17.0-SNAPSHOT 
+of everything (it starts in ~/.lein/profile.clj). 
+
+---> Updating CIDER had no effect. 
+
+M-x nrepl-toggle-message-logging 
+cider inspect is working now. I don't know why. I killed the *figwheel* buffer, tried
+the inspect (it started working); I created a new *figwheel* repl; things continued to work. 
+
+Now I'm wondering why :matched and :occupy aren't present in the transient PN. 
+
+The design is such now that I can easily use persistent rather than transient. 
+Let's try that. 
+
+I switched to persistent objects. Things seem to be working. 
+
+
+Line 72: Buffer is empty, :occupy shows it to be so. Next message is legitimately an :m3-starved.
+So somehow the counting is not going right, because the link is wrong. 
+
+STARVED IS INCONSISTENT...................
+msg =  {:clk 2019.9388, :act :m3-complete-job, :m :m3, :mjpact :ej, :ent 2008.3233, :j 1319, 
+        :dets {:run {:m1 1323, :m2 1320, :m3 1319}, :bufs {:b1 [1321 1322], :b2 []}}, :line 72}
+marking-key =  [:place-1 :place-2 :place-3 :place-4 :place-5 :place-6 :Place-13 :Place-14]
+llink =  {:M [0 1 0 1 0 1 1 1], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 1], :m :m3, :job 1319, :line 72}
+occupy =  {:Place-13 2, :Place-14 0}
+...................
+
+Failed on msg block: 
+    {:clk 2019.9388, :act :m3-starved, :m :m3, :mjpact :st, 
+:dets {:run {:m1 1323, :m2 1320, :m3 nil}, :bufs {:b1 [1321 1322], :b2 []}}, :line 73}
+
+*** Let's focus on m2-complet-job, m3-start-job
+
+start =  {:M [0 1 0 1 0 1 2 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 2 2], :line 0}
+
+ msg = {:dets {:run {:m1 1313, :m2 1310, :m3 nil}, :bufs {:b1 [1311 1312], :b2 [1308 1309]}}, :n 2, :m :m3, :act :m3-start-job, :mjpact :sm, :bf :b2, :j 1308, :line 1, :clk 1999.8745}
+i =  {:M [1 1 0 1 0 0 2 2], :Mp [0 1 0 1 0 1 2 1], :fire :m3-start-job, :job 1308, :line 1, :m :m3}
+occupy = {:Place-13 2, :Place-14 1}
+
+ msg = {:dets {:run {:m1 1313, :m2 1310, :m3 1308}, :bufs {:b1 [1311 1312], :b2 [1309]}}, :n 1, :m :m2, :act :m2-complete-job, :mjpact :bj, :bf :b2, :j 1310, :line 3, :clk 2001.3233}
+i =  {:M [0 1 0 1 0 1 2 1], :Mp [0 1 0 0 1 1 2 2], :fire :m2-complete-job, :job 1310, :line 3, :m :m2}
+occupy = {:Place-13 2, :Place-14 2}
+
+ msg = {:dets {:run {:m1 1314, :m2 1311, :m3 nil}, :bufs {:b1 [1312 1313], :b2 [1309 1310]}}, :n 2, :m :m3, :act :m3-start-job, :mjpact :sm, :bf :b2, :j 1309, :line 9, :clk 2001.3745}
+i =  {:M [1 1 0 1 0 0 2 2], :Mp [0 1 0 1 0 1 2 1], :fire :m3-start-job, :job 1309, :line 9, :m :m3}
+occupy = {:Place-13 2, :Place-14 1}
+
+ msg = {:dets {:run {:m1 1314, :m2 1311, :m3 1309}, :bufs {:b1 [1312 1313], :b2 [1310]}}, :n 1, :m :m2, :act :m2-complete-job, :mjpact :bj, :bf :b2, :j 1311, :line 10, :clk 2002.3233}
+i =  {:M [0 1 0 1 0 1 2 1], :Mp [0 1 0 0 1 1 2 2], :fire :m2-complete-job, :job 1311, :line 10, :m :m2}
+occupy = {:Place-13 2, :Place-14 2}
+
+ msg = {:dets {:run {:m1 1314, :m2 1312, :m3 nil}, :bufs {:b1 [1313], :b2 [1310 1311]}}, :n 2, :m :m3, :act :m3-start-job, :mjpact :sm, :bf :b2, :j 1310, :line 13, :clk 2002.3745}
+i =  {:M [1 1 0 1 0 0 1 2], :Mp [0 1 0 1 0 1 1 1], :fire :m3-start-job, :job 1310, :line 13, :m :m3}
+occupy = {:Place-13 1, :Place-14 1}
+
+ msg = {:dets {:run {:m1 1315, :m2 1312, :m3 1310}, :bufs {:b1 [1313 1314], :b2 [1311]}}, :n 1, :m :m2, :act :m2-complete-job, :mjpact :bj, :bf :b2, :j 1312, :line 16, :clk 2003.3233}
+i =  {:M [0 1 0 1 0 1 2 1], :Mp [0 1 0 0 1 1 2 2], :fire :m2-complete-job, :job 1312, :line 16, :m :m2}
+occupy = {:Place-13 2, :Place-14 2}
+
+ msg = {:dets {:run {:m1 1316, :m2 1313, :m3 nil}, :bufs {:b1 [1314 1315], :b2 [1311 1312]}}, :n 2, :m :m3, :act :m3-start-job, :mjpact :sm, :bf :b2, :j 1311, :line 21, :clk 2003.8745}
+i =  {:M [1 1 0 1 0 0 2 2], :Mp [0 1 0 1 0 1 2 1], :fire :m3-start-job, :job 1311, :line 21, :m :m3}
+occupy = {:Place-13 2, :Place-14 1}
+
+ msg = {:dets {:run {:m1 1316, :m2 1313, :m3 1311}, :bufs {:b1 [1314 1315], :b2 [1312]}}, :n 1, :m :m2, :act :m2-complete-job, :mjpact :bj, :bf :b2, :j 1313, :line 22, :clk 2004.3233}
+i =  {:M [0 1 0 1 0 1 2 1], :Mp [0 1 0 0 1 1 2 2], :fire :m2-complete-job, :job 1313, :line 22, :m :m2}
+occupy = {:Place-13 2, :Place-14 2}
+
+ msg = {:dets {:run {:m1 1316, :m2 1314, :m3 nil}, :bufs {:b1 [1315], :b2 [1312 1313]}}, :n 2, :m :m3, :act :m3-start-job, :mjpact :sm, :bf :b2, :j 1312, :line 25, :clk 2004.8745}
+i =  {:M [1 1 0 1 0 0 1 2], :Mp [0 1 0 1 0 1 1 1], :fire :m3-start-job, :job 1312, :line 25, :m :m3}
+occupy = {:Place-13 1, :Place-14 1}
+
+ msg = {:dets {:run {:m1 1317, :m2 1314, :m3 1312}, :bufs {:b1 [1315 1316], :b2 [1313]}}, :n 1, :m :m2, :act :m2-complete-job, :mjpact :bj, :bf :b2, :j 1314, :line 28, :clk 2005.8233}
+i =  {:M [0 1 0 1 0 1 2 1], :Mp [0 1 0 0 1 1 2 2], :fire :m2-complete-job, :job 1314, :line 28, :m :m2}
+occupy = {:Place-13 2, :Place-14 2}
+
+ msg = {:dets {:run {:m1 1317, :m2 1315, :m3 nil}, :bufs {:b1 [1316], :b2 [1313 1314]}}, :n 2, :m :m3, :act :m3-start-job, :mjpact :sm, :bf :b2, :j 1313, :line 31, :clk 2005.8745}
+i =  {:M [1 1 0 1 0 0 1 2], :Mp [0 1 0 1 0 1 1 1], :fire :m3-start-job, :job 1313, :line 31, :m :m3}
+occupy = {:Place-13 1, :Place-14 1}
+
+ msg = {:dets {:run {:m1 nil, :m2 1315, :m3 1313}, :bufs {:b1 [1316 1317], :b2 [1314]}}, :n 1, :m :m2, :act :m2-complete-job, :mjpact :bj, :bf :b2, :j 1315, :line 34, :clk 2006.8233}
+i =  {:M [0 1 0 1 0 1 2 1], :Mp [0 1 0 0 1 1 2 2], :fire :m2-complete-job, :job 1315, :line 34, :m :m2}
+occupy = {:Place-13 2, :Place-14 2}
+
+ msg = {:dets {:run {:m1 1318, :m2 1316, :m3 nil}, :bufs {:b1 [1317], :b2 [1314 1315]}}, :n 2, :m :m3, :act :m3-start-job, :mjpact :sm, :bf :b2, :j 1314, :line 37, :clk 2006.8745}
+i =  {:M [1 1 0 1 0 0 1 2], :Mp [0 1 0 1 0 1 1 1], :fire :m3-start-job, :job 1314, :line 37, :m :m3}
+occupy = {:Place-13 1, :Place-14 1}
+
+ msg = {:dets {:run {:m1 nil, :m2 1316, :m3 1314}, :bufs {:b1 [1317 1318], :b2 [1315]}}, :n 1, :m :m2, :act :m2-complete-job, :mjpact :bj, :bf :b2, :j 1316, :line 40, :clk 2008.3233}
+i =  {:M [0 1 0 1 0 1 2 1], :Mp [0 1 0 0 1 1 2 2], :fire :m2-complete-job, :job 1316, :line 40, :m :m2}
+occupy = {:Place-13 2, :Place-14 2}
+
+ msg = {:dets {:run {:m1 1319, :m2 1317, :m3 nil}, :bufs {:b1 [1318], :b2 [1315 1316]}}, :n 2, :m :m3, :act :m3-start-job, :mjpact :sm, :bf :b2, :j 1315, :line 43, :clk 2008.3745}
+i =  {:M [1 1 0 1 0 0 1 2], :Mp [0 1 0 1 0 1 1 1], :fire :m3-start-job, :job 1315, :line 43, :m :m3}
+occupy = {:Place-13 1, :Place-14 1}
+
+ msg = {:dets {:run {:m1 1320, :m2 1317, :m3 1315}, :bufs {:b1 [1318 1319], :b2 [1316]}}, :n 1, :m :m2, :act :m2-complete-job, :mjpact :bj, :bf :b2, :j 1317, :line 47, :clk 2012.0242}
+i =  {:M [0 1 0 1 0 1 2 1], :Mp [0 1 0 0 1 1 2 2], :fire :m2-complete-job, :job 1317, :line 47, :m :m2}
+occupy = {:Place-13 2, :Place-14 2}
+
+ msg = {:dets {:run {:m1 1321, :m2 1318, :m3 nil}, :bufs {:b1 [1319 1320], :b2 [1316 1317]}}, :n 2, :m :m3, :act :m3-start-job, :mjpact :sm, :bf :b2, :j 1316, :line 53, :clk 2012.346}
+i =  {:M [1 1 0 1 0 0 2 2], :Mp [0 1 0 1 0 1 2 1], :fire :m3-start-job, :job 1316, :line 53, :m :m3}
+occupy = {:Place-13 2, :Place-14 1}
+
+ msg = {:dets {:run {:m1 1321, :m2 1318, :m3 nil}, :bufs {:b1 [1319 1320], :b2 [1317]}}, :n 1, :m :m3, :act :m3-start-job, :mjpact :sm, :bf :b2, :j 1317, :line 56, :clk 2013.846}
+i =  {:M [1 1 0 1 0 0 2 1], :Mp [0 1 0 1 0 1 2 0], :fire :m3-start-job, :job 1317, :line 56, :m :m3}
+occupy = {:Place-13 2, :Place-14 0}
+
+ msg = {:dets {:run {:m1 1321, :m2 1318, :m3 nil}, :bufs {:b1 [1319 1320], :b2 []}}, :n 0, :m :m2, :act :m2-complete-job, :mjpact :bj, :bf :b2, :j 1318, :line 59, :clk 2016.2446}
+i =  {:M [1 1 0 1 0 0 2 0], :Mp [1 1 0 0 1 0 2 1], :fire :m2-complete-job, :job 1318, :line 59, :m :m2}
+occupy = {:Place-13 2, :Place-14 1}
+
+ msg = {:dets {:run {:m1 1322, :m2 1319, :m3 nil}, :bufs {:b1 [1320 1321], :b2 [1318]}}, :n 1, :m :m3, :act :m3-start-job, :mjpact :sm, :bf :b2, :j 1318, :line 65, :clk 2016.9388}
+i =  {:M [1 1 0 1 0 0 2 1], :Mp [0 1 0 1 0 1 2 0], :fire :m3-start-job, :job 1318, :line 65, :m :m3}
+occupy = {:Place-13 2, :Place-14 0}
+
+xxx right here!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+ msg = {:dets {:run {:m1 1322, :m2 1319, :m3 1318}, :bufs {:b1 [1320 1321], :b2 []}}, :n 0, :m :m2, :act :m2-complete-job, :mjpact :bj, :bf :b2, :j 1319, :line 68, :clk 2017.7446}
+i =  {:M [0 1 0 1 0 1 2 1], :Mp [0 1 0 0 1 1 2 2], :fire :m2-complete-job, :job 1319, :line 68, :m :m2}
+occupy = {:Place-13 3, :Place-14 1}
+
+ msg = {:dets {:run {:m1 1323, :m2 1320, :m3 nil}, :bufs {:b1 [1321 1322], :b2 [1319]}}, :n 1, :m :m3, :act :m3-start-job, :mjpact :sm, :bf :b2, :j 1319, :line 71, :clk 2018.4388}
+i =  {:M [1 1 0 1 0 0 1 2], :Mp [0 1 0 1 0 1 1 1], :fire :m3-start-job, :job 1319, :line 71, :m :m3}
+occupy = {:Place-13 2, :Place-14 0}
+
+STARVED IS INCONSISTENT...................
+msg =  {:clk 2019.9388, :act :m3-starved, :m :m3, :mjpact :st, :dets {:run {:m1 1323, :m2 1320, :m3 nil}, :bufs {:b1 [1321 1322], :b2 []}}, :line 73}
+marking-key =  [:place-1 :place-2 :place-3 :place-4 :place-5 :place-6 :Place-13 :Place-14]
+llink =  {:M [0 1 0 1 0 1 1 1], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 1], :m :m3, :job 1319, :line 72}
+occupy =  {:Place-13 2, :Place-14 0}
+...................
+
+Failed on msg block: 
+    {:clk 2019.9388, :act :m3-starved, :m :m3, :mjpact :st, :dets {:run {:m1 1323, :m2 1320, :m3 nil}, :bufs {:b1 [1321 1322], :b2 []}}, :line 73}
+(true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true)
+gov.nist.sinet.fitness> 
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+
+ msg = {:dets {:run {:m1 1322, :m2 1319, :m3 nil}, :bufs {:b1 [1320 1321], :b2 [1318]}}, :n 1, :m :m3, :act :m3-start-job, :mjpact :sm, :bf :b2, :j 1318, :line 65, :clk 2016.9388}
+i =  {:M [1 1 0 1 0 0 2 1], :Mp [0 1 0 1 0 1 2 0], :fire :m3-start-job, :job 1318, :line 65, :m :m3}
+occupy = {:Place-13 2, :Place-14 0}
+
+ msg = {:dets {:run {:m1 1322, :m2 1320, :m3 1318}, :bufs {:b1 [1321], :b2 [1319]}}, :n 1, :m :m1, :act :m1-complete-job, :mjpact :bj, :bf :b1, :j 1322, :line 66, :clk 2017.7446}
+i =  {:M [0 1 0 1 0 1 2 0], :Mp [0 0 1 1 0 1 2 0], :fire :m1-complete-job, :job 1322, :line 66, :m :m1}
+occupy = {:Place-13 3, :Place-14 0}
+
+WHAT HAPPENED HERE? ???????????????????? 66 :Mp does not match 67 :M !!!! This relax thing.... :add-job... ?!?!?! NG. 
+
+ msg = {:dets {:run {:m1 nil, :m2 1320, :m3 1318}, :bufs {:b1 [1321 1322], :b2 [1319]}}, :m :m1, :act :m1-start-job, :mjpact :aj, :jt :jobType1, :j 1323, :line 67, :clk 2017.7446, :ends 2021.3328}
+i =  {:M [0 0 1 1 0 1 1 1], :Mp [0 1 0 1 0 1 2 1], :fire :m1-start-job, :job 1323, :line 67, :m :m1, :relax? :add-job}
+occupy = {:Place-13 3, :Place-14 0}
+
+ msg = {:dets {:run {:m1 1322, :m2 1319, :m3 1318}, :bufs {:b1 [1320 1321], :b2 []}}, :n 0, :m :m2, :act :m2-complete-job, :mjpact :bj, :bf :b2, :j 1319, :line 68, :clk 2017.7446}
+i =  {:M [0 1 0 1 0 1 2 1], :Mp [0 1 0 0 1 1 2 2], :fire :m2-complete-job, :job 1319, :line 68, :m :m2}
+occupy = {:Place-13 3, :Place-14 1}
+
+** <2018-01-15 Mon>
+
+I'm continuing with debugging stepping through. Now, if I simply processes everything with rgraph, 
+rather than using loom anywhere, it runs to completion. Review what got me here:
+
+Started looking at the 3-machine December 19, case almost a month ago!  
+Not all that bad, however; I took a vacation!
+
+1) I wrote the "add-buffer" mutation. 
+2) I use a fast algorithm to find all starting points (more robust, more likely).
+3) I use comtemp-block to look through all contemporaneous messages (more robust).
+4) I switched back and forth on using PN for everything, settling finally on using PN. 
+5) I wrote effective diagnostic code for single step and one step backward. This could be extended to save EVERY step. 
+6) I removed use of loom in this example. AFAICS, loom might not even be useful. 
+
+Trying to get interpet-scada to do what diag-step-interp! does (that is, complete!)...
+
+** <2018-01-16 Tue>
+
+*** It looks like it is jumping over some messages... FIXED. 
+
+*** Testing transient/persistent
+
+Obviously, transients aren't worth the effort:
+
+1 start-link, using transients:         "Elapsed time: 1034.793177 msecs" (However, it revealed a bug!)
+1 start-links,   not using transients:  "Elapsed time: 1054.834388 msecs"
+All start-links, not using transients:  "Elapsed time: 1305.997906 msecs"
+
+
+*** Use of contemp-block in this file! lines 66, 68, 69, 67, 70
+                                                  *  *   *    These should be processed in non-sequential order. 
+

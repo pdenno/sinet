@@ -88,6 +88,11 @@
 
 (def ^:dynamic *debugging* false)
 
+(defn when-debugging
+  [& body]
+  `(when *debugging*
+     @body))
+
 (defn pick-from-atom!
   "Randomly remove one element from the atom and return it."
   [atom]

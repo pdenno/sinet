@@ -11,7 +11,8 @@
             [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp)]
             [gov.nist.spntools.util.reach :as pnr :refer (reachability renumber-pids)]
             [gov.nist.sinet.simulate :as sim :refer-only (simulate)]
-            [gov.nist.sinet.util :as util :refer (app-info reset related-places handling-evolve map->Inv)]
+            [gov.nist.sinet.util :as util :refer (*debugging* app-info reset
+                                                  related-places handling-evolve map->Inv)]
             [gov.nist.sinet.scada :as scada]
             [gov.nist.sinet.pnn :as pnn]
             [gov.nist.sinet.report :as rep]))
@@ -20,6 +21,9 @@
   (alias 'fit 'gov.nist.sinet.fitness)
   (alias 'fitt 'gov.nist.sinet.fitness-test) ; POD temporary
   (alias 'gp   'gov.nist.sinet.gp)) ; POD temporary
+
+(declare contemp-msgs next-time-line reasonably-marked-pn lax-reach max-marks full-interp?)
+(declare interp-possible?)
   
 ;;; ToDo: 
 ;;;         1) Create inhibitors from information learned from PNN.
@@ -112,45 +116,18 @@
       (assoc :m    (:m msg))
       (assoc :job  (:j msg))
       (assoc :clk  (:clk msg))
-      (assoc :line (:line msg))))
+      (assoc :line (:line msg))
+      (dissoc :rate-fn :clk :rate)))
 
-;;; POD multimethod, except spec...
+;;; BTW 'link' here is a combination of spntools-like link info and MJPdes-like msg info. (see link+msg.)
 (defn link-match
   "Return the link which follows from the current link and log msg."
   [pn action llink msg]
-  (let [glink (:graph-link pn)]
-    (cond (= action :link) ; graph-link = llink? (use spec)
-          (when-let [link (some #(when (and (= (:Mp llink) (:M %)) 
-                                            (= (:fire %) (:act msg)))
-                                   %)
-                                (:rgraph pn))]
-            (link+msg link msg)),
-          ;; This relaxes conformance to rgraph. I think the idea was that when 
-          ;; (3) a job is added, or (5) a job at the front of the log is finishing up,
-          ;; there needs to be a way to account for these. (rgraph as FSM won't???)
-          ;; The loom method (use :graph-link to find which of the candidate state is nearest)
-          ;; is good for this, I think, because it doesn't mess up the marking too much. 
-          ;; POD Other methods might be faster! (Hint: use arc :priority to figure out adds/deletes.)
-          (or (= action :aj)      ; (3)
-              (= action :active)) ; (5)
-          (when-let [links (filter #(and #_(= (:Mp glink) (:M %)) ; POD why commented?
-                                         (= (:fire %) (:act msg)))
-                                   (:rgraph pn))]
-            (let [graph (:loom-steps pn)
-                  from (:Mp glink)
-                  dists (map
-                         (fn [l] {:link l
-                                  :dist (count (alg/dijkstra-path
-                                                graph
-                                                from
-                                                (:M l)))})
-                         links)
-                  best (-> (sort #(< (:dist %1) (:dist %2)) dists) first :link)]
-              (when best
-                (as-> (link+msg best msg) ?link
-                  (if (= action :aj)
-                    (assoc ?link :relax? :add-job)
-                    (assoc ?link :relax? :active)))))),)))
+  (when-let [link (some #(when (and (= (:Mp llink) (:M %)) 
+                                    (= (:fire %) (:act msg)))
+                           %)
+                        (:rgraph pn))]
+    (link+msg link msg)))
 
 (defn starved?
   "Return true if the argument machine (in msg) is starved."
@@ -159,40 +136,59 @@
   (when buf 
     (= 0 (nth (:Mp llink) (.indexOf mkey buf)))))
 
-;;; Links carry :occupy information for diagnostics. 
-;;; next-match (directly and through link-match) puts :occupy into links (used as llink here). 
-;;; diag-update-occupy takes :occupy from the llink and updates it, returning an updated occupy map.
-;;; The updated :occupy info is placed in the match-info object by the caller, next-match.
-;;; It then gets moved into the link in match-contemp-block.
-;;; BTW 'link' here is a combination of spntools-like link info and MJPdes-like msg info. (see link+msg.)
-(def diag-occupy-ok? (atom true))
-(defn diag-update-occupy
-  "Update match-info's :occupy occupancy info from the log message -- diagnostic only.
+(defn diag-occupy-map
+  "return :occupy Update match-info's :occupy occupancy info from the log message -- diagnostic only.
    (The point of interpretation is to figure this stuff out, but 
    MJPdes messages happen to provide occupancy.) Return updated occupy map."
-  ([msg match-info pn] (diag-update-occupy msg match-info (:place-map pn) (:marking-key pn)))
-  ([msg match-info place-map ^clojure.lang.PersistentVector mkey]
-   (reset! diag {:msg msg :match-info match-info :place-map place-map :mkey mkey})
-   (println "msg =" msg)
-   (when-not (-> match-info :llink :occupy) (throw (ex-info "no :occupy in llink" {})))
-   ;; When things are off, re-check consistency of occupy with :M
-   (when (and (not @diag-occupy-ok?)
-              (every? #(= (% (-> match-info :llink :occupy))
-                          (nth (-> match-info :matched :M) (.indexOf mkey %)))
-                      (-> match-info :llink :occupy keys)))
-     (reset! diag-occupy-ok? true)
-     (println "=======>  Occupancy back to correct"))
-   ;; Check PREVIOUS link
-   (doseq [key (-> match-info :llink :occupy keys)]
-     (when-not (= (key (-> match-info :llink :occupy))
-                  (nth (-> match-info :llink :Mp) (.indexOf mkey key)))
-       (when @diag-occupy-ok?
-         (reset! diag-occupy-ok? false)
-         (println "=======>  Occupancy wrong on " key))))
-   ;; Update :occupy info in match-info; it should now match :Mp (not checked).
-   (cond-> (-> match-info :llink :occupy)
-     (= :sm (:mjpact msg))   (update ((:bf msg) place-map) dec)
-     (= :bj (:mjpact msg))   (update ((:bf msg) place-map) inc))))
+  [pn]
+  (let [^clojure.lang.PersistentVector mkey (:marking-key pn)
+        place-map (:place-map pn)
+        msg       (:msg pn)]
+    (when-not (:occupy pn) (throw (ex-info "no :occupy in PN" {})))
+    ;; Compute new occupy-map 
+    (cond-> (:occupy pn)
+      (= :sm (:mjpact msg))   (update ((:bf msg) place-map) dec)
+      (= :bj (:mjpact msg))   (update ((:bf msg) place-map) inc))))
+
+(defn diag-report-interp
+  "Report on the message interpretation; change nothing (except maybe diagnostics); return pn"
+  [pn]
+  ;; Report message and link (i = interpretation).
+  (let [link (:matched pn)
+        save-diag-occupy-ok? (atom (:diag-occupy-ok? pn))]
+    (println "\n msg =" (:msg pn))
+    (println "i = "  (apply sorted-map (interleave (keys link) (vals link))))
+    (println "occupy =" (:occupy pn))
+    ;; When things are off, re-check consistency of occupy with :M
+    (let [occ-map (:occupy pn)
+          mkey (:marking-key pn)]
+      (when (and (not (:diag-occupy-ok? pn))
+                 (every? #(= (% occ-map)
+                             (nth (-> pn :matched :M) (.indexOf mkey %)))
+                         (keys occ-map)))
+        (reset! save-diag-occupy-ok? true)
+        (println "=======>  Occupancy back to correct"))
+      ;; Check occupy map againts :Mp of the new link. 
+      (doseq [key (keys occ-map)]
+        (when-not (= (key occ-map)
+                     (nth (:Mp link) (.indexOf mkey key)))
+          (when (:diag-occupy-ok? pn)
+            (reset! save-diag-occupy-ok? false)
+            (println "=======>  Occupancy wrong on " key)))))
+    (assoc pn :diag-occupy-ok? @save-diag-occupy-ok?)))
+
+(defn match-starve-inconsistent
+  "Interpretation failed because have work in buffers but reporting starving
+   set :matched to nil."
+  [pn msg]
+  (when *debugging*
+    (println "STARVED IS INCONSISTENT...................")
+    (println "msg = " msg)
+    (println "marking-key = " (:marking-key pn))
+    (println "matched = " (:matched pn))
+    (println "occupy = " (:occupy pn))
+    (println "..................."))
+  (assoc pn :matched nil))
 
 ;;; Process msgs in strict log-order:
 ;;; (1) If the msg is not ordinary...
@@ -209,52 +205,204 @@
    link information. Otherwise return nil."
   [pn msg] 
   (let [job (:j msg)
-        llink (:last-link pn)
-        slink (atom nil)
-        match-info
-        (cond (not (ordinary? msg))                            ; (1)
-              (if (and (= (:mjpact msg) :st)
-                       (when-let [machine (:m msg)]
-                         (not (starved? llink msg (:marking-key pn)
-                                        (first (machine (:pulls-from pn)))))))
-                (do (println "STARVED IS INCONSISTENT...................")
-                    (println "llink = " llink)
-                    (println "msg = " msg)
-                    (println "marking-key = " (:marking-key pn))
-                    (println "buf = " (first ((:m msg) (:pulls-from pn))))
-                    (println "...................")
-                    (reset! diag {:llink llink :msg msg :mk (:marking-key pn) :buf (first ((:m msg) (:pulls-from pn)))})
-                    (when (= 0 (nth (:Mp llink) 7))
-                      (throw (ex-info "here" {})))
-                    nil)
-                {:matched ; create a link
-                 {:act (:act msg) :prev-act (:fire llink) :Mp (:Mp llink) :exceptional true :occupy (:occupy llink)
-                  :state (:Mp llink) :clk (:clk msg) :job (:job llink) :line (:line msg)}}),
+        llink (:matched pn)
+        slink (atom nil)]
+    (as-> pn ?pn
+      (cond (not (ordinary? msg))                                   ; (1)
+            (if (and (= (:mjpact msg) :st)
+                     (when-let [machine (:m msg)]
+                       (not (starved? llink msg (:marking-key pn)
+                                      (first (machine (:pulls-from pn)))))))
+              (match-starve-inconsistent ?pn msg)
+              (assoc ?pn :matched ; else create a link 
+                     {:exceptional true :act (:act msg) :Mp (:Mp llink) 
+                      :clk (:clk msg) :line (:line msg)})),
               
-              (reset! slink (link-match pn :link llink msg))   ; (2)
-              {:matched    @slink                              
-               :graph-link @slink}  ; g-l tracks rgraph state change
-              
-              (= :aj (:mjpact msg))                            ; (3)
-              (when-let [link (link-match pn :aj llink msg)]     
-                {:matched link
-                 :graph-link link}),
-              
-              (contains? (:active-jobs pn) job)
-              (when-let [link (link-match pn :active llink msg)] ; (5)
-                {:matched link
-                 :graph-link link})
-              
-              true {:matched nil})]                            ; (6)
+            (reset! slink (link-match ?pn :link llink msg))         ; (2)
+            (assoc ?pn :matched @slink),                              
 
-    (as-> match-info ?m
-      (assoc ?m :llink llink)
-      (assoc ?m :occupy (diag-update-occupy msg ?m pn))
-      (cond-> ?m
-        (not (contains? ?m :graph-link)) (assoc :graph-link (:graph-link pn)), 
-        true                             (assoc :active-jobs (:active-jobs pn)),
-        (= :aj (:mjpact msg))            (assoc :active-jobs (conj (:active-jobs pn) job)),
-        (= :ej (:mjpact msg))            (assoc :active-jobs (set/difference (:active-jobs pn) #{job}))))))
+            (and (= :aj (:mjpact msg))                              ; (3)
+                 (reset! slink (link-match ?pn :aj llink msg)))
+            (assoc ?pn :matched @slink), 
+              
+            (and (contains? (:active-jobs ?pn) job)
+                 (reset! slink (link-match ?pn :active llink msg))) ; (5)
+            (assoc ?pn :matched @slink), 
+              
+            true (assoc ?pn :matched nil))                          ; (6)
+            
+            (cond-> ?pn
+              true                    (assoc :msg msg) ;!4
+              (= :aj (:mjpact msg))   (assoc :active-jobs (conj (:active-jobs ?pn) job)),
+              (= :ej (:mjpact msg))   (assoc :active-jobs (set/difference (:active-jobs pn) #{job}))))))
+
+(defn match-contemp-block
+  "next-match any contemporary message; return pn updated."
+  [pn]
+  (let [old-match  (:matched pn)]
+    (if-let [pn (some #(let [pn (next-match (assoc pn :matched old-match) %)] ;!
+                         (when (:matched pn) pn))
+                      (:msg-buf pn))]
+      (as-> pn ?pn ;!3 and conj!
+        (assoc ?pn :msg-buf (remove #(= (-> ?pn :matched :line) (:line %)) (:msg-buf ?pn)))
+        (assoc ?pn :interp (conj (:interp ?pn) (:matched ?pn)))
+        (cond-> ?pn
+          *debugging* (assoc :occupy (diag-occupy-map ?pn))
+          *debugging* (diag-report-interp)))
+      (do 
+        (when *debugging* (cl-format *out* "~%Failed on msg block: ~{~%    ~A~}~%" (:msg-buf pn)))
+        (assoc pn :matched nil)))))
+
+(declare rgraph2loom-steps)
+(defn prep-interp [pn log start-link]
+  "Prepare the PN for interpretation."
+  (when *debugging*
+    (println "msg = " (first log))
+    (println "start = " start-link))
+  (as-> pn ?pn
+    (assoc ?pn :msg-buf (remove #(= (:line %) (:line start-link))
+                                (contemp-msgs log (:line start-link))))
+    (assoc ?pn :active-jobs (scada/active-jobs log))
+    (assoc ?pn :matched    start-link) ; needed because no (-> pn :interp last) with transient)
+    (assoc ?pn :interp [start-link])))
+
+(def diag-pn (atom nil))
+(defn reset-diag-step-interp! []
+  (reset! diag-pn (-> (load-file "data/PNs/hopeful-pn-3.clj")
+                      (lax-reach 2)
+                      (assoc :diag-occupy-ok? true)
+                      (assoc :pulls-from {:m1 [], :m2 [:Place-13], :m3 [:Place-14]})
+                      (assoc :place-map {:b1 :Place-13 :b2 :Place-14})
+                      (assoc :occupy {:Place-13 2 :Place-14 2})
+                      (prep-interp (-> (app-info) :problem :scada-log)
+                                   {:M [0 1 0 1 0 1 2 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 2 2], :line 0})))
+  true)
+
+(def last-step-pn (atom nil))
+(defn diag-unstep-interp! ; POD probably not good for more that one step.
+  []
+  "Undo the effect of the last interpretation step."
+  (reset! diag-pn @last-step-pn)
+  true)
+
+(defn diag-step-interp!
+  []
+  "Interpret one message, updating the diag-pn."
+  (binding [*debugging* true]
+    (let [pn @diag-pn
+          log (-> (app-info) :problem :scada-log)]
+      (if (full-interp? pn log)
+        (println "Full interpretation!")
+        (do (reset! last-step-pn pn)
+            (reset! diag-pn 
+                    (cond-> pn
+                      (empty? (:msg-buf pn))
+                      (assoc :msg-buf (contemp-msgs log (next-time-line log (-> pn :matched :line)))), ;!
+                      true (match-contemp-block)))))
+    true)))
+
+(defn interpret-scada
+  "Describe how the message stream could be accounted for by this PN. 
+   Return pn with :interp set to a vector where an element is:
+    - a link augmented with :line and :job (if an ordinary message is processed), or
+    - a map naming an exceptional message (if an such a message is processed)."
+  [pn log start-link] 
+  (loop [pn (prep-interp pn log start-link)]
+    (as-> pn ?pn
+      (cond-> ?pn
+        (empty? (:msg-buf ?pn)) 
+        (assoc :msg-buf (contemp-msgs log (next-time-line log (-> ?pn :matched :line)))), ;!
+        true (match-contemp-block))
+      (cond (not (:matched ?pn))
+            (assoc ?pn :interp []), 
+            (full-interp? ?pn log)
+            (dissoc ?pn :msg-buf :active-jobs),
+            true   ; continue
+            (recur ?pn)))))
+
+(defn tryme []
+  (== 3002
+      (-> (load-file "data/PNs/hopeful-pn-3.clj")
+          (lax-reach 2)
+          (assoc :diag-occupy-ok? true)
+          (assoc :pulls-from {:m1 [], :m2 [:Place-13], :m3 [:Place-14]})
+          (assoc :place-map {:b1 :Place-13 :b2 :Place-14})
+          (assoc :occupy {:Place-13 2 :Place-14 2})
+          (prep-interp (-> (app-info) :problem :scada-log)
+                       {:M [0 1 0 1 0 1 2 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 2 2], :line 0})
+          (interpret-scada (-> (app-info) :problem :scada-log)
+                           {:M [0 1 0 1 0 1 2 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 2 2], :line 0})
+          (-> :interp count))))
+
+(defn tryme2 []
+  (let [log (-> (app-info) :problem :scada-log)]
+    (== 3002
+        (-> (load-file "data/PNs/hopeful-pn-3.clj")
+            (find-interpretation log 2 2)
+            :interp
+            count))))
+
+(defn tryme3 []
+  (let [log (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj")
+        patterns (scada/scada-patterns log)
+        msg-types (conj (scada/exceptional-msgs patterns log) :ordinary)
+        pn (as-> (find-interpretation fitt/hopeful-pn log 3 3) ?pn
+             (assoc  ?pn :msg-table (compute-msg-table ?pn msg-types))
+             (assoc  ?pn :norm-factors (normalize-marking-factors (:rgraph ?pn)))
+             (assoc  ?pn :trans-counts (trans-counts (:interp ?pn)))
+             (dissoc ?pn :interp)
+             (assoc  ?pn :sigma 0.35)
+             (assoc  ?pn :loom-prob (rgraph2loom-probability (:rgraph ?pn) (:trans-counts ?pn)))
+             (assoc  ?pn :distance-fn (dist-fn-6 (:loom-prob ?pn) (:norm-factors ?pn)))
+             (assoc  ?pn :pdf-fns
+                     (zipmap (-> ?pn :msg-table keys)
+                             (map #(parzen-pdf-msg ?pn %)
+                                  (-> ?pn :msg-table keys)))))]
+    pn))
+
+
+                            
+(defn interp-k-some-start-link
+  "Try to interpret the log where the rgraph reflects a given k-boundedness."
+  [pn log]
+  (some #(let [result-pn (interpret-scada pn log %)]
+           (when (full-interp? result-pn log) result-pn))
+        (starting-links pn log)))
+
+(defn interp-some-k
+  [pn log min-max-k max-max-k]
+  (let [found (some (fn [max-k]
+                      (as-> (lax-reach pn max-k) ?pn
+                        (when-let [success (interp-k-some-start-link ?pn log)] success)))
+                    (range min-max-k (inc max-max-k)))]
+      (or found pn)))
+
+(defn find-interpretation
+  "At increasing values of max-k, find new starting links and try to interpret the entire log. 
+   Return pn with :interp set to the first complete interpretation found, if any below max-max-k."
+  ([pn log] (find-interpretation pn
+                                 log
+                                 (-> (app-info) :gp-params :min-max-k)
+                                 (-> (app-info) :gp-params :max-max-k)))
+  ([pn log min-max-k max-max-k] 
+   (when (interp-possible? pn)
+     (let [machines (util/machines-of pn)] 
+       (as-> pn ?pn ; memoize util/pulls-from
+         (assoc ?pn :pulls-from (zipmap machines (map #(util/pulls-from ?pn %) machines)))
+         (interp-some-k ?pn log min-max-k max-max-k))))))
+
+;;; Interp utils ==================
+(defn next-time-line
+  "Return the line number of a message after the time of the argument message
+  or nil if none left."
+  [log indx]
+  (let [msg  (nth log indx)
+        time (:clk  msg)
+        last-indx (-> log last :line)]
+    (loop [n (inc indx)]
+      (cond (> n last-indx) nil,
+            (> (:clk (nth log n)) time) n,
+            :else (recur (inc n))))))
 
 (defn contemp-msgs
   "Return all messages that occurred when the message at indx occurred."
@@ -271,103 +419,6 @@
         (into 
          (-> (loop-fn dec #(< % 0)) rest reverse vec)
          (loop-fn inc #(> % max-line))))))
-
-(defn next-time-line
-  "Return the line number of a message after the time of the argument message
-  or nil if none left."
-  [log indx]
-  (let [msg  (nth log indx)
-        time (:clk  msg)
-        last-indx (-> log last :line)]
-    (loop [n (inc indx)]
-      (cond (> n last-indx) nil,
-            (> (:clk (nth log n)) time) n,
-            :else (recur (inc n))))))
-
-(defn match-contemp-block
-  "next-match any contemporary message; return pn updated."
-  [pn]
-  (let [match-info (some #(when-let [r (next-match pn %)] r) (:msg-buf pn))]
-    (when-not (:matched match-info)
-      (cl-format *out* "~%Failed on msg block: ~{~%    ~A~}~%" (:msg-buf pn)))
-    (let [link (when (:matched match-info)
-                   (-> (:matched match-info)
-                       (dissoc :rate-fn :clk :rate :job :m)
-                       (assoc  :occupy (:occupy match-info))))
-          line (:line link)]
-      (println "m = " (apply sorted-map (interleave (keys link) (vals link))))
-      (-> pn ; update! would be nice here!
-          (assoc! :msg-buf (remove #(= line (:line %)) (:msg-buf pn)))
-          (assoc! :active-jobs (:active-jobs match-info))
-          (assoc! :graph-link (:graph-link match-info))
-          (assoc! :interp (conj! (:interp pn) link))
-          (assoc! :last-link link)))))
-
-(declare rgraph2loom-steps)
-(defn prep-interp [pn log start-link]
-  "Prepare the PN for interpretation."
-  (as-> pn ?pn
-    (transient ?pn)
-    (assoc! ?pn :msg-buf (contemp-msgs log (-> start-link :line inc)))
-    (assoc! ?pn :active-jobs (scada/active-jobs log))
-    (assoc! ?pn :graph-link start-link)
-    (assoc! ?pn :last-link  start-link) ; needed because no (-> pn :interp last) with transient)
-    (assoc! ?pn :loom-steps (rgraph2loom-steps (:rgraph ?pn))) ; Used in link-match
-    (assoc! ?pn :interp (transient []))))
-
-(def diag-pn (atom nil))
-(reset! diag-pn (-> (load-file "data/PNs/hopeful-pn-3.clj")
-                    reasonably-marked-pn
-                    (lax-reach 2)
-                    (assoc :pulls-from {:m1 [], :m2 [:Place-13], :m3 [:Place-14]})
-                    (assoc :place-map {:b1 :Place-13 :b2 :Place-14})
-                    (assoc :start-occupy {:Place-13 2 :Place-14 2})
-                    (prep-interp (-> (app-info) :problem :scada-log)
-                                 {:M [0 1 0 1 0 1 2 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 2 2], :line 0,
-                                   :occupy {:Place-13 2, :Place-14 2}})))
-
-(defn diag-step-interp!
-  []
-  "Interpret one message, updating the diag-pn."
-  (let [pn @diag-pn
-        log (-> (app-info) :problem :scada-log)]
-    (reset! diag-pn 
-            (cond-> pn
-              (empty? (:msg-buf pn))
-              (assoc!  :msg-buf (contemp-msgs log (next-time-line log (-> pn :last-link :line)))),
-              true (match-contemp-block)))
-    true))
-  
-(defn interpret-scada
-  "Describe how the message stream could be accounted for by this PN. 
-   Return pn with :interp set to a vector where an element is:
-    - a link augmented with :line and :job (if an ordinary message is processed), or
-    - a map naming an exceptional message (if an such a message is processed)."
-  [pn log start-link]
-  (reset! diag-occupy-ok? true)
-  (let [last-indx (-> log last :line)
-        log (subvec log 1) ; start-link accounts for first log entry. 
-        start-link (cond-> start-link
-                     (contains? pn :start-occupy) (assoc :occupy (:start-occupy pn)))]
-    (println "start = " start-link)
-    (loop [pn (prep-interp pn log start-link)]
-      (as-> pn ?pn
-        (cond-> ?pn
-          (empty? (:msg-buf ?pn)) 
-          (assoc! :msg-buf (contemp-msgs log (next-time-line log (-> ?pn :last-link :line)))),
-          true (match-contemp-block))
-        (cond (not (:last-link ?pn))
-              (-> ?pn ; failure
-                  (assoc! :interp [])
-                  (dissoc! :loom-steps #_:rgraph)
-                  persistent!)
-              (> (-> ?pn :last-link :line inc) last-indx)
-              (-> ?pn ; success
-                  (assoc! :interp (persistent! (:interp ?pn)))
-                  (dissoc! :msg-buf :active-jobs :graph-link :loom-steps)
-                  persistent!)
-              true   ; continue
-              (recur ?pn))))))
 
 (defn reasonably-marked-pn
   "Set PN marking so that things that look like machines have a state."
@@ -416,7 +467,7 @@
 (defn full-interp?
   "Return true if the interpretation read the whole log."
   [pn log]
-  (let [llink (:last-link pn)]
+  (let [llink (:matched pn)]
     (and (number? (:line llink))
          (== (-> log last :line)
              (:line llink)))))
@@ -431,41 +482,7 @@
       (>= (count (set (mapcat (fn [[m1 m2]] (util/buffers-between pn m1 m2)) combos)))
           (dec (count m))))))
 
-;;; POD written this way for easier debugging. 
-(defn interp-k-some-start-link
-  "Try to interpret the log where the rgraph reflects a given k-boundedness."
-  [pn log]
-  (as-> pn ?pn
-    (assoc ?pn :start-occupy {:Place-13 2, :Place-14 2})
-    (some #(let [result-pn (interpret-scada ?pn log %)]
-             (when (full-interp? result-pn log) result-pn))
-          (starting-links ?pn log))))
-  
-;;; POD written this way for easier debugging. 
-(defn interp-some-k
-  [pn log min-max-k max-max-k]
-  (as-> pn ?pn
-    (let [found (some (fn [max-k]
-                        (as-> (lax-reach ?pn max-k) ?pnk
-                          (when-let [success (interp-k-some-start-link ?pnk log)] success)))
-                      (range min-max-k (inc max-max-k)))]
-      (or found ?pn))))
-
-
-(defn find-interpretation
-  "At increasing values of max-k, find new starting links and try to interpret the entire log. 
-   Return pn with :interp set to the first complete interpretation found, if any below max-max-k."
-  ([pn log] (find-interpretation pn
-                                 log
-                                 (-> (app-info) :gp-params :min-max-k)
-                                 (-> (app-info) :gp-params :max-max-k)))
-  ([pn log min-max-k max-max-k] 
-   (when (interp-possible? pn)
-     (let [machines (util/machines-of pn)] 
-       (as-> pn ?pn ; memoize util/pulls-from
-         (assoc ?pn :pulls-from (zipmap machines (map #(util/pulls-from ?pn %) machines)))
-         (interp-some-k ?pn log min-max-k max-max-k))))))
-
+;;;; ======== Exceptional Probabilty =================================
 ;;; You can have the same marking associated with more than one class. The more times you have
 ;;; it associated with a class, the stronger the result will be for that class. To make
 ;;; the following efficient, I'll have to count the number of times each marking is associated
