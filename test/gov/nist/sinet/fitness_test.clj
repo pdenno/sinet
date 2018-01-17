@@ -36,14 +36,20 @@
 
 (deftest starving-is-ok
   (testing "that the starved? predicate works."
-    (is (not (fit/starved?
-              {:M [0 1 0 1 1], :fire :m2-complete-job, :Mp [1 1 0 0 1], :m :m2, :indx 224}
-              {:act :m2-starved, :m :m2, :prev-act :m2-complete-job, :Mp [1 1 0 0 1], :state [1 1 0 0 1], :indx 225}
-              hopeful-pn)))
-    (is (fit/starved? 
-         {:M [0 1 0 1 0], :fire :m2-complete-job, :Mp [1 1 0 0 0] :m :m2, :indx 224}
-         {:act :m2-starved, :m :m2, :line 225, :mjpact :st}
-         hopeful-pn))))
+    (let [machines (util/machines-of hopeful-pn)
+          pn (-> hopeful-pn
+                 (assoc :pulls-from (zipmap machines (map #(util/pulls-from hopeful-pn %) machines)))
+                 fit/reasonably-marked-pn)]
+      (is (not (fit/starved?
+                {:M [0 1 0 1 1], :fire :m2-complete-job, :Mp [1 1 0 0 1], :m :m2, :indx 224}
+                {:act :m2-starved, :m :m2, :prev-act :m2-complete-job, :Mp [1 1 0 0 1], :state [1 1 0 0 1], :indx 225}
+                (:marking-key pn)
+                (-> pn :pulls-from :m2 first))))
+      (is (fit/starved? 
+           {:M [0 1 0 1 0], :fire :m2-complete-job, :Mp [1 1 0 0 0] :m :m2, :indx 224}
+           {:act :m2-starved, :m :m2, :line 225, :mjpact :st}
+           (:marking-key pn)
+           (-> pn :pulls-from :m2 first))))))
 
 (defn winners-ok?
   "Returns true if calculated are as expected."
@@ -60,7 +66,7 @@
           pn  (fit/find-interpretation hopeful-pn log 3 3)]
       (is (= 3002 (count (:interp pn)))))))
 
-(deftest logs-interpret-2
+(deftest logs-interpret-3
   (testing "that interpretation works on 3-machine example")
   (let [log (scada/load-scada "data/SCADA-logs/scada-3m-2j-bufs-out.clj")]
     (is (== 3002
@@ -122,7 +128,7 @@
                   [0 1 0 1 2] 460,
                   [1 0 1 0 0] 32}})
 
-(def old-msg-table
+(def pnn-msg-table
   {:m2-starved   {[1 1 0 0 0] 32},
    :m2-unstarved {[1 1 0 0 1] 32},
    :m1-blocked   {[0 1 0 1 3] 60},
@@ -244,9 +250,9 @@
                (assoc ?pn :sigma 0.35)
                (assoc ?pn :rgraph rgraph)
                (assoc ?pn :distance-fn (fit/dist-fn-1 norm-factors))
-               (assoc ?pn :msg-table old-msg-table)
+               (assoc ?pn :msg-table pnn-msg-table)
                (assoc ?pn :pdf-fns
-                      (zipmap (keys old-msg-table)
+                      (zipmap (keys pnn-msg-table)
                               (map #(fit/parzen-pdf-msg ?pn %)
                                    (-> ?pn :msg-table keys)))))]
       ;; Not so good values, even with medium sigma.
@@ -271,9 +277,9 @@
                (assoc ?pn :sigma 0.35)
                (assoc ?pn :rgraph rgraph)
                (assoc ?pn :distance-fn (fit/dist-fn-2 loom-steps norm-factors))
-               (assoc ?pn :msg-table old-msg-table)
+               (assoc ?pn :msg-table pnn-msg-table)
                (assoc ?pn :pdf-fns
-                      (zipmap (keys old-msg-table)
+                      (zipmap (keys pnn-msg-table)
                               (map #(fit/parzen-pdf-msg ?pn %)
                                    (-> ?pn :msg-table keys)))))]
       (is (winners-ok?
@@ -296,7 +302,7 @@
     (let [pn (as-> {} ?pn
                (assoc ?pn :sigma 0.35)
                (assoc ?pn :rgraph rgraph)
-               (assoc ?pn :msg-table old-msg-table)
+               (assoc ?pn :msg-table pnn-msg-table)
                (assoc ?pn :distance-fn (fit/dist-fn-3 old-trans-counts loom-prob))
                (assoc ?pn :pdf-fns
                       (zipmap (-> ?pn :msg-table keys) ;
@@ -322,7 +328,7 @@
     (let [pn (as-> {} ?pn
                (assoc ?pn :sigma 0.35)
                (assoc ?pn :rgraph rgraph)
-               (assoc ?pn :msg-table old-msg-table)
+               (assoc ?pn :msg-table pnn-msg-table)
                (assoc ?pn :distance-fn (fit/dist-fn-4 loom-steps loom-prob norm-factors))
                (assoc ?pn :pdf-fns
                       (zipmap (-> ?pn :msg-table keys)
@@ -347,7 +353,7 @@
   (testing "Distance = the sum of 1/p steps along shortest path."
     (let [pn (as-> {} ?pn
                (assoc ?pn :sigma 0.35)
-               (assoc ?pn :msg-table old-msg-table)
+               (assoc ?pn :msg-table pnn-msg-table)
                (assoc ?pn :distance-fn (fit/dist-fn-5 loom-prob))
                (assoc ?pn :pdf-fns
                       (zipmap (-> ?pn :msg-table keys)
@@ -372,7 +378,7 @@
   (testing "Distance = the sum of 1/p steps along shortest path times euclidean distance."
     (let [pn (as-> {} ?pn
                (assoc ?pn :sigma 0.35)
-               (assoc ?pn :msg-table old-msg-table)
+               (assoc ?pn :msg-table pnn-msg-table)
                (assoc ?pn :distance-fn (fit/dist-fn-6 loom-prob norm-factors))
                (assoc ?pn :pdf-fns
                       (zipmap (-> ?pn :msg-table keys)

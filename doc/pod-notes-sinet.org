@@ -22,7 +22,6 @@
 
 *** TODO Operations
 **** M-Shift-Ret open a TODO.
-
 **** C-c C-t (terminate?) marks a TODO as done.
 *** Miscellaneous
 **** Timestamps C-c . (C-c ! is similar but 'without creating an agenda entry' whatever that means.)
@@ -47,11 +46,18 @@
 ** Clojure.core is one file of about 8000 lines. Worth a read! Includes futures, etc. 
 
 * Sinet/MJPdes/SPNtools TODOs
-** TODO Investigate the relative accuracy of the new interpretation. Update fitness_test.clj. See notes <2018-01-06 Sat> 
-** TODO Can I halt interpretation when it looks like pulling from an empty buffer?
+** TODO For easier debugging, instead of starting at line 0, try starting where the last machine finishes a job. 
+        This may be a change to fit/starting-links. 
+** DONE Investigate the relative accuracy of the new interpretation. Update fitness_test.clj. See notes <2018-01-06 Sat> 
+   CLOSED: [2018-01-16 Tue 17:25]
+   Judging by the :msg-table, there isn't that much difference. 
+** DONE Can I halt interpretation when it looks like pulling from an empty buffer?
+   CLOSED: [2018-01-16 Tue 17:22]
         Yeah, but if "start-job" means what we want it to mean, that will never happen in the rgraph.
 ** TODO Decide whether setting all transitions to timed makes sense for simple-reach. See discussion <2017-10-15 Sun>
-** TODO Investigate possible bugs with MJPdes 'coordination' and create more 'deterministic' test cases.
+** DONE Investigate possible bugs with MJPdes 'coordination' and create more 'deterministic' test cases.
+   CLOSED: [2018-01-16 Tue 17:21]
+   I have :dets (detail) now; I'm not sure what the issue was here. 
 ** DONE Conceive of a strategy for using exceptional fitness
    CLOSED: [2017-12-07 Thu 11:17]
  [I think I missed the whole point in the stuff below, but just to be sure: There are messages that
@@ -128,7 +134,8 @@
         GP operators on tokens is a thing of the past. 
 ** DONE How do I use graph distance with real-valued data (round???)
    CLOSED: [2017-11-15 Wed 14:28]
-** TODO Integrate exceptional fitness, try using it to place buffer limits.
+** DONE Integrate exceptional fitness, try using it to place buffer limits.
+   CLOSED: [2018-01-16 Tue 17:20]
     In addition to adding an inhibitor with multiplicity, may need to attach functions that
     will emit messages on exceptional events.
 ** TODO Add individuals that represent machine activity???
@@ -138,7 +145,8 @@
              - At least when there are parallel workcenters, this will be true. 
              - Also true about learning about buffers and accommodating other jobs.
              - Probably want a "ready-made structure" for insertion of parallel workstations. 
-** TODO Add Causal
+** DONE Add Causal
+   CLOSED: [2018-01-16 Tue 17:17]
     This entails making the infinitessimal generator parametric.
 ** DONE Paper: Add more PNN distance algorithms
    CLOSED: [2017-12-07 Thu 11:21]
@@ -4750,62 +4758,7 @@ matched =  nil
 ** <2018-01-06 Sat>
 
 *** Continuing with debug; here's from the msg-buf approach
-
-start =  {:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 0], :rate-fn #function[gov.nist.spntools.util.reach/next-links/fn--32658/fn--32663], :rate 1.0, :line 0, :job 1356}
-matched =  {:fire :m2-complete-job, :M [0 1 0 1 0 1 1 1], :Mp [0 1 0 0 1 1 1 1], :m :m2, :rate 1.0, :relax? :active, :line 0, :job 1356}
-matched =  {:M [0 1 0 0 1 1 1 1], :fire :m2-start-job, :Mp [0 1 0 1 0 1 0 2], :rate 1.0, :m :m2, :job 1357, :line 1}
-matched =  {:act :m1-unblocked, :prev-act :m2-start-job, :Mp [0 1 0 1 0 1 0 2], :state [0 1 0 1 0 1 0 2], :job 1357, :line 2}
-matched =  {:M [0 1 0 1 0 1 0 2], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 0 2], :rate 1.0, :m :m1, :job 1359, :line 3}
-matched =  {:M [0 0 1 1 0 1 0 2], :fire :m1-start-job, :Mp [0 1 0 1 0 1 1 2], :rate 1.0, :m :m1, :job 1360, :line 4}
-matched =  {:M [0 1 0 1 0 1 1 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 2], :rate 1.0, :m :m3, :job 1355, :line 5}
-matched =  {:M [1 1 0 1 0 0 1 2], :fire :m3-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m3, :job 1356, :line 6}
-matched =  {:act :m1-blocked, :prev-act :m3-start-job, :Mp [0 1 0 1 0 1 1 1], :state [0 1 0 1 0 1 1 1], :job 1356, :line 7}
-matched =  {:M [0 1 0 1 0 1 1 1], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 1 1], :rate 1.0, :m :m2, :job 1357, :line 8}
-matched =  {:M [0 1 0 0 1 1 1 1], :fire :m2-start-job, :Mp [0 1 0 1 0 1 0 2], :rate 1.0, :m :m2, :job 1358, :line 9}
-matched =  {:act :m1-unblocked, :prev-act :m2-start-job, :Mp [0 1 0 1 0 1 0 2], :state [0 1 0 1 0 1 0 2], :job 1358, :line 10}
-matched =  {:M [0 1 0 1 0 1 0 2], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 0 2], :rate 1.0, :m :m1, :job 1360, :line 11}
-matched =  {:M [0 0 1 1 0 1 0 2], :fire :m1-start-job, :Mp [0 1 0 1 0 1 1 2], :rate 1.0, :m :m1, :job 1361, :line 12}
-matched =  {:M [0 1 0 1 0 1 1 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 2], :rate 1.0, :m :m3, :job 1356, :line 13}
-matched =  {:M [1 1 0 1 0 0 1 2], :fire :m3-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m3, :job 1357, :line 14}
-matched =  {:M [0 1 0 1 0 1 1 1], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 1 1], :rate 1.0, :m :m2, :job 1358, :line 15}
-matched =  {:M [0 1 0 0 1 1 1 1], :fire :m2-start-job, :Mp [0 1 0 1 0 1 0 2], :rate 1.0, :m :m2, :job 1359, :line 16}
-matched =  {:M [0 1 0 1 0 1 0 2], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 0 2], :rate 1.0, :m :m1, :job 1361, :line 17}
-matched =  {:M [0 0 1 1 0 1 0 2], :fire :m1-start-job, :Mp [0 1 0 1 0 1 1 2], :rate 1.0, :m :m1, :job 1362, :line 18}
-matched =  {:M [0 1 0 1 0 1 1 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 2], :rate 1.0, :m :m3, :job 1357, :line 19}
-matched =  {:M [1 1 0 1 0 0 1 2], :fire :m3-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m3, :job 1358, :line 20}
-matched =  {:M [0 1 0 1 0 1 1 1], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 1 1], :rate 1.0, :m :m2, :job 1359, :line 21}
-matched =  {:M [0 1 0 0 1 1 1 1], :fire :m2-start-job, :Mp [0 1 0 1 0 1 0 2], :rate 1.0, :m :m2, :job 1360, :line 22}
-matched =  {:M [0 1 0 1 0 1 0 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 0 2], :rate 1.0, :m :m3, :job 1358, :line 23}
-matched =  {:M [1 1 0 1 0 0 0 2], :fire :m3-start-job, :Mp [0 1 0 1 0 1 0 1], :rate 1.0, :m :m3, :job 1359, :line 24}
-matched =  {:M [0 1 0 1 0 1 0 1], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 0 1], :rate 1.0, :m :m1, :job 1362, :line 25}
-matched =  {:M [0 0 1 1 0 1 0 1], :fire :m1-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m1, :job 1363, :line 26}
-matched =  {:M [0 1 0 1 0 1 1 1], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 1 1], :rate 1.0, :m :m2, :job 1360, :line 27}
-matched =  {:M [0 1 0 0 1 1 1 1], :fire :m2-start-job, :Mp [0 1 0 1 0 1 0 2], :rate 1.0, :m :m2, :job 1361, :line 28}
-matched =  {:M [0 1 0 1 0 1 0 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 0 2], :rate 1.0, :m :m3, :job 1359, :line 29}
-matched =  {:M [1 1 0 1 0 0 0 2], :fire :m3-start-job, :Mp [0 1 0 1 0 1 0 1], :rate 1.0, :m :m3, :job 1360, :line 30}
-matched =  {:M [0 1 0 1 0 1 0 1], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 0 1], :rate 1.0, :m :m1, :job 1363, :line 31}
-matched =  {:M [0 0 1 1 0 1 0 1], :fire :m1-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m1, :job 1364, :line 32}
-matched =  {:M [0 1 0 1 0 1 1 1], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 1 1], :rate 1.0, :m :m2, :job 1361, :line 33}
-matched =  {:M [0 1 0 0 1 1 1 1], :fire :m2-start-job, :Mp [0 1 0 1 0 1 0 2], :rate 1.0, :m :m2, :job 1362, :line 34}
-matched =  {:M [0 1 0 1 0 1 0 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 0 2], :rate 1.0, :m :m3, :job 1360, :line 35}
-matched =  {:M [1 1 0 1 0 0 0 2], :fire :m3-start-job, :Mp [0 1 0 1 0 1 0 1], :rate 1.0, :m :m3, :job 1361, :line 36}
-matched =  {:M [0 1 0 1 0 1 0 1], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 0 1], :rate 1.0, :m :m1, :job 1364, :line 37}
-matched =  {:M [0 0 1 1 0 1 0 1], :fire :m1-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m1, :job 1365, :line 38}
-matched =  {:M [0 1 0 1 0 1 1 1], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 1 1], :rate 1.0, :m :m2, :job 1362, :line 39}
-matched =  {:M [0 1 0 0 1 1 1 1], :fire :m2-start-job, :Mp [0 1 0 1 0 1 0 2], :rate 1.0, :m :m2, :job 1363, :line 40}
-matched =  {:M [0 1 0 1 0 1 0 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 0 2], :rate 1.0, :m :m3, :job 1361, :line 41}
-matched =  {:M [1 1 0 1 0 0 0 2], :fire :m3-start-job, :Mp [0 1 0 1 0 1 0 1], :rate 1.0, :m :m3, :job 1362, :line 42}
-matched =  {:M [0 1 0 1 0 1 0 1], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 0 1], :rate 1.0, :m :m1, :job 1365, :line 43}
-matched =  {:M [0 0 1 1 0 1 0 1], :fire :m1-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m1, :job 1366, :line 44}
-matched =  {:M [0 1 0 1 0 1 1 1], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 1 1], :rate 1.0, :m :m2, :job 1363, :line 45}
-matched =  {:M [0 1 0 0 1 1 1 1], :fire :m2-start-job, :Mp [0 1 0 1 0 1 0 2], :rate 1.0, :m :m2, :job 1364, :line 46}
-matched =  {:M [0 1 0 1 0 1 0 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 0 2], :rate 1.0, :m :m3, :job 1362, :line 47}
-matched =  {:M [1 1 0 1 0 0 0 2], :fire :m3-start-job, :Mp [0 1 0 1 0 1 0 1], :rate 1.0, :m :m3, :job 1363, :line 48}
-matched =  {:M [0 1 0 1 0 1 0 1], :fire :m1-complete-job, :Mp [0 0 1 1 0 1 0 1], :rate 1.0, :m :m1, :job 1366, :line 49}
-matched =  {:M [0 0 1 1 0 1 0 1], :fire :m1-start-job, :Mp [0 1 0 1 0 1 1 1], :rate 1.0, :m :m1, :job 1367, :line 50}
-matched =  {:M [0 1 0 1 0 1 1 1], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 1 1], :rate 1.0, :m :m3, :job 1363, :line 51}
-matched =  nil
-
+  [removed]
 *** It goes wrong very quickly!
 **** good
 start =    {:M [0 1 0 1 0 1 2 0], :fire :m2-complete-job, :Mp [0 1 0 0 1 1 2 0], :rate 1.0, :indx 0, :job 1356}
@@ -5628,7 +5581,6 @@ I'm continuing with MJPdes inspection, now with names of job running and in buff
 {:clk 2001.3233 :act :m1-complete-job :m :m1 :mjpact :bj :bf :b1 :n 1 :j 1313 
  :dets {:run {:m1 1313, :m2 1311, :m3 1308}, :bufs {:b1 [1312], :b2 [1309 1310]}} :line 6}
 
-
 ** <2018-01-12 Fri>
 
 I am continuing to refactor intepretation with the view of stepping through the interpretation. 
@@ -5866,3 +5818,7 @@ All start-links, not using transients:  "Elapsed time: 1305.997906 msecs"
 *** Use of contemp-block in this file! lines 66, 68, 69, 67, 70
                                                   *  *   *    These should be processed in non-sequential order. 
 
+*** Things work (2-machine and 3-machine interpretation). 
+
+Next thing, I think is to fix the mutation :add-buffer to do what the 3-machine example is actually doing
+(and test this on the 2-machine test case too). 

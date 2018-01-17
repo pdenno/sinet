@@ -24,13 +24,6 @@
 
 (declare contemp-msgs next-time-line reasonably-marked-pn lax-reach max-marks full-interp?)
 (declare interp-possible?)
-  
-;;; ToDo: 
-;;;         1) Create inhibitors from information learned from PNN.
-;;;         2) Causal / Dynamic response (from Q matrix or simulation)
-;;;         3) Colour/MJP fitness. 
-;;;         4) Perhaps do the workflow analysis after I do the SCADA analysis
-;;;            (and maybe reconceive its implementation to exploit lax interpretation work. 
 
 (def ^:private diag (atom nil))
 ;;;===========================================
@@ -92,8 +85,6 @@
     false
     msg))
 
-;;; POD For easier debugging, instead of starting at line 0, try starting where the 
-;;;     last machine finishes a job. 
 (defn starting-links
   "Based only on the rgraph and message firing, return all 
    links that could start interpretation." 
@@ -130,9 +121,9 @@
     (link+msg link msg)))
 
 (defn starved?
-  "Return true if the argument machine (in msg) is starved."
+  "Return true if the argument machine (in msg) is starved.
+   Doesn't actually check that it is busy, only that the buffer is empty."
   [llink msg ^clojure.lang.PersistentVector mkey buf]
-  (reset! diag {:llink llink :msg msg :mkey mkey :buf buf})
   (when buf 
     (= 0 (nth (:Mp llink) (.indexOf mkey buf)))))
 
@@ -320,48 +311,6 @@
             true   ; continue
             (recur ?pn)))))
 
-(defn tryme []
-  (== 3002
-      (-> (load-file "data/PNs/hopeful-pn-3.clj")
-          (lax-reach 2)
-          (assoc :diag-occupy-ok? true)
-          (assoc :pulls-from {:m1 [], :m2 [:Place-13], :m3 [:Place-14]})
-          (assoc :place-map {:b1 :Place-13 :b2 :Place-14})
-          (assoc :occupy {:Place-13 2 :Place-14 2})
-          (prep-interp (-> (app-info) :problem :scada-log)
-                       {:M [0 1 0 1 0 1 2 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 2 2], :line 0})
-          (interpret-scada (-> (app-info) :problem :scada-log)
-                           {:M [0 1 0 1 0 1 2 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 2 2], :line 0})
-          (-> :interp count))))
-
-(defn tryme2 []
-  (let [log (-> (app-info) :problem :scada-log)]
-    (== 3002
-        (-> (load-file "data/PNs/hopeful-pn-3.clj")
-            (find-interpretation log 2 2)
-            :interp
-            count))))
-
-(defn tryme3 []
-  (let [log (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj")
-        patterns (scada/scada-patterns log)
-        msg-types (conj (scada/exceptional-msgs patterns log) :ordinary)
-        pn (as-> (find-interpretation fitt/hopeful-pn log 3 3) ?pn
-             (assoc  ?pn :msg-table (compute-msg-table ?pn msg-types))
-             (assoc  ?pn :norm-factors (normalize-marking-factors (:rgraph ?pn)))
-             (assoc  ?pn :trans-counts (trans-counts (:interp ?pn)))
-             (dissoc ?pn :interp)
-             (assoc  ?pn :sigma 0.35)
-             (assoc  ?pn :loom-prob (rgraph2loom-probability (:rgraph ?pn) (:trans-counts ?pn)))
-             (assoc  ?pn :distance-fn (dist-fn-6 (:loom-prob ?pn) (:norm-factors ?pn)))
-             (assoc  ?pn :pdf-fns
-                     (zipmap (-> ?pn :msg-table keys)
-                             (map #(parzen-pdf-msg ?pn %)
-                                  (-> ?pn :msg-table keys)))))]
-    pn))
-
-
-                            
 (defn interp-k-some-start-link
   "Try to interpret the log where the rgraph reflects a given k-boundedness."
   [pn log]
