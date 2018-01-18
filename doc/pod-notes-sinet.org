@@ -46,8 +46,15 @@
 ** Clojure.core is one file of about 8000 lines. Worth a read! Includes futures, etc. 
 
 * Sinet/MJPdes/SPNtools TODOs
+** TODO Need also a :rem-machine-restart-bbs. 
+** TODO Add :add-machine-restart-bbs to tests
+** TODO Need a :bbs-to-bas and :bas-to-bbs
+** TODO Add :starve and :block operators
+** TODO Make BBS vs BAS matter in fitness scoring
+** TODO remove :visible from places
 ** TODO For easier debugging, instead of starting at line 0, try starting where the last machine finishes a job. 
         This may be a change to fit/starting-links. 
+
 ** DONE Investigate the relative accuracy of the new interpretation. Update fitness_test.clj. See notes <2018-01-06 Sat> 
    CLOSED: [2018-01-16 Tue 17:25]
    Judging by the :msg-table, there isn't that much difference. 
@@ -118,6 +125,7 @@
         In BBS, the part moves off the machine at :mx-complete-job and :mx-blocked prevents starting a new job.
         (Regarding the BBS comment, at least that's the way I see it for PNs.) See next TODO!
 ** TODO MJPdes: Make BBS/BAS something settable on the individual machine. 
+** TODO Number elements of PN non-globally, rewrite pnu/next-pid etc. 
 * Agenda up to December 1:
 ** DONE Fix bug in pnr/simple-reach. See bug <2017-10-15 Sun>
    CLOSED: [2017-10-15 Sun 18:13]
@@ -251,6 +259,18 @@ Find the PN for this on Sunday 2017-10-29.
 ***** Certainly more to say about locality, but that's it for now!
 *** Semantic operators
 **** Example failure is hopeful-pn with initial-marking token on place-1
+
+
+* Prep for MeetUp Presentation
+** Things I enjoyed in development
+*** persistence in debugging
+*** clojure.spec 
+*** custom threading macro (pn-ok?->  
+*** literals for maps and vectors
+*** Stuart Sierra's component
+*** Quil 
+*** Figwheel 
+*** CIDER's stepper 
 
 
 * Sinet Log *
@@ -5822,3 +5842,83 @@ All start-links, not using transients:  "Elapsed time: 1305.997906 msecs"
 
 Next thing, I think is to fix the mutation :add-buffer to do what the 3-machine example is actually doing
 (and test this on the 2-machine test case too). 
+** <2018-01-17 Wed>
+
+I'm testing integration of 3-machine, especially :add-buffer mutation
+
+*** Thoughts about new semantic genetic operators
+
+**** Can BAS vs BBS be detected in the log?  YES!
+BBS: move to buffer and block are contemporaneous with complete job; unblock contemporaneous with start-job. 
+BAS: move to buffer contemporaneous with unblock OR with complete job; unblock contemporaneous with next machine starting a job. 
+
+??? Need a separate "move to buffer" message ??? NO!
+
+In BBS "m1-complete-job" is also "m1-buffer-job". 
+In BAS "m1-complete-job" is "m1-buffer-job" WHEN NOT BLOCKED, otherwise "unblock" is "m1-buffer-job"
+
+**** What sort of operators are needed?
+
+***** I once had the idea that evo was "towards a machine perspective" whereas Eden individuals are a "job perspective". 
+      The latter is certainly true. The having everything concerning a machine processing a job TOGETHER is a "machine perspective"
+      Having the machine "THEN start another job" is the other part of this. 
+
+***** Should Eden individuals put-on and pull-off jobs? 
+  BTW, BBS looks a lot more like an Eden individual than BAS: 
+    BAS:  m1-complete -- buffer -- m2-start   -- You add in a thing to let is start as soon as it finishes.
+    BBS:  m1-complete -- m1-blocked -- m1-start - buffer -- m2-start 
+
+---> So Eden's
+
+***** It would be worthwhile to think about ASSEMBLY and PARALLEL machines now. 
+****** Assembly 
+  Subassemblies could be joined at start of process, or in middle. 
+  Could just have simple 2-transition loop where one of the transitions is mx-start-job (if joined at start).
+  When mx-start-job fires, this 2-transition loop then returns to transition "prepare-subassembly" 
+
+  Question here is how, from the log, do we know that a subassembly is coming in here?
+  Maybe the message needs to be explicitly mention both (e.g. JOIN assembly and subassembly). 
+  Otherwise, (without the JOIN) is there something to be learned from a subassembly vanishing? 
+  I don't think so. 
+
+****** Parallel machines
+  This one might be hard. hmmm...
+  You see A - B'   - C
+          A - B''  - C
+          A - B''' - C
+  How do you know these aren't three different job types? 
+  I think I decided that we know job types, but not whether the job types matter (with respect to processing time). 
+  Soooo... If the three are declared to be of the same job type, but they are produced by different machines....
+  You have a CROSSOVER operator that splices in machines as 
+
+
+
+
+--> Have separate operators for BBS/Starve BBS/Block BAS/Starve BAS/Block
+--> I got away with a mass-rework when there was just two machines, it won't be feasible with more. 
+** <2018-01-18 Thu>
+
+I'm continuing with add-machine-restart-bbs (new genetic operators, generally). 
+
+(-> (initial-pop 1) first :pn tryme make-inv diag-push-inv)
+
+*** I'm not using buffers-between-strict
+(It was weird anyway.) 
+#_(defn buffers-between-strict
+  "Return all (only one?) buffers between the argument machines. 
+   (1) If m1 is not upstream from m2, return nil. 
+   (2) The candidate place must not function as blocking (that is,
+       be between :ej and :sm or :aj transitions)."
+  [pn m1 m2]
+  (let [candidates (get (iface-places pn) [m1 m2])
+        arcs  (:arcs pn)]
+    (when (upstream? pn m1 m2)
+      (filterv (fn [p]
+                 (not (and (some #(and (= (:source %) p) ; an arc that has it as its source
+                                       (contains? #{:aj :bj :sm} (-> (pnu/name2obj pn (:target %)) :rep :mjpact)))
+                                 arcs)
+                           (some #(and (= (:target %) p)
+                                       (= :bj (-> (pnu/name2obj pn (:source %)) :rep :mjpact)))
+                                 arcs))))
+               candidates))))
+

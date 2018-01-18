@@ -18,12 +18,12 @@
             [gov.nist.sinet.report :as rep]))
 
 (defn aliases []
-  (alias 'fit 'gov.nist.sinet.fitness)
+  (alias 'fit  'gov.nist.sinet.fitness)
   (alias 'fitt 'gov.nist.sinet.fitness-test) ; POD temporary
   (alias 'gp   'gov.nist.sinet.gp)) ; POD temporary
 
-(declare contemp-msgs next-time-line reasonably-marked-pn lax-reach max-marks full-interp?)
-(declare interp-possible?)
+(declare contemp-msgs next-time-line reasonably-marked-pn lax-reach max-marks full-interp? max-marks)
+(declare interp-possible? act2trans rgraph2loom-steps buffers-to-constrain constrain-buffer-size)
 
 (def ^:private diag (atom nil))
 ;;;===========================================
@@ -42,7 +42,6 @@
                    (== tkn-id (apply max (:j msg))))))
           log))
 
-(declare act2trans)
 ;;; POD Because I'm focusing on jobs here (qpn-gather-job), at some point I'm going to have to account for
 ;;; lines in the log that were not addressed by qpn-gather-job (and the things in-between it).
 (defn qpn-act-is-intro? 
@@ -244,7 +243,6 @@
         (when *debugging* (cl-format *out* "~%Failed on msg block: ~{~%    ~A~}~%" (:msg-buf pn)))
         (assoc pn :matched nil)))))
 
-(declare rgraph2loom-steps)
 (defn prep-interp [pn log start-link]
   "Prepare the PN for interpretation."
   (when *debugging*
@@ -389,7 +387,6 @@
 ;;;     Using all possibilities, choose the rgraph that has most states.
 ;;;     It will probably be sufficient to use the first one found, as I do below. No need for multiple i-marks.
 ;;;     Should check for m-mp/mp-m errors (spec?)
-(declare max-marks)
 (defn lax-reach
   "Set the marking-key such there is one token on each machine.
    Return the pn with an artificially k-bounded :rgraph associated with this marking."
@@ -590,7 +587,6 @@
 ;;; process, we associate the marking to response nil. For every message we fail to process,
 ;;; we associate the marking with the message. So how does this work? I guess there is an
 ;;; input node for every marking place. We run every input against every output in training.
-(declare buffers-to-constrain constrain-buffer-size)
 (defn exceptional-fitness
   "Return the Inv with an :except value assessing how well the individual addresses 
    exceptional circumstances (blocking and starvation)."
@@ -743,8 +739,3 @@
                      cmaps))))
             []
             blocking)))
-
-
-            
-
-  

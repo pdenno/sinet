@@ -10,7 +10,7 @@
             [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp pn-ok-> as-pn-ok->)]
             [gov.nist.spntools.util.reach :as pnr :refer (reachability)]
             [gov.nist.spntools.util.pnml :as pnml :refer (read-pnml)] ;  POD clean this up
-            [gov.nist.sinet.util :as util :refer (log app-info map->Inv gp-param pr-param *debugging* handling-evolve)]
+            [gov.nist.sinet.util :as util :refer (log app-info map->Inv gp-param pr-param VARS *debugging* handling-evolve)]
             [gov.nist.sinet.simulate :as sim :refer (simulate)]
             [gov.nist.sinet.fitness :as fit :refer (exceptional-fitness)]
             [gov.nist.sinet.scada :as scada]
@@ -18,6 +18,9 @@
             [gov.nist.sinet.report :as rep]))
 
 (alias 'gp 'gov.nist.sinet.gp)
+(declare eden-places eden-trans eden-arcs add-machine-restart-bbs mutate-m eval-pn add-color-binding
+         diag-record-inv remove-wrap-places)
+
 (s/check-asserts true)
 
 ;;; Just for the record, I started with Lee Spector's "gp" demonstration software!
@@ -85,7 +88,6 @@
 ;;; looks at the default causal knowledge. See Sankaran Mahadevan's paper with Sudarsan
 ;;; "Automated uncertainty quantification analysis using a system model and data"
 ;;; (4) The NN problem with blocking/starvation. 
-(declare eden-places eden-trans eden-arcs)
 (defn eden-pn
   "Return a PN expressing the places and transitions of the argument 'plan.'
    It is a loop made by using visible places and transitions with additional
@@ -114,7 +116,7 @@
          (vec (map (fn [plan]
                      (as-> (pnu/make-transition pn :name (:act plan)) ?tr
                        (assoc ?tr :type :exponential) ; (if (= 0 (rand-int 2)) :exponential :immediate))
-                       (assoc ?tr :rep (dissoc plan :name))
+                       (assoc ?tr :rep (dissoc plan :name :dets :ends))
                        (assoc ?tr :visible? (if (= :silent (:mjpact plan)) false true))))
                    plans))))
 
@@ -242,8 +244,6 @@
     (when (not-empty arcs)
       (nth arcs (rand-int (count arcs))))))
 
-(declare mutate-m eval-pn add-color-binding diag-record-inv)
-
 (defn mutate
   "Mutate the individual. If impossible (after 5 tries) just return it."
   ([inv] (mutate inv :pick-fn rand-mute-key)) ; no args to r-m defaults to :mutation-dist
@@ -289,7 +289,7 @@
       (update ?i :pn #(pnu/add-pn % (pnu/make-arc % (-> % :places last :name) trans-out)))
       (assoc-in ?i [:pn :marking-key] :invalid)
       (update ?i :pn pnr/renumber-pids)
-      (update ?i :history conj [:add-place (-> ?i :pn :places last :name) :from (:id ?i)]))))
+      (update ?i :history conj {:op :add-place :place (-> ?i :pn :places last :name) :from (:id ?i)}))))
 
 (defmethod mutate-m :add-trans [inv & args]
   (if-let [p-in (:name (random-place (:pn inv)))]
@@ -304,7 +304,7 @@
                      (as-> % ?pn
                        (pnu/add-pn ?pn (pnu/make-arc ?pn p-in tname))
                        (pnu/add-pn ?pn (pnu/make-arc ?pn tname p-out)))))
-          (update ?i :history conj [:add-trans (-> ?i :pn :transitions last :name) :from (:id ?i)]))
+          (update ?i :history conj {:op :add-trans :trans (-> ?i :pn :transitions last :name) :from (:id ?i)}))
         {:skip :add-trans :msg "no p-out"})
     {:skip :add-trans :msg "no p-in"}))
 
@@ -317,51 +317,70 @@
                                 (filter #(= (:type %) :normal) (-> inv :pn :arcs)))]
           (-> inv
               (update-in [:pn :arcs (pnu/arc-index (:pn inv) (:name have-one)) :multiplicity] inc)
-              (update    :history conj [:add-arc :have-one (:name have-one) :from (:id inv)]))
+              (update    :history conj {:op :add-arc :have-one (:name have-one) :from (:id inv)}))
           (as-> inv ?i
               (update ?i :pn #(pnu/add-pn % (pnu/make-arc % (:name from) (:name to))))
-              (update ?i :history conj [:add-arc (-> ?i :pn :arcs last :name) :from (:id ?i)]))))
+              (update ?i :history conj {:op :add-arc :arc (-> ?i :pn :arcs last :name) :from (:id ?i)}))))
       {:skip :add-arc :msg "No place"})
     {:skip :add-arc :msg "No trans"}))
 
-(declare add-buffer)
-(defmethod mutate-m :add-buffer
+(defmethod mutate-m :add-machine-restart-bbs
   [inv & args]
   (let [pn (:pn inv)
-        machines (util/machines-of pn)
-        size (count machines)
-        m1 (nth machines (rand-int size))
-        m2 (util/next-machine pn m1)]
-    (if (and m2 (empty? (util/buffers-between pn m1 m2)))
+        not-waiting (->> (util/related-places pn)
+                         (reduce (fn [mp [key places]] ; key is a machine
+                                   (if (or (empty? places)
+                                           (some #(= :waiting (:purpose (pnu/name2obj pn %))) places))
+                                     mp
+                                     (assoc mp key places)))
+                                 {})
+                         keys)
+        m1 (nth not-waiting (rand-int (count not-waiting)))
+        m2 (when m1 (util/next-machine pn m1 :wrap-ok))]
+    (if (and m1 m2)
       (-> inv
-          (assoc :pn (add-buffer pn m1 m2))
-          (update :history conj [:add-buffer m1 m2]))
-      inv)))
+          (assoc :pn (add-machine-restart-bbs pn m1 m2))
+          (update :history conj {:op :add-machine-restart-bbs :m1 m1 :m2 m2}))
+      {:skip :add-machine-restart-bbs :msg "no qualifying machine"})))
 
-(defn add-buffer
-  "Add a buffer between two adjacent machines."
+(defn add-machine-restart-bbs
+  "Mutate a buffering pattern to (potentially) 'buffering and returning to restart' pattern.
+   The place added is the 'waiting' one, where 'waiting' can be interpreted as blocking or 
+   starving; interpretation decides which of these. The buffer is the existing interface 
+   place between the two machines."
   [pn m1 m2]
-  (let [buffer (pnu/make-place pn)
-        m1-start (some #(when (and (= m1 (-> % :rep :m))
+  (let [waiting (-> (pnu/make-place pn :name (pnu/name-with-prefix pn "wait"))
+                    (assoc :purpose :waiting))
+        m1-end  (some #(when (and (= m1 (-> % :rep :m))
+                                  (contains? #{:bj :ej} (-> % :rep :mjpact)))
+                         (:name %))
+                      (:transitions pn))
+        m1-start (some #(when (and (= m1  (-> % :rep :m))
                                    (contains? #{:aj :sm} (-> % :rep :mjpact)))
                           (:name %))
                        (:transitions pn))
-        m2-start (some #(when (and (= m2  (-> % :rep :m))
-                                   (= :sm (-> % :rep :mjpact)))
-                          (:name %))
-                       (:transitions pn))
-        m1-to-buffer (assoc (pnu/make-arc pn m1-start (:name buffer)) :bind {:jtype :blue})
-        buffer-to-m2 (assoc (pnu/make-arc pn (:name buffer) m2-start) :bind {:jtype :blue})
-        p1-m2 (some #(when (= m2-start (:target %)) (:name %)) (:arcs pn))
-        p3-m1 (some #(when (= m1-start (:target %)) (:name %)) (:arcs pn))]
-    (if (and m1-start m2-start p1-m2 p3-m1)
-      (-> pn
-          (pnu/add-pn buffer)
-          (pnu/add-pn m1-to-buffer)
-          (pnu/add-pn buffer-to-m2)
-          (assoc-in [:arcs (pnu/arc-index pn p1-m2) :target] m1-start)
-          (assoc-in [:arcs (pnu/arc-index pn p3-m1) :target] m2-start))
-       (throw (ex-info "Couldn't find pieces for add-buffer" {:pn pn :m1 m1 :m2 m2})))))
+        end-to-waiting   (assoc (pnu/make-arc pn m1-end (:name waiting)) :bind {:jtype :blue})
+        waiting-to-start (assoc (pnu/make-arc pn (:name waiting) m1-start) :bind {:jtype :blue})]
+    (if (and m1-end m1-start)
+      (cond-> pn
+          true (pnu/add-pn waiting)
+          true (pnu/add-pn end-to-waiting)
+          true (pnu/add-pn waiting-to-start)
+          (not (util/next-machine pn m1)) (remove-wrap-places m1 m2))
+      (throw (ex-info "Couldn't find pieces for add-buffer" {:pn pn :m1 m1 :m2 m2})))))
+
+(defn remove-wrap-places
+  "Remove the ability to go from the last machine back to the first."
+  [pn m1 m2]
+  (let [places (get (util/iface-places pn) [m1 m2])]
+    (reduce (fn [pn place]
+              (-> pn
+                  (update :places (fn [ps] (vec (remove #(= (:name %) place) ps))))
+                  (update :arcs   (fn [as] (vec (remove #(or (= (:source %) place)
+                                                                  (= (:target %) place))
+                                                             as))))))
+            pn
+            places)))
 
 ;;;------------------ Remove -----------------------------
 (defn sole-arc?
@@ -399,7 +418,7 @@
             (update-in ?i [:pn :arcs] (fn [arcs] (vec (remove (fn [ar] (some #(= (:name ar) %) elims)) arcs)))))
           (assoc-in ?i [:pn :marking-key] :invalid)
           (update ?i :pn pnr/renumber-pids)
-          (update ?i :history conj [:remove-place pl :from (:id ?i)]))
+          (update ?i :history conj {:op :remove-place :place pl :from (:id ?i)}))
       {:skip :remove-place :msg "no qualifying place"})))
 
 (defmethod mutate-m :remove-trans [inv & args]
@@ -409,7 +428,7 @@
         (update-in [:pn :transitions] (fn [ts] (vec (remove #(= % tr) ts))))
         (update-in [:pn :arcs] (fn [arcs] (vec (remove #(or (= (:source %) tr)
                                                                (= (:target %) tr)) arcs))))
-        (update    :history conj [:remove-trans tr :from (:id inv)]))
+        (update    :history conj {:op :remove-trans :trans tr :from (:id inv)}))
       {:skip :remove-trans :msg "too few"})))
 
 (defn update-arc-removal
@@ -424,7 +443,7 @@
                                                                    (not (sole-arc? (:pn inv) ar true)))) %))]
     (-> inv
         (update-arc-removal ar)
-        (update :history conj [:remove-or-dec-arc (:name ar) :from (:id inv)]))
+        (update :history conj {:op :remove-or-dec-arc :arc (:name ar) :from (:id inv)}))
     {:skip :remove-arc :msg "No arc"}))
 
 ;;;------------------ Swap -----------------------------
@@ -455,7 +474,7 @@
         (-> inv
             (assoc-in [:pn :arcs (pnu/arc-index pn (:name arc1)) :priority] p2)
             (assoc-in [:pn :arcs (pnu/arc-index pn (:name arc2)) :priority] p1)
-            (update :history conj [:swap-priority  (:name arc1) (:name arc2) :from (:id inv)])))
+            (update :history conj {:op :swap-priority  :arc1 (:name arc1) :arc2 (:name arc2) :from (:id inv)})))
       {:skip :swap-priority :msg "no candidates"})))
 
 ;;;=====================================================================================

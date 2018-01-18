@@ -11,6 +11,10 @@
 
 (def ^:private diag (atom nil))
 
+(defmacro VARS [& args] 
+  "Prints (println) values of the arguments (VARS x y) prints 'x = ..., y = ...'"
+  `(println (format ~(cl-format nil "~{ ~A = %s~^,~}" `~args) ~@args)))
+
 (defn app-info
   "The way into the app for reading."
   []
@@ -211,23 +215,24 @@
   [pn]
   (let [machines (machines-of pn)
         combos   (map vec (combo/combinations machines 2))
-        from-to  (into combos (map (fn [[x y]] [y x]) combos))] ; machine pairs
+        from-to  (into combos (map (fn [[x y]] [y x]) combos)) ; machine pairs
+        places   (map :name (:places pn))
+        arcs     (:arcs pn)]
     (zipmap from-to
-            (let [places   (map :name (:places pn))
-                  arcs     (:arcs pn)]
               (map (fn [[mx my]]
-                     (filterv (fn [p]
-                                (and (some (fn [a]
+                     (filterv (fn [p] 
+                                (and (some (fn [a] ; target of arc is the place; source is trans on mx. 
                                              (and (= (:target a) p)
                                                   (= mx (-> (pnu/name2obj pn (:source a)) :rep :m))))
                                            arcs)
-                                     (some (fn [a]
+                                     (some (fn [a] ; source of arc is the place; target is trans on my. 
                                              (and (= (:source a) p)
                                                   (= my (-> (pnu/name2obj pn (:target a)) :rep :m))))
                                            arcs)))
                               places))
-                   from-to)))))
-    
+                   from-to))))
+
+
 (defn related-arcs
   "Return a map where the each key is a machine name and each value is a set of arc names.
    Both ends of the arcs must be connected a related-place or related-transition."
@@ -258,7 +263,7 @@
       [start]
       (some #(let [paths (pnu/paths-to pn start end %)]
                (first paths))
-            (map #(* % 4) (range 1 (inc (count (machines-of pn)))))))))
+            (map #(* % 4) (range 1 (+ 2 (count (machines-of pn)))))))))
 
 (defn upstream? 
   "Return true if mx is upstream of my."
@@ -268,45 +273,29 @@
        (count (first-contact pn start-trans my)))))
 
 (defn next-machine
-  "Return the next machine in the serial line."
-  [pn m]
-  (let [candidates
-        (->> (machines-of pn)
-             (remove #(= m %))
-             (filter #(upstream? pn m %)))
-        m-trans (some #(when (and (=   m (-> % :rep :m))
-                                  (contains? #{:aj :sm} (-> % :rep :mjpact)))
-                         (:name %))
-                      (:transitions pn))
-        [best _] (reduce (fn [[best bsize] [mcand path]]
-                           (let [psize (count path)]
-                             (if (and (> psize 0) (< psize bsize))
-                               [mcand psize]
-                               [best bsize])))
-                         [nil 999999]
-                         (zipmap candidates
-                                 (map #(first-contact pn m-trans %)
-                                      candidates)))]
-        best))
+  "Return the next machine in the serial line. Does not wrap around unless
+   optional 3rd argument is true."
+  ([pn m] (next-machine pn m false))
+  ([pn m wrap?]
+   (let [candidates
+         (as-> (machines-of pn) ?machs
+           (remove #(= m %) ?machs)
+           (if wrap? ?machs (filter #(upstream? pn m %) ?machs)))
+         m-trans (some #(when (and (=   m (-> % :rep :m))
+                                   (contains? #{:aj :sm} (-> % :rep :mjpact)))
+                          (:name %))
+                       (:transitions pn))
+         [best _] (reduce (fn [[best bsize] [mcand path]]
+                            (let [psize (count path)]
+                              (if (and (> psize 0) (< psize bsize))
+                                [mcand psize]
+                                [best bsize])))
+                          [nil 999999]
+                          (zipmap candidates
+                                  (map #(first-contact pn m-trans %)
+                                       candidates)))]
+     best)))
              
-#_(defn buffers-between
-  "Return all (only one?) buffers between the argument machines. 
-   (1) If m1 is not upstream from m2, return nil. 
-   (2) The candidate place must not function as blocking (that is,
-       be between :ej and :sm or :aj transitions)."
-  [pn m1 m2]
-  (let [candidates (get (iface-places pn) [m1 m2])
-        arcs  (:arcs pn)]
-    (when (upstream? pn m1 m2)
-      (filterv (fn [p]
-                 (not (and (some #(and (= (:source %) p) ; an arc that has it as its source
-                                       (contains? #{:aj :bj :sm} (-> (pnu/name2obj pn (:target %)) :rep :mjpact)))
-                                 arcs)
-                           (some #(and (= (:target %) p)
-                                       (= :bj (-> (pnu/name2obj pn (:source %)) :rep :mjpact)))
-                                 arcs))))
-               candidates))))
-
 ;;; POD This is a heuristic, at best. 
 (defn buffers-between
   "Return all (only one?) buffers between the argument machines. "

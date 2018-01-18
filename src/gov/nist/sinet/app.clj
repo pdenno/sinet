@@ -8,14 +8,14 @@
             [gov.nist.sinet.gp :as gp]))
 
 (def mutation-dist "The pdf for ordinary mutations (not eden mutations)"
-  [[:add-place           0] ; Add place (mine can't be absorbing, thus Nobile 1&2).
-   [:add-trans           0]
-   [:add-buffer       2/10] ; New for November 27. (Yeah right, finishend Dec 17th!)
-   [:add-arc          1/10] ; 1/20 pre-except
-   [:remove-place        0] ; 1/10 pre-except
-   [:remove-trans        0] ; 1/10 pre-November 27
-   [:remove-arc       1/10] ; 
-   [:swap-priority    1/10]])
+  [[:add-place                  0] ; Add place (mine can't be absorbing, thus Nobile 1&2).
+   [:add-trans                  0]
+   [:add-machine-restart-bbs 2/10] ; New for November 27. (Yeah right, finishend Dec 17th!)
+   [:add-arc                 1/10] ; 1/20 pre-except
+   [:remove-place               0] ; 1/10 pre-except
+   [:remove-trans               0] ; 1/10 pre-November 27
+   [:remove-arc              1/10] ; 
+   [:swap-priority           1/10]])
 
 (def gp-params
   (atom
