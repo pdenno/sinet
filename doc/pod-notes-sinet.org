@@ -46,12 +46,18 @@
 ** Clojure.core is one file of about 8000 lines. Worth a read! Includes futures, etc. 
 
 * Sinet/MJPdes/SPNtools TODOs
+** TODO dedupe -> distinct
 ** TODO Need also a :rem-machine-restart-bbs. 
-** TODO Add :add-machine-restart-bbs to tests
-** TODO Need a :bbs-to-bas and :bas-to-bbs
+** DONE Add :add-machine-restart-bbs to tests
+   CLOSED: [2018-01-18 Thu 16:50]
+** DONE Need a :bbs-to-bas and :bas-to-bbs
+   CLOSED: [2018-01-18 Thu 16:49]
 ** TODO Add :starve and :block operators
 ** TODO Make BBS vs BAS matter in fitness scoring
+   Actually, the problem is different than this. It currently interprets using BBS and NOT BAS, even 
+   though all machines in the log are BAS (verify this). 
 ** TODO remove :visible from places
+** TODO Rework scada.clj and its callers to use scada/job-map. See fit/quick-job-trace.
 ** TODO For easier debugging, instead of starting at line 0, try starting where the last machine finishes a job. 
         This may be a change to fit/starting-links. 
 
@@ -273,7 +279,7 @@ Find the PN for this on Sunday 2017-10-29.
 *** CIDER's stepper 
 
 
-* Sinet Log *
+* Sinet Log 
 ** <2017-10-14 Sat>
 *** I started with this log file: [[file:~/Documents/git/sinet/data/SCADA-logs/m2-j1-n3-block-out.clj::%5B][m2-j1-n3-block-out.clj]] which blocks like crazy. 
 *** I switched from returning 'the first' good starting marking to all markings.
@@ -4033,8 +4039,6 @@ Does this just not get loaded?
            ;; and false for WebSocket.  (send! channel data close-after-send?)
                                  (hkit-s/send! channel data))))) ; data is sent directly to the client
 
-
-
 ** <2017-12-18 Mon>
 
 I worked on:
@@ -5922,3 +5926,115 @@ I'm continuing with add-machine-restart-bbs (new genetic operators, generally).
                                  arcs))))
                candidates))))
 
+
+I coded genetic operator add-machine-restart-bbs, bb2-to-bas and bas-2-bb2. 
+
+*** I'm going to see what I get for interpretation and then fitness with these. 
+
+This one, (def pnpn (-> (initial-pop 1) first :pn gpt/restart-bbs-3)), interprets fine in 1.4 seconds
+for full (find-interpretation pnpn (-> (app-info) :problem :scada-log)))). 
+
+(defn restart-bbs-4 [pn]
+  (-> pn
+      (gp/add-machine-restart-bbs :m1 :m2)
+      (gp/add-machine-restart-bbs :m2 :m3)
+      (gp/add-machine-restart-bbs :m3 :m1)
+      (gp/bbs-bas-switch :m1 :bbs2bas)))
+
+Unfortunately, 
+
+(def pn2 (-> (gp/initial-pop 1) first :pn restart-bbs-4 gpt/make-inv gp/diag-push-inv))
+(time (def pndone2 (find-interpretation pn2 (-> (app-info) :problem :scada-log))))
+(-> pndone2 :interp count)
+0
+
+So a more lenient interpretation (if even possible) is going to take more work. 
+
+--> Let's try fitness.... Ugh! The thing that is succeeding does not look like it should
+(and it finds this solution in 1 interation!)
+
+I'll start investigating this by learning how I get an immediate transition (constrain buffer size)!
+Things I'd want here: 
+
+   1) Print multiplicity of inhibitors in draw.cljs. 
+   2) Spread out arcs on transitions. 
+   3) Simulator with for interpretation of logs. 
+
+
+** <2018-01-19 Fri>
+
+*** The PN from yesterday that, oddly, interprets.
+
+[[file:~/Documents/git/sinet/data/PNs/pn-2018-01-19.clj][pn file from yesterday]].
+[[file:~/TwoDrive/OneDrive/Repo/mindmaps/images/Screen Shot 2018-01-19 at 8.31.26 AM.jpg][Picture of this PN]].
+
+Hey, I'm thinking about it wrong! This PN is fine. 
+I thought it looked wrong because there was no arcs into :m1-start-job, 
+but there need not be! 
+
+Note that there is also no wait on :m2 however. 
+
+*** Regarding: TODO Make BBS vs BAS matter in fitness scoring. 
+
+[[file:~/Documents/git/sinet/data/PNs/pn1-2018-01-19.clj][all BBS]]
+[[file:~/Documents/git/sinet/data/PNs/pn2-2018-01-19.clj][:m1 BAS :m2 BBS]]
+
+
+(time (def result (interp-some-k 
+                   (-> (load-file "data/PNs/pn1-2018-01-19.clj")
+                       diag-prep-interp)
+                   (-> (app-info) :problem :scada-log)
+                   :min-max-k 2 
+                   :max-max-k 2 
+                   :start-links [{:M [1 2 1 2 1 0 0 0], :fire :m3-complete-job, :Mp [1 2 1 2 0 0 0 1], :line 0}])))
+
+pn1 : no wrong :occupy. 
+pn2 : about 360 wrong :occupy; all on place-3. 
+
+This is sort of good! 
+
+0) Add :occupy to prep-interp ???
+1) While testing on pn2, get the errors to reverse. 
+2) Use this kind of information to count :occupy-wrong {:place-2 0 :place-4 0} etc. 
+
+(def result
+  (interp-some-k 
+     (-> (load-file "data/PNs/pn2-2018-01-19.clj")
+          diag-prep-interp)
+     (scada/load-scada "data/SCADA-logs/scada-3m-2j-second-out.clj")
+     :min-max-k 2 
+     :max-max-k 2 
+     :start-links [{:M [1 2 1 2 1 0 0 0], :fire :m3-complete-job, :Mp [1 2 1 2 0 0 0 1], :line 0}]))
+
+---> IN BAS it fills the buffer later. That's what's happening here. So DEFINE 'later'
+
+===> Can inspect log and rgraph at each machine and determine whether each is
+     BBS or BAS according to whether or not the :Mp after :bj increments (it does in BBS). 
+
+Not there yet, because it is not so clear how to determine these from the log. 
+Could add buffering messages.... That's what makes all this stuff so un-inspiring!
+
+===> You have BBS if blocking occurs before start job.        -- end-job block start-job
+===> You have BAS if blocking occurs after/with complete job. -- start-job block end-job
+
+{:clk 2000.8233 :act :m1-blocked :m :m1 :mjpact :bl  :line 2}
+{:clk 2001.3233 :act :m1-unblocked :m :m1 :mjpact :ub  :line 5}
+{:clk 2001.3233 :act :m1-complete-job :m :m1 :mjpact :bj :bf :b1 :n 1 :j 1313  :line 6}
+{:clk 2001.3233 :act :m1-start-job :m :m1 :mjpact :aj :jt :jobType2 :ends 2002.8233 :j 1314  :line 7}
+{:clk 2002.8233 :act :m1-complete-job :m :m1 :mjpact :bj :bf :b1 :n 1 :j 1314  :line 14}
+{:clk 2002.8233 :act :m1-start-job :m :m1 :mjpact :aj :jt :jobType1 :ends 2003.8233 :j 1315  :line 15}
+{:clk 2003.8233 :act :m1-complete-job :m :m1 :mjpact :bj :bf :b1 :n 1 :j 1315  :line 18}
+{:clk 2003.8233 :act :m1-start-job :m :m1 :mjpact :aj :jt :jobType2 :ends 2005.3233 :j 1316  :line 19}
+{:clk 2005.3233 :act :m1-complete-job :m :m1 :mjpact :bj :bf :b1 :n 1 :j 1316  :line 26}
+{:clk 2005.3233 :act :m1-start-job :m :m1 :mjpact :aj :jt :jobType2 :ends 2006.8233 :j 1317  :line 27}
+{:clk 2006.8233 :act :m1-complete-job :m :m1 :mjpact :bj :bf :b1 :n 1 :j 1317  :line 32}
+{:clk 2006.8233 :act :m1-start-job :m :m1 :mjpact :aj :jt :jobType2 :ends 2008.3233 :j 1318  :line 33}
+{:clk 2008.3233 :act :m1-complete-job :m :m1 :mjpact :bj :bf :b1 :n 1 :j 1318  :line 38}
+{:clk 2008.3233 :act :m1-start-job :m :m1 :mjpact :aj :jt :jobType2 :ends 2009.8233 :j 1319  :line 39}
+{:clk 2009.8233 :act :m1-complete-job :m :m1 :mjpact :bj :bf :b1 :n 1 :j 1319  :line 44}
+{:clk 2009.8233 :act :m1-start-job :m :m1 :mjpact :aj :jt :jobType2 :ends 2011.3233 :j 1320  :line 45}
+{:clk 2011.3233 :act :m1-blocked :m :m1 :mjpact :bl  :line 46}
+{:clk 2012.0242 :act :m1-unblocked :m :m1 :mjpact :ub  :line 49}
+{:clk 2012.0242 :act :m1-complete-job :m :m1 :mjpact :bj :bf :b1 :n 1 :j 1320  :line 50}
+{:clk 2012.0242 :act :m1-start-job :m :m1 :mjpact :aj :jt :jobType1 :ends 2013.0242 :j 1321  :line 51}
+{:clk 2013.0242 :act :m1-blocked :m :m1 :mjpact :bl  :line 54}

@@ -332,10 +332,43 @@
   [pn]
   (let [machines (machines-of pn)
         betweens (combo/combinations machines 2)]
-    (dedupe
+    (dedupe ; <======================= distinct
      (flatten
       (filter identity (into (map (fn [[m1 m2]] (buffers-between pn m1 m2)) betweens)
                              (map (fn [[m1 m2]] (buffers-between pn m2 m1)) betweens)))))))
 
+(defn bbs?
+  "Returns true if machine m of pn is using block-before-service discipline."
+  [pn m1]
+  (when-let [m2 (next-machine pn m1)]
+    (when-let [buffer (first (get (iface-places pn) [m1 m2]))]
+      (let [m1-done (some #(when (= :bj (-> (pnu/name2obj pn %) :rep :mjpact)) %)
+                          (get (related-trans pn) m1))]
+        (and (some #(= :waiting (:purpose (pnu/name2obj pn %))) ; The machine has BBS or BAS. 
+                   (get (related-places pn) m1))
+             (some #(and (= (:source %) m1-done)
+                         (= (:target %) buffer))
+                   (:arcs pn)))))))
+
+(defn bas?
+  "Returns true if machine m of pn is using block-after-service discipline."
+  [pn m1]
+  (when-let [m2 (next-machine pn m1)]
+    (when-let [buffer (first (get (iface-places pn) [m1 m2]))]
+      (let [m1-start (some #(when (contains? #{:aj :sm} (-> (pnu/name2obj pn %) :rep :mjpact)) %)
+                           (get (related-trans pn) m1))]
+        (and (some #(= :waiting (:purpose (pnu/name2obj pn %))) ; The machine has BBS or BAS. 
+                   (get (related-places pn) m1))
+             (some #(and (= (:source %) m1-start)
+                         (= (:target %) buffer))
+                   (:arcs pn)))))))
+
+(defn clean-pn
+  "Remove stuff from the pn that can be easily calculated"
+  [pn]
+  (dissoc pn :trans-counts :matched :sigma :winners :distance-fn
+          :k-limited? :pdf-fns :rgraph :msg :msg-table :loom-prob))
+       
 
 
+  

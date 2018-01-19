@@ -80,6 +80,26 @@
                 (fit/interpret-scada log {:M [0 1 0 1 0 1 2 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 2 2], :line 0})
                 (-> :interp count))))))
 
+(deftest find-interp-3m-all-bbs
+  (testing "that a 3-machine with all machine using BBS discipline interprets."
+    (let [log (scada/load-scada "data/SCADA-logs/scada-3m-2j-bufs-out.clj")]
+      (is (= 3002
+             (-> (fit/find-interpretation 
+                  (-> (load-file "data/PNs/pn1-2018-01-19.clj"))
+                  log)
+                 :interp
+                 count))))))
+
+(deftest find-interp-3m-bas-bbs
+  (testing "that a 3-machine with m1 using BAS and m2 BBS discipline interprets."
+    (let [log (scada/load-scada "data/SCADA-logs/scada-3m-2j-bufs-out.clj")]
+      (is (= 3002
+             (-> (fit/find-interpretation 
+                  (-> (load-file "data/PNs/pn2-2018-01-19.clj"))
+                  log)
+                 :interp
+                 count))))))
+
 (def rgraph
   [{:M [1 1 0 0 2], :fire :m2-start-job, :Mp [0 1 0 1 1], :rate 1.0}
    {:M [1 1 0 0 3], :fire :m1-complete-job, :Mp [1 0 1 0 3], :rate 1.0}

@@ -17,15 +17,16 @@
             [gov.nist.sinet.ws :as ws]
             [gov.nist.sinet.report :as rep]))
 
+
 (alias 'gp 'gov.nist.sinet.gp)
 (declare eden-places eden-trans eden-arcs add-machine-restart-bbs mutate-m eval-pn add-color-binding
-         diag-record-inv remove-wrap-places)
+         diag-record-inv remove-wrap-places bbs-bas-switch)
 
 (s/check-asserts true)
 
 ;;; Just for the record, I started with Lee Spector's "gp" demonstration software!
 
-;;; ToDo: 
+;;; ToDo:
 ;;;       - Normalize the error calculation.
 ;;;       - Only do local mutations (No arcs to distance places, etc.)
 ;;;       - Implement the MJP crossover operator
@@ -76,7 +77,7 @@
   (reduce (fn [plan msg]
             (as-> plan ?p
               (update ?p :cnt inc)
-              (update ?p :t conj msg) 
+              (update ?p :t conj msg)
               (update ?p :p conj {:name (keyword (format "place-%d" (:cnt ?p)))})))
           {:cnt 0 :t [] :p []}
           msg))
@@ -87,7 +88,7 @@
 ;;; and distributions of timed transitions will be another process, one that also
 ;;; looks at the default causal knowledge. See Sankaran Mahadevan's paper with Sudarsan
 ;;; "Automated uncertainty quantification analysis using a system model and data"
-;;; (4) The NN problem with blocking/starvation. 
+;;; (4) The NN problem with blocking/starvation.
 (defn eden-pn
   "Return a PN expressing the places and transitions of the argument 'plan.'
    It is a loop made by using visible places and transitions with additional
@@ -129,12 +130,12 @@
                  (map vec (partition
                            2 (interleave
                               (vec (interleave (map :name (:p plan)) (map :act (:t plan))))
-                              ;; connect last first 
+                              ;; connect last first
                               (vec (interleave (map :act (:t plan))
                                                (conj (vec (rest (map :name (:p plan))))
                                                      (first (map :name (:p plan))))))))))))
 
-;;; POD Currently only one color. 
+;;; POD Currently only one color.
 (defn add-color-binding
   "Add color binding information."
   [pn]
@@ -191,7 +192,7 @@
   [job-trace]
   (->> job-trace
        make-vertices         ; returns map of skeletons for place and transition definitions
-       eden-pn               ; complete skeletons and add :arcs, making a bipartite graph. 
+       eden-pn               ; complete skeletons and add :arcs, making a bipartite graph.
        add-color-binding     ; add e.g. :bind {:jtype :blue} to :arcs for multi-job paths.
        add-flow-priorities   ; add info for deciding which tokens go where when multiple in/out on trans.
        util/check-pn))
@@ -200,12 +201,12 @@
   "Create an initial population of size pop-size."
   [pop-size]
   (vec (repeatedly
-        pop-size 
+        pop-size
         #(let [job-trace (scada/random-job-trace)]
            (map->Inv {:pn (initial-pn job-trace),
                       :id (util/uuid)
                       :history [{:trace job-trace}]})))))
-          
+
 ;;;================================================================
 ;;; Genetic Operators (AKA search operators)
 ;;;================================================================
@@ -227,22 +228,22 @@
 (defn random-trans [pn & {:keys [subset] :or {subset identity}}]
   (let [trans (subset (:transitions pn))]
     (when (not-empty trans)
-      (nth trans (rand-int (count trans))))))
+      (rand-nth trans))))
 
 (defn random-place [pn  & {:keys [subset] :or {subset identity}}]
   (let [places (subset (:places pn))]
     (when (not-empty places)
-      (nth places (rand-int (count places))))))
+      (rand-nth places))))
 
 (defn random-arc [pn  & {:keys [subset] :or {subset identity}}]
   (let [arcs (subset (:arcs pn))]
     (when (not-empty arcs)
-      (nth arcs (rand-int (count arcs))))))
+      (rand-nth arcs))))
 
 (defn random-inhib [pn  & {:keys [subset] :or {subset identity}}]
   (let [arcs (subset (filter #(= (:type %) :inhibitor) (:arcs pn)))]
     (when (not-empty arcs)
-      (nth arcs (rand-int (count arcs))))))
+      (rand-nth arcs))))
 
 (defn mutate
   "Mutate the individual. If impossible (after 5 tries) just return it."
@@ -257,7 +258,7 @@
              (cond (pnu/pn? (:pn i)) (diag-record-inv i)
                    (= n 0) (do (log {:in 'mutate :inv-id (:id ?inv)}) save-inv)
                    :else (recur (dec n)))))
-         (add-color-binding ?inv) ;; POD meant to be temporary??? Same with next one. 
+         (add-color-binding ?inv) ;; POD meant to be temporary??? Same with next one.
          (update ?inv :pn add-flow-priorities))))))
 
 (defn- mutate-m-dispatch [inv & {:keys [pick-fn force]
@@ -335,7 +336,7 @@
                                      (assoc mp key places)))
                                  {})
                          keys)
-        m1 (nth not-waiting (rand-int (count not-waiting)))
+        m1 (rand-nth not-waiting)
         m2 (when m1 (util/next-machine pn m1 :wrap-ok))]
     (if (and m1 m2)
       (-> inv
@@ -345,8 +346,8 @@
 
 (defn add-machine-restart-bbs
   "Mutate a buffering pattern to (potentially) 'buffering and returning to restart' pattern.
-   The place added is the 'waiting' one, where 'waiting' can be interpreted as blocking or 
-   starving; interpretation decides which of these. The buffer is the existing interface 
+   The place added is the 'waiting' one, where 'waiting' can be interpreted as blocking or
+   starving; interpretation decides which of these. The buffer is the existing interface
    place between the two machines."
   [pn m1 m2]
   (let [waiting (-> (pnu/make-place pn :name (pnu/name-with-prefix pn "wait"))
@@ -398,7 +399,7 @@
                                 (and (== 1 (count outof)) (= (first outof) narc)) (first outof))]
             sole)))
       (into (map :name (:places pn)) (map :name (:transitions pn)))))))
-               
+
 (defmethod mutate-m :remove-place [inv & args]
   (let [pn (:pn inv)  ;; Removing a place means removing all the arcs into/outof. Therefore this subset:
         pl (:name (random-place
@@ -406,7 +407,7 @@
                    :subset #(remove ;; Some vertex for which removing one of the arcs of place would be bad.
                              (fn [pl]
                                (or (:visible? pl)
-                                   (some (fn [ar] (sole-arc? pn ar)) 
+                                   (some (fn [ar] (sole-arc? pn ar))
                                          (into (pnu/arcs-into pn (:name pl))
                                                (pnu/arcs-outof pn (:name pl))))))
                              %)))]
@@ -424,7 +425,7 @@
 (defmethod mutate-m :remove-trans [inv & args]
   (let [tr (:name (random-trans (:pn inv) :subset #(remove (fn [tr] (:visible? tr)) %)))]
     (if (> (-> inv :transitions count) 1)
-      (-> inv 
+      (-> inv
         (update-in [:pn :transitions] (fn [ts] (vec (remove #(= % tr) ts))))
         (update-in [:pn :arcs] (fn [arcs] (vec (remove #(or (= (:source %) tr)
                                                                (= (:target %) tr)) arcs))))
@@ -447,8 +448,9 @@
     {:skip :remove-arc :msg "No arc"}))
 
 ;;;------------------ Swap -----------------------------
-(defn swap-arcs [pn pl1 pl2]
+(defn swap-arcs
   "Swap use of places pl1 and pl2 in the arcs of the PN. Works on trans too!"
+  [pn pl1 pl2]
   (assoc pn :arcs
          (vec (map (fn [ar]
                      (as-> ar ?ar
@@ -465,7 +467,7 @@
         candidates (filter #(> (count (pnu/arcs-outof pn %)) 1)
                            (map :name (:transitions pn)))]
     (if (not-empty candidates)
-      (let [trans (nth candidates (rand-int (count candidates)))
+      (let [trans (rand-nth candidates)
             patom (atom (pnu/arcs-outof pn trans))
             arc1 (util/pick-from-atom! patom)
             arc2 (util/pick-from-atom! patom)
@@ -477,10 +479,49 @@
             (update :history conj {:op :swap-priority  :arc1 (:name arc1) :arc2 (:name arc2) :from (:id inv)})))
       {:skip :swap-priority :msg "no candidates"})))
 
+(defmethod mutate-m :bbs-to-bas [inv & args]
+  (let [pn (:pn inv)
+        machines (util/machines-of pn)
+        bbs-machines (filter #(util/bbs? pn %) machines)]
+    (if (not-empty bbs-machines)
+      (let [machine (rand-nth bbs-machines)
+            muted (bbs-bas-switch pn machine :bbs2bas)]
+        (if (pnu/pn? muted)
+          (update muted :history conj {:op :bbs2bas :m machine})
+          (update muted :history conj {:op :bbs2bas-failed! :m machine})))
+      {:skip :bbs-to-bas :msg "no bbs machine"})))
+
+(defmethod mutate-m :bas-to-bbs [inv & args]
+  (let [pn (:pn inv)
+        machines (util/machines-of pn)
+        bas-machines (filter #(util/bas? pn %) machines)]
+    (if (not-empty bas-machines)
+      (let [machine (rand-nth bas-machines)
+            muted (bbs-bas-switch pn machine :bas2bbs)]
+        (if (pnu/pn? muted)
+          (update muted :history conj {:op :bas2bbs :m machine})
+          (update muted :history conj {:op :bas2bbs-failed! :m machine})))
+      {:skip :bas-to-bbs :msg "no bas machine"})))
+
+(defn bbs-bas-switch
+  "Switch the argument machine from block-before-service to block-after-service."
+  [pn m1 dir]
+  (let [rtrans (get (util/related-trans pn) m1)]
+    (when-let [m2 (util/next-machine pn m1)]
+      (when-let [buffer (first (get (util/iface-places pn) [m1 m2]))]
+        (when-let [done  (some #(when (= :bj (-> (pnu/name2obj pn %) :rep :mjpact)) %) rtrans)]
+          (when-let [start (some #(when (contains? #{:aj :sm} (-> (pnu/name2obj pn %) :rep :mjpact)) %) rtrans)]
+            (when-let [arc (some #(when (and (= (:source %) (if (= dir :bbs2bas) done start))
+                                             (= (:target %) buffer))
+                                    (:name %))
+                                 (:arcs pn))]
+                (assoc-in pn [:arcs (pnu/arc-index pn arc) :source] (if (= dir :bbs2bas) start done)))))))))
+
+
 ;;;=====================================================================================
 ;;;  Evolution Algorithm
 ;;;=====================================================================================
-(defn i-error 
+(defn i-error
   "Compute the individual's score."
   [inv]
   (reset! diag {:inv inv})
@@ -542,9 +583,9 @@
   (handling-evolve [world]
      (let [e-cnt    (gp-param :elite-individuals)
            pop-size (gp-param :pop-size)
-           pressure (gp-param :select-pressure)] ; POD I'm running 4 right now. 
+           pressure (gp-param :select-pressure)] ; POD I'm running 4 right now.
        (update world :pop
-               (fn [?x] 
+               (fn [?x]
                  (as-> ?x ?spop
                    (into (subvec ?spop 0 e-cnt)
                          (repeatedly (int (* 3/4 pop-size))
@@ -554,11 +595,11 @@
                      (if (>= (count pop) pop-size)
                        (subvec (vec pop) 0 pop-size)
                        (recur (conj pop (select ?x pressure)))))))))))
-  
+
 (defn evolve-success? [world]
   (cond (< (-> world :pop first :err)
            (gp-param :success-threshold))
-        (assoc world :state :success), 
+        (assoc world :state :success),
         (>= (:gen world) (gp-param :max-gens))
         (-> world
             (assoc :state :failure)
@@ -580,7 +621,7 @@
   (println "evolve-init...")
   (if @the-future
     world ; already started.
-    (do 
+    (do
       (reset-all!)
       (let [world (as-> {} ?w
                     (assoc ?w :gen 0)
@@ -611,7 +652,7 @@
             (do (rep/push-inv (-> ?w :pop first))
                 (deliver prom ?w)
                 (>!! (util/evolve-chan) "pause"))
-            
+
             (= (:state ?w) :failure)
             (do (rep/push-inv (-> ?w :pop first))
                 (deliver prom ?w)
@@ -624,7 +665,7 @@
             :else
             (recur (make-next-gen ?w))))))
 
-;;; POD currently not doing anything with the world. 
+;;; POD currently not doing anything with the world.
 (defn evolve-continue-start
   "Setup for running the evolve loop, setting the-promise, the-future and a reaper process."
   [world]
@@ -636,11 +677,11 @@
                 (future (evolve-continue world @the-promise)))
         (future ; This is a last resort timeout method; see also evolve-success?
           (let [result (deref @the-promise ; yes, 'double deref'
-                              (* 1000 (-> (app-info) :gp-params :timeout-secs)) 
+                              (* 1000 (-> (app-info) :gp-params :timeout-secs))
                               :too-late)]
             (when (= result :too-late)
-              (log "evolve-continue the-future expired.") 
-              (println "evolve-continue the-future expired.") 
+              (log "evolve-continue the-future expired.")
+              (println "evolve-continue the-future expired.")
               (>!! (util/evolve-chan) "abort"))))
         world)))
 
@@ -659,24 +700,24 @@
         (println "Leaving go; will need to run start-evolve-loop!.")
         (let [world (cond (= msg "init")
                           (evolve-init world), ; returns world map with population, etc.
-                          
+
                           (= msg "continue")   ; new future & promise and returns world
-                          (evolve-continue-start world) 
-                          
+                          (evolve-continue-start world)
+
                           (= msg "pause")      ; continue-evolve will have delivered it.
                           (do (reset! the-future nil)
                               (deref @the-promise))
-                          
+
                           (= msg "report now!")
                           (do (println "world = " world)
                               ;(reset! diag {:world world})
                               world)
-                          
+
                           (= msg "success")
                           (do (println "success!")
                               (reset! the-future nil)
                               (deref @the-promise))
-                          
+
                           (= msg "abort")
                           (do (println "aborting...")
                               (when (future? @the-future)
@@ -757,7 +798,7 @@
   []
   (binding [*debugging* false] ;<===== Whether or not to save every individual
     (reset! diag-all-inv {})
-    (>!! (util/evolve-chan) "init") 
+    (>!! (util/evolve-chan) "init")
     (>!! (util/evolve-chan) "continue")))
 
 (defn diag-sim
@@ -797,7 +838,7 @@
     (print "   :history ") (ppprint (:history inv))
     (print "})")))
 
-(defn diag-save-gen 
+(defn diag-save-gen
   "Save the current generation."
   []
   (with-open [writer (java.io.FileWriter. "data/generations/test.clj")]
@@ -813,7 +854,7 @@
   [pn priority-maps]
   (as-> pn ?pn
     (update ?pn :arcs (fn [arcs] (vec (map #(assoc % :priority 1) arcs))))
-    (update ?pn :arcs 
+    (update ?pn :arcs
             (fn [arcs] (reduce (fn [arcs pr]
                                  (if-let [ar (some #(when (and (= (:source %) (:source pr))
                                                                (= (:target %) (:target pr)))
@@ -842,21 +883,21 @@
 ;;; Highest priority (lowest priority number) gets the newest tokens.
 ;;; Thus here we want:
 ;;;    - m1-start-job to buffer be a low priority, sending the old part to the buffer.
-;;;    - m2-start-job doesn't matter; it is a "fan in", will take the newest. 
+;;;    - m2-start-job doesn't matter; it is a "fan in", will take the newest.
 (defn diag-inject-pn2
   "Read the PN and insert it in the population, replacing the individual specified."
   [fname ix priorities]
   (let [pn (-> (pnml/read-pnml fname)
                add-color-binding
                (diag-force-priority priorities))]
-    (update-pop! 
+    (update-pop!
      (assoc (-> (app-info) :pop) ix
             (map->Inv {:pn pn})))))
 
 (defn diag-inject-pn1
   "Read the PN and insert it in the population, replacing the individual specified."
   [pn ix]
-    (update-pop! 
+    (update-pop!
      (assoc (-> (app-info) :pop) ix
             (map->Inv {:pn pn}))))
 

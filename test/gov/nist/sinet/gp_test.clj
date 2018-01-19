@@ -43,9 +43,8 @@
     {:source :place-6, :target :m3-complete-job, :name :aa-842}
     {:source :m3-complete-job, :target :place-1, :name :aa-843}]})
 
-;;; (-> (initial-pop 1) first :pn tryme make-inv diag-push-inv)
-(deftest add-machine-restart-bbs-test
-  (testing "that add-machine-restart-bbs works.")
+(def bbs-3-machine
+  "A test PN that has 3-machines, all doing BBS."
   (let [save-check (s/check-asserts?)]
     (s/check-asserts false)
     (let [pn (as-> simple-3-machine-pn ?pn
@@ -57,7 +56,22 @@
                (update ?pn :places #(mapv (fn [p] (dissoc p :pid)) %))
                (update ?pn :arcs   #(mapv (fn [a] (dissoc a :name :aid)) %)))]
       (s/check-asserts save-check)
-      (is (= pn
+      pn)))
+
+(defn make-inv [pn] (map->Inv {:pn pn}))
+(defn restart-bbs-3 [pn]
+  (-> pn
+      (gp/add-machine-restart-bbs :m1 :m2)
+      (gp/add-machine-restart-bbs :m2 :m3)
+      (gp/add-machine-restart-bbs :m3 :m1)
+      #_(gp/bbs-bas-switch :m1 :bbs2bas)))
+
+
+  
+;;; (-> (initial-pop 1) first :pn gpt/restart-bbs-3 gpt/make-inv diag-push-inv)
+(deftest add-machine-restart-bbs-test
+  (testing "that add-machine-restart-bbs works.")
+      (is (= bbs-3-machine
              {:places
               [{:name :place-2} {:name :place-4} {:name :place-6}
                {:name :wait-1, :purpose :waiting}
@@ -82,5 +96,4 @@
                {:source :m2-complete-job, :target :wait-2}
                {:source :wait-2, :target :m2-start-job}
                {:source :m3-complete-job, :target :wait-3}
-               {:source :wait-3, :target :m3-start-job}]})))))
-
+               {:source :wait-3, :target :m3-start-job}]})))

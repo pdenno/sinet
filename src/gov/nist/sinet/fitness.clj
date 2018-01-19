@@ -164,7 +164,7 @@
                      (nth (:Mp link) (.indexOf mkey key)))
           (when (:diag-occupy-ok? pn)
             (reset! save-diag-occupy-ok? false)
-            (println "=======>  Occupancy wrong on " key)))))
+            (println "=======>  Occupancy wrong (BBS) on" key)))))
     (assoc pn :diag-occupy-ok? @save-diag-occupy-ok?)))
 
 (defn match-starve-inconsistent
@@ -248,21 +248,30 @@
   (when *debugging*
     (println "msg = " (first log))
     (println "start = " start-link))
-  (as-> pn ?pn
-    (assoc ?pn :msg-buf (remove #(= (:line %) (:line start-link))
+  (let [machines (util/machines-of pn)
+        pulls-from (map #(util/pulls-from pn %) machines)]
+    (-> pn 
+        (assoc :msg-buf (remove #(= (:line %) (:line start-link))
                                 (contemp-msgs log (:line start-link))))
-    (assoc ?pn :active-jobs (scada/active-jobs log))
-    (assoc ?pn :matched    start-link) ; needed because no (-> pn :interp last) with transient)
-    (assoc ?pn :interp [start-link])))
+        (assoc :pulls-from (zipmap machines pulls-from))
+        (assoc :occupy-wrong (zipmap pulls-from (repeat (count pulls-from) 0)))
+        (assoc :active-jobs (scada/active-jobs log))
+        (assoc :start-link start-link) ; useful for debugging
+        (assoc :matched start-link) 
+        (assoc :interp [start-link]))))
+
+(defn diag-prep-interp [pn]
+  "Add stuff to PN that is necessary for diagnostics run."
+  (-> pn
+      (assoc :diag-occupy-ok? true)
+      (assoc :place-map {:b1 :place-3 :b2 :place-5})      ; <---------------- POD done by hand
+      (assoc :occupy {:place-3 2 :place-5 2}))) ;
 
 (def diag-pn (atom nil))
 (defn reset-diag-step-interp! []
-  (reset! diag-pn (-> (load-file "data/PNs/hopeful-pn-3.clj")
+  (reset! diag-pn (-> (load-file "data/PNs/pn-2018-01-19.clj")
                       (lax-reach 2)
-                      (assoc :diag-occupy-ok? true)
-                      (assoc :pulls-from {:m1 [], :m2 [:Place-13], :m3 [:Place-14]})
-                      (assoc :place-map {:b1 :Place-13 :b2 :Place-14})
-                      (assoc :occupy {:Place-13 2 :Place-14 2})
+                      (diag-prep-interp 2)
                       (prep-interp (-> (app-info) :problem :scada-log)
                                    {:M [0 1 0 1 0 1 2 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 2 2], :line 0})))
   true)
@@ -295,34 +304,38 @@
    Return pn with :interp set to a vector where an element is:
     - a link augmented with :line and :job (if an ordinary message is processed), or
     - a map naming an exceptional message (if an such a message is processed)."
-  [pn log start-link] 
-  (loop [pn (prep-interp pn log start-link)]
-    (as-> pn ?pn
-      (cond-> ?pn
-        (empty? (:msg-buf ?pn)) 
-        (assoc :msg-buf (contemp-msgs log (next-time-line log (-> ?pn :matched :line)))), ;!
-        true (match-contemp-block))
-      (cond (not (:matched ?pn))
-            (assoc ?pn :interp []), 
-            (full-interp? ?pn log)
-            (dissoc ?pn :msg-buf :active-jobs),
-            true   ; continue
-            (recur ?pn)))))
+  [pn log start-link]
+  (binding [*debugging* false]
+    (loop [pn (prep-interp pn log start-link)]
+      (as-> pn ?pn
+        (cond-> ?pn
+          (empty? (:msg-buf ?pn)) 
+          (assoc :msg-buf (contemp-msgs log (next-time-line log (-> ?pn :matched :line)))), ;!
+          true (match-contemp-block))
+        (cond (not (:matched ?pn))
+              (assoc ?pn :interp []), 
+              (full-interp? ?pn log)
+              (dissoc ?pn :msg-buf :active-jobs),
+              true   ; continue
+              (recur ?pn))))))
 
 (defn interp-k-some-start-link
   "Try to interpret the log where the rgraph reflects a given k-boundedness."
-  [pn log]
+  [pn log start-links]
   (some #(let [result-pn (interpret-scada pn log %)]
            (when (full-interp? result-pn log) result-pn))
-        (starting-links pn log)))
+        start-links))
 
 (defn interp-some-k
-  [pn log min-max-k max-max-k]
-  (let [found (some (fn [max-k]
-                      (as-> (lax-reach pn max-k) ?pn
-                        (when-let [success (interp-k-some-start-link ?pn log)] success)))
+  "Calculate the reachability graph either interpret with supplied starting links
+   or calculate them."
+  [pn log & {:keys [min-max-k max-max-k start-links]}]
+  (let [pn (lax-reach pn max-max-k)
+        start-links (or start-links (starting-links pn log))
+        found (some (fn [max-k]
+                      (when-let [success (interp-k-some-start-link pn log start-links)] success))
                     (range min-max-k (inc max-max-k)))]
-      (or found pn)))
+    (or found pn)))
 
 (defn find-interpretation
   "At increasing values of max-k, find new starting links and try to interpret the entire log. 
@@ -336,7 +349,7 @@
      (let [machines (util/machines-of pn)] 
        (as-> pn ?pn ; memoize util/pulls-from
          (assoc ?pn :pulls-from (zipmap machines (map #(util/pulls-from ?pn %) machines)))
-         (interp-some-k ?pn log min-max-k max-max-k))))))
+         (interp-some-k ?pn log :min-max-k min-max-k :max-max-k max-max-k))))))
 
 ;;; Interp utils ==================
 (defn next-time-line
@@ -739,3 +752,53 @@
                      cmaps))))
             []
             blocking)))
+
+;;;==============================
+;;; log-only analysis
+;;;==============================
+(defn quick-job-trace ; POD Something like this belongs in the reworked scada.clj. 
+  "Return all mentions of the job."
+  [job-map log job-id]
+  (let [jcover (get job-map job-id)]
+    (reset! diag jcover)
+    (->> (subvec log (:starts jcover) (-> jcover :ends inc))
+         (remove #(and (contains? % :j)
+                       (not= (:j %) job-id)))
+         vec)))
+
+(defn bas-pattern?
+  "Returns true if job-trace reflects block-after-service discipline on machine m."
+  [jtrace m]
+  true)
+
+(defn bbs-pattern?
+  "Returns true if job-trace reflects block-before-service discipline on machine m."
+  [jtrace m]
+  false)
+
+(defn buffer-discipline
+  "Return a map describing the evidence for BBS and BAS for 
+   each machine in the system. e.g. {:m2 {:bbs 22 :bas 0}...}"
+  [log]
+  (let [job-map (scada/job-map log)
+        jobs (keys job-map)
+        machines (->> (quick-job-trace job-map log (rand-nth jobs))
+                      (map :m)
+                      distinct
+                      (filter identity))]
+    (zipmap machines
+            (map #(let [m %]
+                    (reduce (fn [accum job-id]
+                              (let [jtrace (quick-job-trace job-map log job-id)]
+                                (cond-> accum
+                                  (bas-pattern? jtrace m) (update :bas inc)
+                                  (bbs-pattern? jtrace m) (update :bbs inc))))
+                            {:bas 0 :bbs 0}
+                            jobs))
+                 machines))))
+                            
+                            
+                    
+
+
+            

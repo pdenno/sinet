@@ -59,17 +59,17 @@
   "Return the trace of a random job. This includes every message starting 
    with where it is first mentioned to where it is last mentioned MINUS
    the messages that are about a different job."
-  []
-  (let [data (scada-log)
-        line-num (-> data count rand-int)
-        job-id (job-id-near data line-num)
-        job-trace (scada-gather-job data job-id)
+  ([] (random-job-trace (scada-log)))
+  ([log]
+  (let [line-num (-> log count rand-int)
+        job-id (job-id-near log line-num)
+        job-trace (scada-gather-job log job-id)
         start-job (-> job-trace first :line)
         end-job (-> job-trace last :line)]
-    (->> (subvec data start-job (inc end-job))
+    (->> (subvec log start-job (inc end-job))
          (remove #(and (contains? % :j) (not (== job-id (:j %)))))
          (filter (fn [msg] (contains? msg :j)))
-         vec)))
+         vec))))
 
 (defn max-machine [job-trace]
   "Return an integer representing the last machine mentioned in the argument job trace
@@ -87,7 +87,7 @@
 (defn scada-gather-job
   "Return a 'job trace', every mention of of job-id in chronological order."
   [data job-id]
-  (filter  #(= (:j %) job-id) data))
+  (filter  #(= (:j %) job-id) data)) ; POD this is not a very efficient implementation!
   
 (defn scada-all-job-ids
   "Return a vector of all job-ids found in the data"
@@ -208,6 +208,32 @@
     (difference all-jobs add-jobs)))
 
 (defn msg-matching
+  "Return a message matching the predicate."
   [pred]
   (let [log (-> (app-info) :problem :scada-log)]
     (some #(when (pred %) %) log)))
+
+;;; POD the 'whole-job requirement currently just for neatness. 
+(defn job-map 
+  "Return a map indexed by job-id and containing maps of where 
+   mention of that job starts and stops. The job must be whole."
+  [log]
+  (as-> {} ?jmap
+    (reduce (fn [jmap msg]
+              (if-let [job-id (:j msg)]
+                (if (contains? jmap job-id)
+                  (assoc-in jmap [job-id :ends] (:line msg))
+                  (if (= (:mjpact msg) :aj) ; whole job started.
+                    (assoc jmap job-id {:starts (:line msg)})
+                    jmap))
+                jmap))
+            ?jmap
+            log)
+    (reduce (fn [jmap job-id] ; whole job ended.
+              (if-let [end-line (-> (get jmap job-id) :ends)]
+                (if (= :ej (:mjpact (nth log end-line)))
+                  jmap
+                  (dissoc jmap job-id))
+                (dissoc jmap job-id)))
+            ?jmap
+            (keys ?jmap))))

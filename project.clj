@@ -25,7 +25,7 @@
                  [reagent-forms                  "0.5.35"]
                  [re-frame                       "0.10.2"] 
                  [re-frisk                       "0.5.3"] 
-                 [org.webjars/bootstrap          "4.0.0-beta.3"]
+                 [org.webjars/bootstrap          "3.3.7" #_"4.0.0-beta.3"] ; 4 beta breaks things, no webjar for 4.0
                  [quil                           "2.6.0"]
 
                  [datawalk                       "0.1.12"]
