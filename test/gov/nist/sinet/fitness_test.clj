@@ -62,13 +62,13 @@
 ;;; POD This one is worth lots more tests!!!
 (deftest logs-interpret
   (testing "that interpretations can be found when they should be found."
-    (let [log (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj")
+    (let [log (:raw (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj"))
           pn  (fit/find-interpretation hopeful-pn log 3 3)]
       (is (= 3002 (count (:interp pn)))))))
 
 (deftest logs-interpret-3
   (testing "that interpretation works on 3-machine example")
-  (let [log (scada/load-scada "data/SCADA-logs/scada-3m-2j-bufs-out.clj")]
+  (let [log (:raw (scada/load-scada "data/SCADA-logs/scada-3m-2j-bufs-out.clj"))]
     (is (== 3002
             (-> (load-file "data/PNs/hopeful-pn-3.clj")
                 (fit/lax-reach 2)
@@ -82,7 +82,7 @@
 
 (deftest find-interp-3m-all-bbs
   (testing "that a 3-machine with all machine using BBS discipline interprets."
-    (let [log (scada/load-scada "data/SCADA-logs/scada-3m-2j-bufs-out.clj")]
+    (let [log (:raw (scada/load-scada "data/SCADA-logs/scada-3m-2j-bufs-out.clj"))]
       (is (= 3002
              (-> (fit/find-interpretation 
                   (-> (load-file "data/PNs/pn1-2018-01-19.clj"))
@@ -92,7 +92,7 @@
 
 (deftest find-interp-3m-bas-bbs
   (testing "that a 3-machine with m1 using BAS and m2 BBS discipline interprets."
-    (let [log (scada/load-scada "data/SCADA-logs/scada-3m-2j-bufs-out.clj")]
+    (let [log (:raw (scada/load-scada "data/SCADA-logs/scada-3m-2j-bufs-out.clj"))]
       (is (= 3002
              (-> (fit/find-interpretation 
                   (-> (load-file "data/PNs/pn2-2018-01-19.clj"))
@@ -200,7 +200,7 @@
 
 (deftest trans-counts-test
   (testing "that trans-counts works"
-      (let [log (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj")
+      (let [log (:raw (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj"))
             pn (as-> (fit/find-interpretation hopeful-pn log 3 3) ?pn
                  (assoc ?pn :msg-table (fit/compute-msg-table ?pn)))] 
         (is (= trans-counts (fit/trans-counts (:interp pn)))))))
@@ -208,7 +208,7 @@
 (deftest msg-table-test
   (testing "that the message table looks good"
     (is (= msg-table
-           (let [log (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj")
+           (let [log (:raw (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj"))
                  patterns (scada/scada-patterns log)
                  msg-types (conj (scada/exceptional-msgs patterns log) :ordinary)]
              (as-> (fit/find-interpretation hopeful-pn log 3 3) ?pn
@@ -216,7 +216,7 @@
 
 (deftest full-winner-process
   (testing "that the process works to winners and that intermediate test data is in sync."
-    (let [log (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj")
+    (let [log (:raw (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj"))
           patterns (scada/scada-patterns log)
           msg-types (conj (scada/exceptional-msgs patterns log) :ordinary)
           pn (as-> (fit/find-interpretation hopeful-pn log 3 3) ?pn

@@ -1,4 +1,3 @@
-[
 {:act :m2-complete-job, :m :m2, :j 580, :ent 1978.5846465942125, :clk 1998.982137625191, :line 0, :mjpact :ej}
 {:act :m2-start-job, :bf :b1, :j 581, :n 3, :clk 1998.982137625191, :line 1, :mjpact :sm, :m :m2}
 {:act :m1-complete-job, :bf :b1, :j 584, :n 2, :clk 1998.982137625191, :line 2, :mjpact :bj, :m :m1}
@@ -3002,4 +3001,3 @@
 {:act :m1-complete-job, :bf :b1, :j 1088, :n 2, :clk 3729.0720757450654, :line 3000, :mjpact :bj, :m :m1}
 {:act :m1-unblocked, :m :m1, :clk 3729.0720757450654, :line 3001, :mjpact :ub}
 {:act :m1-start-job, :j 1089, :jt :jobType1, :ends 3731.027158068991, :clk 3729.0720757450654, :line 3002, :mjpact :aj, :m :m1}
-]

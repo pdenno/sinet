@@ -272,7 +272,7 @@
   (reset! diag-pn (-> (load-file "data/PNs/pn-2018-01-19.clj")
                       (lax-reach 2)
                       (diag-prep-interp 2)
-                      (prep-interp (-> (app-info) :problem :scada-log)
+                      (prep-interp (-> (app-info) :problem :scada-log :raw)
                                    {:M [0 1 0 1 0 1 2 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 2 2], :line 0})))
   true)
 
@@ -288,7 +288,7 @@
   "Interpret one message, updating the diag-pn."
   (binding [*debugging* true]
     (let [pn @diag-pn
-          log (-> (app-info) :problem :scada-log)]
+          log (-> (app-info) :problem :scada-log :raw)]
       (if (full-interp? pn log)
         (println "Full interpretation!")
         (do (reset! last-step-pn pn)
@@ -605,7 +605,7 @@
    exceptional circumstances (blocking and starvation)."
   [inv]
   (handling-evolve [inv]
-    (let [log (-> (app-info) :problem :scada-log)
+    (let [log (-> (app-info) :problem :scada-log :raw)
               pn  (as-> (find-interpretation (:pn inv) log) ?pn
                     (assoc  ?pn :msg-table (compute-msg-table ?pn))
                     (assoc  ?pn :trans-counts (trans-counts (:interp ?pn)))
@@ -769,6 +769,7 @@
 (defn bas-pattern?
   "Returns true if job-trace reflects block-after-service discipline on machine m."
   [jtrace m]
+  (reset! diag {:jtrace jtrace :m m})
   true)
 
 (defn bbs-pattern?

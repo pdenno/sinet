@@ -353,11 +353,11 @@
   (let [waiting (-> (pnu/make-place pn :name (pnu/name-with-prefix pn "wait"))
                     (assoc :purpose :waiting))
         m1-end  (some #(when (and (= m1 (-> % :rep :m))
-                                  (contains? #{:bj :ej} (-> % :rep :mjpact)))
+                                  (#{:bj :ej} (-> % :rep :mjpact)))
                          (:name %))
                       (:transitions pn))
         m1-start (some #(when (and (= m1  (-> % :rep :m))
-                                   (contains? #{:aj :sm} (-> % :rep :mjpact)))
+                                   (#{:aj :sm} (-> % :rep :mjpact)))
                           (:name %))
                        (:transitions pn))
         end-to-waiting   (assoc (pnu/make-arc pn m1-end (:name waiting)) :bind {:jtype :blue})
@@ -510,7 +510,7 @@
     (when-let [m2 (util/next-machine pn m1)]
       (when-let [buffer (first (get (util/iface-places pn) [m1 m2]))]
         (when-let [done  (some #(when (= :bj (-> (pnu/name2obj pn %) :rep :mjpact)) %) rtrans)]
-          (when-let [start (some #(when (contains? #{:aj :sm} (-> (pnu/name2obj pn %) :rep :mjpact)) %) rtrans)]
+          (when-let [start (some #(when (#{:aj :sm} (-> (pnu/name2obj pn %) :rep :mjpact)) %) rtrans)]
             (when-let [arc (some #(when (and (= (:source %) (if (= dir :bbs2bas) done start))
                                              (= (:target %) buffer))
                                     (:name %))

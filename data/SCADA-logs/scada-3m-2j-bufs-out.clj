@@ -14,7 +14,6 @@
  :number-of-simulations 1,
  :report {:log? true, :max-lines 3000}}
 
-[
 {:clk 1999.8745 :act :m3-complete-job :m :m3 :mjpact :ej :ent 1990.8793 :j 1307 :dets {:run {:m1 1313, :m2 1310, :m3 1307}, :bufs {:b1 [1311 1312], :b2 [1308 1309]}} :line 0}
 {:clk 1999.8745 :act :m3-start-job :m :m3 :mjpact :sm :bf :b2 :n 2 :j 1308 :dets {:run {:m1 1313, :m2 1310, :m3 nil}, :bufs {:b1 [1311 1312], :b2 [1308 1309]}} :line 1}
 {:clk 2000.8233 :act :m1-blocked :m :m1 :mjpact :bl :dets {:run {:m1 1313, :m2 1310, :m3 1308}, :bufs {:b1 [1311 1312], :b2 [1309]}} :line 2}
@@ -3017,7 +3016,7 @@
 {:clk 2692.0568 :act :m1-start-job :m :m1 :mjpact :aj :jt :jobType1 :ends 2693.0568 :j 1774 :dets {:run {:m1 nil, :m2 1771, :m3 nil}, :bufs {:b1 [1772 1773], :b2 [1770]}} :line 2999}
 {:clk 2692.0568 :act :m3-complete-job :m :m3 :mjpact :ej :ent 2686.171 :j 1769 :dets {:run {:m1 nil, :m2 1771, :m3 1769}, :bufs {:b1 [1772 1773], :b2 [1770]}} :line 3000}
 {:clk 2692.0568 :act :m3-start-job :m :m3 :mjpact :sm :bf :b2 :n 1 :j 1770 :dets {:run {:m1 1774, :m2 1771, :m3 nil}, :bufs {:b1 [1772 1773], :b2 [1770]}} :line 3001}
-]
+
 #_{:TP 0.6665,
  :number-of-jobs 5332,
  :avg-buffer-occupancy

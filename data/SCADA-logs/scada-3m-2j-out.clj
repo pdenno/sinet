@@ -31,7 +31,6 @@
                  (assoc :place-map {:b1 :Place-13 :b2 :Place-14})
                  (assoc :start-occupy {:Place-13 2 :Place-14 0})))
 
-[
 {:clk 1999.6152 :act :m2-complete-job :m :m2 :mjpact :bj :bf :b2 :n 0 :j 1356 :line 0}
 {:clk 1999.6152 :act :m2-start-job :m :m2 :mjpact :sm :bf :b1 :n 2 :j 1357 :line 1}
 {:clk 1999.6152 :act :m1-unblocked :m :m1 :mjpact :ub :line 2}
@@ -3033,7 +3032,6 @@
 {:clk 2660.1893 :act :m1-unblocked :m :m1 :mjpact :ub :line 2998}
 {:clk 2660.1893 :act :m1-complete-job :m :m1 :mjpact :bj :bf :b1 :n 1 :j 1806 :line 2999}
 {:clk 2660.1893 :act :m1-start-job :m :m1 :mjpact :aj :jt :jobType1 :ends 2661.1893 :j 1807 :line 3000}
-]
 #_{:TP 0.664625,
  :number-of-jobs 5317,
  :avg-buffer-occupancy

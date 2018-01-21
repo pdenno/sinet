@@ -9,7 +9,6 @@
  :print nil,
  :number-of-simulations 1,
  :report {:log? true, :max-lines 3000}}
-[
 {:clk 1999.6645 :act :m1-complete-job :m :m1 :mjpact :bj :bf :b1 :n 0 :j 1697 :line 0}
 {:clk 1999.6645 :act :m1-start-job :m :m1 :mjpact :aj :jt :jobType1 :ends 2000.6645 :j 1698 :line 1}
 {:clk 2000.4152 :act :m2-complete-job :m :m2 :mjpact :ej :ent 1997.327 :j 1696 :line 2}
@@ -3012,7 +3011,6 @@
 {:clk 2838.0093 :act :m1-unblocked :m :m1 :mjpact :ub :line 2999}
 {:clk 2838.0093 :act :m1-complete-job :m :m1 :mjpact :bj :bf :b1 :n 2 :j 2402 :line 3000}
 {:clk 2838.0093 :act :m1-start-job :m :m1 :mjpact :aj :jt :jobType1 :ends 2839.0093 :j 2403 :line 3001}
-]
 #_{:TP 0.8415,
  :number-of-jobs 6732,
  :avg-buffer-occupancy {:b1 1.3951469396654306},

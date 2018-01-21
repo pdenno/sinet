@@ -8,12 +8,17 @@
             [gov.nist.sinet.util :as util :refer (app-info)]))
 
 (def ^:private diag (atom nil))
+(declare scada-gather-job job-map)
 
-;;; Get error "Method code too large!" If I just do load-file here.
 (defn load-scada [filename] 
-  "Read a SCADA log."
-  (let [in (java.io.PushbackReader. (clojure.java.io/reader filename))]
-    (edn/read in)))
+  (with-open [in (java.io.PushbackReader. (clojure.java.io/reader filename))]
+    (let [raw (loop [msg (edn/read {:eof :eof} in)
+                     lines (transient [])]
+                (if (not= :eof msg)
+                  (recur (edn/read {:eof :eof} in) (conj! lines msg)) 
+                  (persistent! lines)))]
+      {:raw raw
+       :job-map (job-map raw)})))
 
 (s/def ::act keyword?)
 (s/def ::mjpact keyword?)
@@ -27,9 +32,10 @@
 (s/def ::scada-msg
   (s/keys :req-un [::act ::mjpact ::clk ::line]
           :opt-un [::m ::bf ::n ::ent ::ends]))
-(s/def ::scada-log (s/coll-of ::scada-msg :kind vector?))
+(s/def ::raw (s/coll-of ::scada-msg :kind vector?))
+(s/def ::scada-log (s/keys :req-un [::raw]))
 
-;;; POD I expected this to check the return value; it doesn't.  
+;;; POD I expected this to check the return value; it doesn't. 
 (s/fdef load-scada
         :args (s/cat :filename string?)
         :ret  ::scada-log)
@@ -51,9 +57,7 @@
 (defn scada-log
   "Return the entire SCADA log vector."
   []
-  (-> (util/app-info) :problem :scada-log))
-
-(declare scada-gather-job)
+  (-> (util/app-info) :problem :scada-log :raw))
 
 (defn random-job-trace
   "Return the trace of a random job. This includes every message starting 
@@ -61,15 +65,15 @@
    the messages that are about a different job."
   ([] (random-job-trace (scada-log)))
   ([log]
-  (let [line-num (-> log count rand-int)
-        job-id (job-id-near log line-num)
-        job-trace (scada-gather-job log job-id)
-        start-job (-> job-trace first :line)
-        end-job (-> job-trace last :line)]
-    (->> (subvec log start-job (inc end-job))
-         (remove #(and (contains? % :j) (not (== job-id (:j %)))))
-         (filter (fn [msg] (contains? msg :j)))
-         vec))))
+   (let [line-num (-> log count rand-int)
+         job-id (job-id-near log line-num)
+         job-trace (scada-gather-job log job-id)
+         start-job (-> job-trace first :line)
+         end-job (-> job-trace last :line)]
+     (->> (subvec log start-job (inc end-job))
+          (remove #(and (contains? % :j) (not (== job-id (:j %)))))
+          (filter (fn [msg] (contains? msg :j)))
+          vec))))
 
 (defn max-machine [job-trace]
   "Return an integer representing the last machine mentioned in the argument job trace
@@ -210,7 +214,7 @@
 (defn msg-matching
   "Return a message matching the predicate."
   [pred]
-  (let [log (-> (app-info) :problem :scada-log)]
+  (let [log (-> (app-info) :problem :scada-log :raw)]
     (some #(when (pred %) %) log)))
 
 ;;; POD the 'whole-job requirement currently just for neatness. 
