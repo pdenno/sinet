@@ -61,7 +61,7 @@
 ;;;================================================================
 
 ;;; {:tkns [{:jtype :blue, :id 1}], :rep {:act :m2-complete-job, :mjpact :ej, :m :m2}}}
-;;; (-> (scada/random-job-trace) mjpdes2pn make-plan)
+;;; (-> (scada/rand-job-trace) mjpdes2pn make-plan)
 ;;; {:cnt 6,
 ;;;  :t
 ;;;  [{:act :m1-start-job, :mjpact :aj, :m :m1}
@@ -202,7 +202,7 @@
   [pop-size]
   (vec (repeatedly
         pop-size
-        #(let [job-trace (scada/random-job-trace)]
+        #(let [job-trace (scada/rand-job-trace)]
            (map->Inv {:pn (initial-pn job-trace),
                       :id (util/uuid)
                       :history [{:trace job-trace}]})))))
@@ -524,13 +524,13 @@
 (defn i-error
   "Compute the individual's score."
   [inv]
-  (reset! diag {:inv inv})
-  (handling-evolve [inv]
-    (as-> inv ?i
-      (assoc ?i :disorder nil)
-      (assoc ?i :except nil)
-      (fit/exceptional-fitness ?i)
-      (assoc ?i :err (:except ?i)#_(+ (:disorder ?i) (:except ?i))))))
+  (let [log (-> (app-info) :problem :scada-log)]
+    (handling-evolve [inv]
+      (as-> inv ?i
+        (assoc ?i :disorder nil)
+        (assoc ?i :except nil)
+        (fit/exceptional-fitness ?i log)
+        (assoc ?i :err (:except ?i)#_(+ (:disorder ?i) (:except ?i)))))))
 
 (def diag-timeouts (atom []))
 
@@ -819,7 +819,7 @@
   []
   (->> (app-info)
        :problem
-       :scada-patterns
+       :patterns
        (map :form)
        ppprint))
 

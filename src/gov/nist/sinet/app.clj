@@ -69,12 +69,7 @@
                       :gp-params @gp-params
                       :problem   @problem
                       :gp-system (gp-system))
-               (assoc-in ?c [:problem :scada-log] (-> ?c :problem :scada-data-file scada/load-scada))
-               (assoc-in ?c [:problem :scada-patterns] ; Needs :pattern-reserves defined.
-                         (-> ?c :problem :scada-log scada/scada-patterns))
-               (assoc-in ?c [:problem :exceptional-msgs]
-                         (scada/exceptional-msgs (-> ?c :problem :scada-patterns)
-                                                 (-> ?c :problem :scada-log :raw))))]
+               (assoc-in ?c [:problem :scada-log] (-> ?c :problem :scada-data-file scada/load-scada)))]
     (s/check-asserts (-> comp :gp-system :check-asserts?))
     (s/assert ::app comp)
     (gp/start-evolve-loop! (-> comp :gp-system :evolve-chan))

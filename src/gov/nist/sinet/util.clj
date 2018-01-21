@@ -173,8 +173,8 @@
 (defn machines-of
   "Return collection of the machines used in the PN."
   [pn]
-  (distinct (mapv #(-> % :rep :m)
-                  (filter #(contains? % :rep) (:transitions pn)))))
+  (set (mapv #(-> % :rep :m)
+             (filter #(contains? % :rep) (:transitions pn)))))
 
 (defn related-trans
   "Return a map where each key is machine name and each value is a set of 
@@ -332,7 +332,7 @@
   [pn]
   (let [machines (machines-of pn)
         betweens (combo/combinations machines 2)]
-    (dedupe ; <======================= distinct
+    (distinct
      (flatten
       (filter identity (into (map (fn [[m1 m2]] (buffers-between pn m1 m2)) betweens)
                              (map (fn [[m1 m2]] (buffers-between pn m2 m1)) betweens)))))))

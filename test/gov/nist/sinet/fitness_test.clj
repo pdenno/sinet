@@ -62,13 +62,12 @@
 ;;; POD This one is worth lots more tests!!!
 (deftest logs-interpret
   (testing "that interpretations can be found when they should be found."
-    (let [log (:raw (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj"))
-          pn  (fit/find-interpretation hopeful-pn log 3 3)]
-      (is (= 3002 (count (:interp pn)))))))
+    (let [log (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj")]
+      (is (== 3002 (-> (fit/find-interp hopeful-pn log 3 3) :interp count))))))
 
 (deftest logs-interpret-3
   (testing "that interpretation works on 3-machine example")
-  (let [log (:raw (scada/load-scada "data/SCADA-logs/scada-3m-2j-bufs-out.clj"))]
+  (let [log (scada/load-scada "data/SCADA-logs/scada-3m-2j-bufs-out.clj")]
     (is (== 3002
             (-> (load-file "data/PNs/hopeful-pn-3.clj")
                 (fit/lax-reach 2)
@@ -82,23 +81,15 @@
 
 (deftest find-interp-3m-all-bbs
   (testing "that a 3-machine with all machine using BBS discipline interprets."
-    (let [log (:raw (scada/load-scada "data/SCADA-logs/scada-3m-2j-bufs-out.clj"))]
-      (is (= 3002
-             (-> (fit/find-interpretation 
-                  (-> (load-file "data/PNs/pn1-2018-01-19.clj"))
-                  log)
-                 :interp
-                 count))))))
+    (let [log (scada/load-scada "data/SCADA-logs/scada-3m-2j-bufs-out.clj")
+          pn  (load-file "data/PNs/pn1-2018-01-19.clj")]
+      (is (== 3002 (-> (fit/find-interp pn log) :interp count))))))
 
 (deftest find-interp-3m-bas-bbs
   (testing "that a 3-machine with m1 using BAS and m2 BBS discipline interprets."
-    (let [log (:raw (scada/load-scada "data/SCADA-logs/scada-3m-2j-bufs-out.clj"))]
-      (is (= 3002
-             (-> (fit/find-interpretation 
-                  (-> (load-file "data/PNs/pn2-2018-01-19.clj"))
-                  log)
-                 :interp
-                 count))))))
+    (let [log (scada/load-scada "data/SCADA-logs/scada-3m-2j-bufs-out.clj")
+          pn  (load-file "data/PNs/pn2-2018-01-19.clj")]
+      (is (== 3002 (-> (fit/find-interp pn log) :interp count))))))
 
 (def rgraph
   [{:M [1 1 0 0 2], :fire :m2-start-job, :Mp [0 1 0 1 1], :rate 1.0}
@@ -200,27 +191,23 @@
 
 (deftest trans-counts-test
   (testing "that trans-counts works"
-      (let [log (:raw (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj"))
-            pn (as-> (fit/find-interpretation hopeful-pn log 3 3) ?pn
-                 (assoc ?pn :msg-table (fit/compute-msg-table ?pn)))] 
+      (let [log (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj")
+            pn (as-> (fit/find-interp hopeful-pn log 3 3) ?pn
+                 (assoc ?pn :msg-table (fit/compute-msg-table ?pn log)))] 
         (is (= trans-counts (fit/trans-counts (:interp pn)))))))
                                         
 (deftest msg-table-test
   (testing "that the message table looks good"
     (is (= msg-table
-           (let [log (:raw (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj"))
-                 patterns (scada/scada-patterns log)
-                 msg-types (conj (scada/exceptional-msgs patterns log) :ordinary)]
-             (as-> (fit/find-interpretation hopeful-pn log 3 3) ?pn
-               (fit/compute-msg-table ?pn msg-types)))))))
+           (let [log (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj")]
+             (as-> (fit/find-interp hopeful-pn log 3 3) ?pn
+               (fit/compute-msg-table ?pn log)))))))
 
 (deftest full-winner-process
   (testing "that the process works to winners and that intermediate test data is in sync."
-    (let [log (:raw (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj"))
-          patterns (scada/scada-patterns log)
-          msg-types (conj (scada/exceptional-msgs patterns log) :ordinary)
-          pn (as-> (fit/find-interpretation hopeful-pn log 3 3) ?pn
-               (assoc  ?pn :msg-table (fit/compute-msg-table ?pn msg-types))
+    (let [log (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj")
+          pn (as-> (fit/find-interp hopeful-pn log 3 3) ?pn
+               (assoc  ?pn :msg-table (fit/compute-msg-table ?pn log))
                (assoc  ?pn :norm-factors (fit/normalize-marking-factors (:rgraph ?pn)))
                (assoc  ?pn :trans-counts (fit/trans-counts (:interp ?pn)))
                (dissoc ?pn :interp)

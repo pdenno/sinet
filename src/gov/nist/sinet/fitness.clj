@@ -40,7 +40,7 @@
                  ;; POD not too sure about just using the newest token here. 
                  (when (not-empty (:j msg))
                    (== tkn-id (apply max (:j msg))))))
-          log))
+          (:raw log)))
 
 ;;; POD Because I'm focusing on jobs here (qpn-gather-job), at some point I'm going to have to account for
 ;;; lines in the log that were not addressed by qpn-gather-job (and the things in-between it).
@@ -72,23 +72,16 @@
     (reduce (fn [distrib msg]
               (update-in distrib [(:act msg)] inc))
             (zipmap acts (repeat (count acts) 0))
-            (filter #(contains? % :act) log))))
+            (filter #(contains? % :act) (:raw log)))))
 
 ;;;====================================================================================
 ;;; Exceptional Fitness
 ;;;====================================================================================
-(defn ordinary?
-  "Returns msg if the message isn't exceptional otherwise false."
-  [msg]
-  (if (contains? (-> (app-info) :problem :exceptional-msgs) (:act msg))
-    false
-    msg))
-
 (defn starting-links
   "Based only on the rgraph and message firing, return all 
    links that could start interpretation." 
   [pn log]
-  (if-let [msg (some #(when (ordinary? %) %) log)]
+  (if-let [msg (some #(when ((:ordinary log) (:act %)) %) (:raw log))]
     (let [line (:line msg)
           fire (:act msg)]
       (distinct
@@ -193,12 +186,12 @@
   "If the argument msg is not ordinary, return information about it and the llink. 
    If the argument msg can advance the rgraph (i.e. ordinary), return augmented
    link information. Otherwise return nil."
-  [pn msg] 
+  [pn log msg] 
   (let [job (:j msg)
         llink (:matched pn)
         slink (atom nil)]
     (as-> pn ?pn
-      (cond (not (ordinary? msg))                                   ; (1)
+      (cond (not ((:ordinary log) (:act msg)))                      ; (1)
             (if (and (= (:mjpact msg) :st)
                      (when-let [machine (:m msg)]
                        (not (starved? llink msg (:marking-key pn)
@@ -228,9 +221,9 @@
 
 (defn match-contemp-block
   "next-match any contemporary message; return pn updated."
-  [pn]
+  [pn log]
   (let [old-match  (:matched pn)]
-    (if-let [pn (some #(let [pn (next-match (assoc pn :matched old-match) %)] ;!
+    (if-let [pn (some #(let [pn (next-match (assoc pn :matched old-match) log %)] ;!
                          (when (:matched pn) pn))
                       (:msg-buf pn))]
       (as-> pn ?pn ;!3 and conj!
@@ -246,7 +239,7 @@
 (defn prep-interp [pn log start-link]
   "Prepare the PN for interpretation."
   (when *debugging*
-    (println "msg = " (first log))
+    (println "msg = " (-> log :raw first))
     (println "start = " start-link))
   (let [machines (util/machines-of pn)
         pulls-from (map #(util/pulls-from pn %) machines)]
@@ -288,7 +281,7 @@
   "Interpret one message, updating the diag-pn."
   (binding [*debugging* true]
     (let [pn @diag-pn
-          log (-> (app-info) :problem :scada-log :raw)]
+          log (-> (app-info) :problem :scada-log)]
       (if (full-interp? pn log)
         (println "Full interpretation!")
         (do (reset! last-step-pn pn)
@@ -296,7 +289,7 @@
                     (cond-> pn
                       (empty? (:msg-buf pn))
                       (assoc :msg-buf (contemp-msgs log (next-time-line log (-> pn :matched :line)))), ;!
-                      true (match-contemp-block)))))
+                      true (match-contemp-block log)))))
     true)))
 
 (defn interpret-scada
@@ -311,7 +304,7 @@
         (cond-> ?pn
           (empty? (:msg-buf ?pn)) 
           (assoc :msg-buf (contemp-msgs log (next-time-line log (-> ?pn :matched :line)))), ;!
-          true (match-contemp-block))
+          true (match-contemp-block log))
         (cond (not (:matched ?pn))
               (assoc ?pn :interp []), 
               (full-interp? ?pn log)
@@ -337,16 +330,16 @@
                     (range min-max-k (inc max-max-k)))]
     (or found pn)))
 
-(defn find-interpretation
+(defn find-interp
   "At increasing values of max-k, find new starting links and try to interpret the entire log. 
    Return pn with :interp set to the first complete interpretation found, if any below max-max-k."
-  ([pn log] (find-interpretation pn
-                                 log
-                                 (-> (app-info) :gp-params :min-max-k)
-                                 (-> (app-info) :gp-params :max-max-k)))
+  ([pn log] (find-interp pn
+                         log
+                         (-> (app-info) :gp-params :min-max-k)
+                         (-> (app-info) :gp-params :max-max-k)))
   ([pn log min-max-k max-max-k] 
-   (when (interp-possible? pn)
-     (let [machines (util/machines-of pn)] 
+   (when (interp-possible? pn log)
+     (let [machines (vec (util/machines-of pn))] 
        (as-> pn ?pn ; memoize util/pulls-from
          (assoc ?pn :pulls-from (zipmap machines (map #(util/pulls-from ?pn %) machines)))
          (interp-some-k ?pn log :min-max-k min-max-k :max-max-k max-max-k))))))
@@ -356,29 +349,31 @@
   "Return the line number of a message after the time of the argument message
   or nil if none left."
   [log indx]
-  (let [msg  (nth log indx)
+  (let [raw (:raw log)
+        msg  (nth raw indx)
         time (:clk  msg)
-        last-indx (-> log last :line)]
+        last-indx (-> raw last :line)]
     (loop [n (inc indx)]
       (cond (> n last-indx) nil,
-            (> (:clk (nth log n)) time) n,
+            (> (:clk (nth raw n)) time) n,
             :else (recur (inc n))))))
 
 (defn contemp-msgs
   "Return all messages that occurred when the message at indx occurred."
   [log line]
-  (if (not line) []
-      (let [time (:clk (nth log line))
-            max-line (-> log last :line)
-            loop-fn (fn [inc-dec-fn hit-bound?]
-                      (loop [col []
-                             n line]
-                        (cond (hit-bound? n) col 
-                              (not= time (:clk (nth log n))) col
-                              :else (recur (conj col (nth log n)) (inc-dec-fn n)))))]
-        (into 
-         (-> (loop-fn dec #(< % 0)) rest reverse vec)
-         (loop-fn inc #(> % max-line))))))
+  (let [raw (:raw log)]
+    (if (not line) []
+        (let [time (:clk (nth raw line))
+              max-line (-> raw last :line)
+              loop-fn (fn [inc-dec-fn hit-bound?]
+                        (loop [col []
+                               n line]
+                          (cond (hit-bound? n) col 
+                                (not= time (:clk (nth raw n))) col
+                                :else (recur (conj col (nth raw n)) (inc-dec-fn n)))))]
+          (into 
+           (-> (loop-fn dec #(< % 0)) rest reverse vec)
+           (loop-fn inc #(> % max-line)))))))
 
 (defn reasonably-marked-pn
   "Set PN marking so that things that look like machines have a state."
@@ -428,18 +423,19 @@
   [pn log]
   (let [llink (:matched pn)]
     (and (number? (:line llink))
-         (== (-> log last :line)
+         (== (-> log :raw last :line)
              (:line llink)))))
 
 ;;; POD Needs work. Too restrictive! async serial line. 
 (defn interp-possible?
   "Returns true if there are enough buffers for an async serial line."
-  [pn]
+  [pn log]
   (when (s/valid? ::util/gppn pn)
-    (let [m (util/machines-of pn)
-          combos (combo/permutations m)]
-      (>= (count (set (mapcat (fn [[m1 m2]] (util/buffers-between pn m1 m2)) combos)))
-          (dec (count m))))))
+    (let [machs (util/machines-of pn)
+          combos (combo/permutations machs)]
+      (and (= machs (:machines log))
+           (>= (count (set (mapcat (fn [[m1 m2]] (util/buffers-between pn m1 m2)) combos)))
+               (dec (count machs)))))))
 
 ;;;; ======== Exceptional Probabilty =================================
 ;;; You can have the same marking associated with more than one class. The more times you have
@@ -450,28 +446,28 @@
 (defn compute-msg-table
   "Return a map indicating what markings are associated with what message types, 
    where message types are either ':ordinary' or some exceptional message type."
-  ([pn] (compute-msg-table pn (conj (-> (app-info) :problem :exceptional-msgs) :ordinary)))
-  ([pn msg-types] 
-   (let [markings (map :M (:rgraph pn))]
-     (when-let [interp (not-empty (:interp pn))]
-       (let [report (reduce (fn [sum msg]
-                              (if (contains? msg :act)
-                                (update-in sum [(:act msg) (:Mp msg)] inc)
-                                (update-in sum [:ordinary (:M msg)] inc)))
-                            (zipmap msg-types
-                                    (repeatedly (count msg-types)
-                                                #(zipmap markings (repeat (count markings) 0))))
-                            interp)]
-         ;; Outer map is indexed by msg-types; inner map in indexed by markings, values are count.
-         ;; Eliminate entries where the count is zero.
-         (reduce (fn [map key]
-                   (update-in map [key]
-                              #(persistent!
-                                (reduce (fn [m k] (if (== 0 (get m k)) (dissoc! m k) m))
-                                        (transient %)
-                                        (keys %)))))
-                 report
-                 msg-types))))))
+  [pn log]
+  (let [msg-types (conj (:exceptional-msgs log) :ordinary)
+        markings (map :M (:rgraph pn))]
+    (when-let [interp (not-empty (:interp pn))]
+      (let [report (reduce (fn [sum msg]
+                             (if (contains? msg :act)
+                               (update-in sum [(:act msg) (:Mp msg)] inc)
+                               (update-in sum [:ordinary (:M msg)] inc)))
+                           (zipmap msg-types
+                                   (repeatedly (count msg-types)
+                                               #(zipmap markings (repeat (count markings) 0))))
+                           interp)]
+        ;; Outer map is indexed by msg-types; inner map in indexed by markings, values are count.
+        ;; Eliminate entries where the count is zero.
+        (reduce (fn [map key]
+                  (update-in map [key]
+                             #(persistent!
+                               (reduce (fn [m k] (if (== 0 (get m k)) (dissoc! m k) m))
+                                       (transient %)
+                                       (keys %)))))
+                report
+                msg-types)))))
 
 (defn trans-prob
   "Calculate the probability of the transition from 
@@ -603,28 +599,27 @@
 (defn exceptional-fitness
   "Return the Inv with an :except value assessing how well the individual addresses 
    exceptional circumstances (blocking and starvation)."
-  [inv]
+  [inv log]
   (handling-evolve [inv]
-    (let [log (-> (app-info) :problem :scada-log :raw)
-              pn  (as-> (find-interpretation (:pn inv) log) ?pn
-                    (assoc  ?pn :msg-table (compute-msg-table ?pn))
-                    (assoc  ?pn :trans-counts (trans-counts (:interp ?pn)))
-                    (dissoc ?pn :interp)
-                    (assoc  ?pn :sigma (-> (app-info) :gp-params :exceptional-sigma))
-                    (assoc  ?pn :loom-prob (rgraph2loom-probability (:rgraph ?pn) (:trans-counts ?pn)))
-                    (assoc  ?pn :distance-fn #(second (alg/dijkstra-path-dist (:loom-prob ?pn) %1 %2)))
-                    (assoc  ?pn :pdf-fns
-                            (zipmap (-> ?pn :msg-table keys)
-                                    (map #(parzen-pdf-msg ?pn %)
-                                         (-> ?pn :msg-table keys))))
-                    (assoc ?pn :winners (choose-winners ?pn))
-                    ;; Constrain buffers if any look promising. POD mark for semantic operator. 
-                    (if (:winners ?pn)
-                      (reduce (fn [pn buf-info]
-                                (constrain-buffer-size ?pn (:buffer buf-info) (:k buf-info)))
-                              ?pn
-                              (buffers-to-constrain ?pn))
-                      ?pn))]
+    (let [pn  (as-> (find-interp (:pn inv) log) ?pn
+                (assoc  ?pn :msg-table (compute-msg-table ?pn log))
+                (assoc  ?pn :trans-counts (trans-counts (:interp ?pn)))
+                (dissoc ?pn :interp)
+                (assoc  ?pn :sigma (-> (app-info) :gp-params :exceptional-sigma))
+                (assoc  ?pn :loom-prob (rgraph2loom-probability (:rgraph ?pn) (:trans-counts ?pn)))
+                (assoc  ?pn :distance-fn #(second (alg/dijkstra-path-dist (:loom-prob ?pn) %1 %2)))
+                (assoc  ?pn :pdf-fns
+                        (zipmap (-> ?pn :msg-table keys)
+                                (map #(parzen-pdf-msg ?pn %)
+                                     (-> ?pn :msg-table keys))))
+                (assoc ?pn :winners (choose-winners ?pn))
+                ;; Constrain buffers if any look promising. POD mark for semantic operator. 
+                (if (:winners ?pn)
+                  (reduce (fn [pn buf-info]
+                            (constrain-buffer-size ?pn (:buffer buf-info) (:k buf-info)))
+                          ?pn
+                          (buffers-to-constrain ?pn))
+                  ?pn))]
       (-> inv ; POD most of these are temporary.
           (assoc :except (cond
                            (not-empty (:trans-count pn)) 0.5
@@ -756,16 +751,6 @@
 ;;;==============================
 ;;; log-only analysis
 ;;;==============================
-(defn quick-job-trace ; POD Something like this belongs in the reworked scada.clj. 
-  "Return all mentions of the job."
-  [job-map log job-id]
-  (let [jcover (get job-map job-id)]
-    (reset! diag jcover)
-    (->> (subvec log (:starts jcover) (-> jcover :ends inc))
-         (remove #(and (contains? % :j)
-                       (not= (:j %) job-id)))
-         vec)))
-
 (defn bas-pattern?
   "Returns true if job-trace reflects block-after-service discipline on machine m."
   [jtrace m]
@@ -781,25 +766,14 @@
   "Return a map describing the evidence for BBS and BAS for 
    each machine in the system. e.g. {:m2 {:bbs 22 :bas 0}...}"
   [log]
-  (let [job-map (scada/job-map log)
-        jobs (keys job-map)
-        machines (->> (quick-job-trace job-map log (rand-nth jobs))
-                      (map :m)
-                      distinct
-                      (filter identity))]
-    (zipmap machines
+  (let [job-map (:job-map log)]
+    (zipmap (:machines log)
             (map #(let [m %]
                     (reduce (fn [accum job-id]
-                              (let [jtrace (quick-job-trace job-map log job-id)]
+                              (let [jtrace (scada/job-trace job-map log job-id)]
                                 (cond-> accum
                                   (bas-pattern? jtrace m) (update :bas inc)
                                   (bbs-pattern? jtrace m) (update :bbs inc))))
                             {:bas 0 :bbs 0}
-                            jobs))
-                 machines))))
-                            
-                            
-                    
-
-
-            
+                            (:job-ids log)))
+                 (:machines log)))))
