@@ -4,9 +4,9 @@
             [quil.core :as quil :include-macros true]
             [quil.middleware :as qm]
             [gov.nist.sinet.client.ws :as ws :refer (->output! output-atom chsk-send!)]
-            [gov.nist.sinet.client.draw :as draw :refer (setup-pn draw-pn pn-wheel-fn +display-pn+)]
             [reagent.core :as reagent]
-            [re-frame.core :as rf]))
+            [re-frame.core :as rf]
+            [pdenno.pn-draw.core :as pnd]))
 
 (declare request-individual request-server-change-evolve-state)
 ;;; https://github.com/Day8/re-frame/blob/master/docs/EffectfulHandlers.md
@@ -117,7 +117,7 @@
 (defn quil-pn []
   (let [pn @(rf/subscribe [:pn])]
     (when (contains? pn :places)
-      (reset! draw/+display-pn+ (draw/pn-geom pn @draw/+display-pn+))
+      (reset! pnd/+display-pn+ (pnd/pn-geom pn @pnd/+display-pn+))
       (draw-it))
     [:canvas {:id "best-pn"}]))
 
@@ -132,7 +132,7 @@
     [:div {:class "container"}
      [:div {:class "row"} [:strong "GP Control"]]
      [:div {:class "row"} "Viewing PN (order): " pn-id]
-     [:div {:class "row"} "Error: " (pretty-val (:err @+display-pn+))]
+     [:div {:class "row"} "Error: " (pretty-val (:err @pnd/+display-pn+))]
      [:div {:class "row"}
       [:div {:class "btn-group btn-group-sm"}
        [:button {:class "btn btn-primary" :style {:background-color "#CC0066"}
@@ -195,12 +195,12 @@
     :host "best-pn"
     :title "Best Individual"
     :settings #(fn [] (quil/smooth 2)) ; Smooth=2 is typical. Can't use pixel-density with js.
-    :setup draw/setup-pn
-    :draw draw/draw-pn
-    :mouse-wheel draw/pn-wheel-fn
+    :setup pnd/setup-pn
+    :draw pnd/draw-pn
+    :mouse-wheel pnd/pn-wheel-fn
     ;; POD I need a solution for getting it here! 
-    :size [(-> draw/graph-window-params :window-size :length)
-           (-> draw/graph-window-params :window-size :height)]))
+    :size [(-> pnd/graph-window-params :window-size :length)
+           (-> pnd/graph-window-params :window-size :height)]))
 
 ;;; Loughborough Purple:  Pantone 269 C #472267 (71,51,103), Websafe, #330066 
 ;;; Loughborough Magenta: Pantone 220 C #8F004F (143,0,79)   Websafe, #CC0066

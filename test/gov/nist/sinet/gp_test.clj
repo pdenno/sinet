@@ -58,15 +58,20 @@
       (s/check-asserts save-check)
       pn)))
 
+(defn add-inhibitor-3
+  [pn]
+  (update pn :arcs conj
+          {:aid 55, :source :place-3, :target :m1-start-job, :name :aa-55, 
+           :type :inhibitor, :multiplicity 3, :bind {:jtype :blue}}))
+
 (defn make-inv [pn] (map->Inv {:pn pn}))
 (defn restart-bbs-3 [pn]
   (-> pn
       (gp/add-machine-restart-bbs :m1 :m2)
       (gp/add-machine-restart-bbs :m2 :m3)
       (gp/add-machine-restart-bbs :m3 :m1)
-      #_(gp/bbs-bas-switch :m1 :bbs2bas)))
-
-
+      (gp/bbs-bas-switch :m1 :bbs2bas)
+      add-inhibitor-3))
   
 ;;; (-> (initial-pop 1) first :pn gpt/restart-bbs-3 gpt/make-inv diag-push-inv)
 (deftest add-machine-restart-bbs-test

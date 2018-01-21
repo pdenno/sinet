@@ -7,7 +7,7 @@
   :dependencies [[org.clojure/clojure            "1.9.0"]
                  [org.clojure/clojurescript      "1.9.946"]
                  [org.clojure/tools.trace        "0.7.9"]
-                 [org.clojure/core.async         "0.3.465"]
+                 [org.clojure/core.async         "0.4.474"]
                  [com.cemerick/piggieback        "0.2.2"]
                  [com.stuartsierra/component     "0.3.2"]
                  [environ                        "1.1.0"]
@@ -32,6 +32,7 @@
 
                  [aysylu/loom                    "1.0.0"]
                  [pdenno/utils4pmap              "0.1.0"]
+                 [pdenno/pn-draw                 "0.1.0-SNAPSHOT"]
                  [gov.nist/spntools              "0.1.0-SNAPSHOT"]]
 
   :plugins [[lein-figwheel  "0.5.14"]
