@@ -17,7 +17,6 @@
             [gov.nist.sinet.ws :as ws]
             [gov.nist.sinet.report :as rep]))
 
-
 (alias 'gp 'gov.nist.sinet.gp)
 (declare eden-places eden-trans eden-arcs add-machine-restart-bbs mutate-m eval-pn add-color-binding
          diag-record-inv remove-wrap-places bbs-bas-switch)

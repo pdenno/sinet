@@ -193,7 +193,7 @@
         ordinary (set (mapcat (fn [pat] (map :act (:form pat))) patterns))]
     (-> log
         (assoc :ordinary ordinary)
-        (assoc :exceptional-msgs
+        (assoc :exceptional
                (->> (reduce (fn [excepts msg]
                               (if (ordinary (:act msg))
                                 excepts ; dissoc for distinct members
