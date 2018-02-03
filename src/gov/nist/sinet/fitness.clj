@@ -1,9 +1,9 @@
 (ns gov.nist.sinet.fitness
   "Compute the fitness of an individual"
-  (:require [clojure.pprint :refer (cl-format pprint print-table)]
+  (:require [clojure.spec.alpha :as s]
+            [clojure.pprint :refer (cl-format pprint print-table)]
             [clojure.core.async :as async :refer [>! <! >!! <!! go-loop chan close!]]
             [clojure.set :as set]
-            [clojure.spec.alpha :as s]
             [clojure.math.combinatorics :as combo]
             [loom.alg :as alg]
             [loom.graph :as graph]
@@ -20,7 +20,7 @@
 (defn aliases []
   (alias 'fit  'gov.nist.sinet.fitness)
   (alias 'fitt 'gov.nist.sinet.fitness-test) ; POD temporary
-  (alias 'gp   'gov.nist.sinet.gp)) ; POD temporary
+  (alias 'gp   'gov.nist.sinet.gp))          ; POD temporary
 
 (declare contemp-msgs next-time-line reasonably-marked-pn lax-reach max-marks full-interp? max-marks)
 (declare interp-possible? act2trans rgraph2loom-steps buffers-to-constrain constrain-buffer-size)
@@ -748,50 +748,3 @@
             []
             blocking)))
 
-;;;==============================
-;;; log-only analysis
-;;;==============================
-;;; ===> You have BBS if blocking occurs before start job.        -- end-job block start-job
-;;; ===> You have BAS if blocking occurs after/with complete job. -- start-job block end-job
-;;; POD I think the argument machine can only block once in the course of the job.
-
-
-;;; I think I have BBS wrong: I meant "if UNblocking occurs before start job."
-;;; THEREFORE I have to write a (next-unblock log :m1 line-num). (There is a predicate....)
-;;; STILL NEEDS THOUGHT!!!!!!! Maybe work on the output in MJPdes before returning to this.
-;;; Create tests for BBS and BAS in MJPdes.
-;;; BTW, This stuff belongs in scada.cljs. It doesn't concern individuals!
-(defn bbs-pattern?
-  "Returns true if job-trace reflects block-before-service discipline on machine m.
-   That is, in this job-trace m blocks, and unblocks before starting the next job." 
-  [log jtrace m]
-  (let [job-id (some #(:j %) jtrace)
-        next-start-line  (some #(when (= :aj (:mjpact %)) (:line %))
-                               (scada/job-trace log (inc job-id)))
-        block-line   (some #(when (and (= :bl (:mjpact %))
-                                       (= m (:m %)))
-                              (:line %))
-                           jtrace)]
-    (when (and block-line next-start-line)
-      (< block-line next-start-line))))
-
-(defn bas-pattern?
-    "Returns true if job-trace reflects block-after-service discipline on machine m."
-  [jtrace m]
-  false)
-
-(defn buffer-discipline
-  "Return a map describing the evidence for BBS and BAS for 
-   each machine in the system. e.g. {:m2 {:bbs 22 :bas 0}...}"
-  [log]
-  (let [job-map (:job-map log)]
-    (zipmap (:machines log)
-            (map #(let [m %]
-                    (reduce (fn [accum job-id]
-                              (let [jtrace (scada/job-trace job-map log job-id)]
-                                (cond-> accum
-                                  (bas-pattern? log jtrace m) (update :bas inc)
-                                  (bbs-pattern? log jtrace m) (update :bbs inc))))
-                            {:bas 0 :bbs 0}
-                            (:job-ids log)))
-                 (:machines log)))))

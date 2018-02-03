@@ -234,20 +234,7 @@
                 [0 0 1 1 2] [:ordinary 0.0960888468671096],
                 [1 1 0 0 1] [:m2-unstarved 1.0],
                 [0 1 0 1 2] [:m1-unblocked 1.0000000000000002],
-                [1 0 1 0 0] [:ordinary 0.01139091655954467]}
-
-               #_{[0 0 1 1 1] [:ordinary 0.07035003350586438],
-                  [0 1 0 1 0] [:ordinary 0.08612941888443124],
-                  [1 1 0 0 2] [:ordinary 0.06977395019946811],
-                  [0 1 0 1 3] [:m1-blocked 1.0000000000000002],
-                  [1 1 0 0 3] [:ordinary 0.09753131509940632],
-                  [0 1 0 1 1] [:ordinary 0.14762935943771455],
-                  [1 1 0 0 0] [:m2-starved 1.0],
-                  [0 0 1 1 0] [:ordinary 0.0721420233904942],
-                  [0 0 1 1 2] [:ordinary 0.0996944685574537],
-                  [1 1 0 0 1] [:m2-unstarved 1.0],
-                  [0 1 0 1 2] [:m1-unblocked 1.0000000000000002],
-                  [1 0 1 0 0] [:ordinary 0.01139091655954467]})))))
+                [1 0 1 0 0] [:ordinary 0.01139091655954467]})))))
 
 ;;; In all tests that use 'distance' on markings, markings are normalized.
 ;;; I think this is necessary if sigma is going to mean anything. 

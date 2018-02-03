@@ -97,18 +97,18 @@
   `(when *debugging*
      @body))
 
-(defn pick-from-atom!
+(defn pick-from-ref!
   "Randomly remove one element from the atom and return it."
-  [atom]
-  (let [picked (nth @atom (rand-int (count @atom)))]
-    (swap! atom (fn [a] (remove #(= picked %) a)))
+  [pref]
+  (let [picked (nth @pref (rand-int (count @pref)))]
+    (dosync (alter pref (fn [a] (remove #(= picked %) a))))
     picked))
 
 (defn random-index
   "Create a vector of size n using each of the numbers 0 to n-1 once."
   [n]
-  (let [patom (atom (range n))]
-    (reduce (fn [v _] (conj v (pick-from-atom! patom)))
+  (let [pref (ref (range n))]
+    (reduce (fn [v _] (conj v (pick-from-ref! pref)))
             []
             (range n))))
 

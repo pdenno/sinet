@@ -1,9 +1,10 @@
 (ns gov.nist.sinet.scada
   "Read and process SCADA data."
-  (:require [clojure.set :refer (union difference intersection)]
+  (:require [clojure.spec.alpha :as s]
+            [clojure.set :refer (union difference intersection)]
             [clojure.pprint :refer (cl-format pprint)]
             [clojure.edn :as edn]
-            [clojure.spec.alpha :as s]
+            [net.cgrand.xforms :as x]
             [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp)]
             [gov.nist.sinet.util :as util :refer (app-info)]))
 
@@ -21,12 +22,13 @@
         (job-map ?log)
         (scada-patterns ?log)
         (exceptional-msgs ?log)
-        (assoc ?log :job-ids (-> ?log :job-map keys))
+        (assoc ?log :job-ids (-> ?log :job-map keys sort vec))
         (assoc ?log :machines (->> ?log
                                    rand-job-trace 
                                    (map :m)
                                    (filter identity)
-                                   set))))))
+                                   set))
+        (buffer-discipline ?log)))))
 
 (s/def ::act keyword?)
 (s/def ::mjpact keyword?)
@@ -67,7 +69,7 @@
   []
   (-> (util/app-info) :problem :scada-log :raw))
 
-(defn job-trace ; POD Something like this belongs in the reworked scada.clj. 
+(defn job-trace 
   "Return all mentions of the job."
   [log job-id]
   (when-let [jcover (get (:job-map log) job-id)]
@@ -252,3 +254,72 @@
                           ?jmap
                           (keys ?jmap)))]
     (assoc log :job-map job-map)))
+
+;;;==============================
+;;; log-only BAS/BBS analysis 
+;;; POD More filtering would be necessary were the machine to generate messages while working.
+;;;==============================
+;;; Once warmed-up, a reliable machine BAS follows this cycle:
+;;; {:clk    5.6000 :act :m1-blocked        :m :m1 :mjpact :bl :line 5}
+;;; {:clk    6.8000 :act :m2-complete-job   :m :m2 :mjpact :ej :ent 1.6 :j 3 :line 6}
+;;; {:clk    6.8000 :act :m2-start-job      :m :m2 :mjpact :sm :bf :b1 :n 1 :j 4 :line 7}
+;;; {:clk    6.8000 :act :m1-unblocked      :m :m1 :mjpact :ub :line 8}
+;;; {:clk    6.8000 :act :m1-complete-job   :m :m1 :mjpact :bj :bf :b1 :n 0 :j 5 :line 9}
+;;; {:clk    6.8000 :act :m1-start-job      :m :m1 :mjpact :aj :jt :jobType1 :ends 7.6 :j 6 :line 10}
+
+;;; Key here is (..., m1-start-job, m1-block, m1-unblock, m1-complete-job, ...)
+(defn count-bas-pattern 
+  "Counts the number of machine process cycles of log that 
+   reflect a block-after-service discipline."
+  [raw m]
+  (transduce
+   (comp (filter #(= m (:m %)))
+         (map :mjpact) 
+         (remove #(#{:st :us} %))
+         (partition-by #(#{:aj :sm} %))     ; stateful
+         (remove #(#{'(:sm) '(:aj)} %))
+         (filter #(and (= :bl (nth % 0))
+                       (= :ub (nth % 1))
+                       (= :bj (nth % 2))))
+         x/count)
+   +
+   raw))
+
+;;; Once warmed-up, a reliable machine BBS follows this cycle:
+;;; {:clk    4.8000 :act :m2-complete-job   :m :m2 :mjpact :ej :ent 0.8 :j 2 :line 14}
+;;; {:clk    4.8000 :act :m2-start-job      :m :m2 :mjpact :sm :bf :b1 :n 1 :j 3 :line 15}
+;;; {:clk    4.8000 :act :m1-unblocked      :m :m1 :mjpact :ub :line 16}
+;;; {:clk    4.8000 :act :m1-start-job      :m :m1 :mjpact :aj :jt :jobType1 :ends 5.6 :j 4 :line 17}
+;;; {:clk    5.6000 :act :m1-complete-job   :m :m1 :mjpact :bj :bf :b1 :n 0 :j 4 :line 18}
+;;; {:clk    5.6000 :act :m1-blocked        :m :m1 :mjpact :bl :line 19}
+
+;;; Key here is (..., m1-unblock, m1-start-job, m1-complete-job, ...)
+
+(defn count-bbs-pattern 
+  "Counts the number of machine process cycles of log 
+   that reflect a block-before-service discipline."
+  [raw m]
+  (transduce
+   (comp (filter #(= m (:m %)))
+         (map :mjpact) 
+         (remove #(#{:st :us} %))
+         (partition-by #(= % :ub))  ; stateful
+         (remove #(= % '(:ub)))
+         (filter #(and (#{:aj :sm} (first  %))
+                       (= :bj      (second %))))
+         x/count)
+   +
+   raw))
+
+(defn buffer-discipline
+  "Add a :discpline map to the log, describing the evidence for 
+   BBS and BAS of each machine in the system. e.g. {:m1 {:bbs 220 :bas 0}...}"
+  [log]
+  (let [raw (:raw log)]
+    (assoc log :discipline
+           (reduce (fn [res m]
+                     (-> res
+                         (assoc m {:bas (count-bas-pattern raw m)
+                                   :bbs (count-bbs-pattern raw m)})))
+                   {}
+                   (:machines log)))))

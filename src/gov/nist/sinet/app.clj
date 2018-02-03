@@ -20,7 +20,7 @@
    [:swap-priority           1/10]])
 
 (def gp-params
-  (atom
+  (ref
    {:pn-elements [:place :token :normal-arc :inhibitor-arc :expo-trans #_:immediate-trans #_:fixed-trans]
     :pop-size 25          ; 100 pre-except
     :aqpn-warm-up 5       ; Ignore this number of tokens on both ends of the log.
@@ -45,7 +45,7 @@
     :mutation-dist mutation-dist}))
 
 (def problem
-  (atom ; :scada-log will be computed in app-start-body
+  (ref ; :scada-log will be computed in app-start-body
    {:keep-vs-ignore 0.8 
     :scada-data-file "data/SCADA-logs/scada-3m-2j-third-out.clj"
     #_"data/SCADA-logs/m2-j1-n3-block-mild-out.clj"      
@@ -79,7 +79,7 @@
 (s/def ::gp-system (s/keys :req-un [::evolve-chan]))
 (s/def ::app (s/keys :req-un [::gp-system]))
 
-;;; Start and stop will reset the component to what is returned here. Thus I use atoms
+;;; Start and stop will reset the component to what is returned here. Thus I use refs
 ;;; for things that I want to change and I do not reload this file on reset.
 ;;; See use of (nsp/disable-reload! (find-ns 'gov.nist.sinet.app)) in util.clj.
 (defrecord App [ws-connection]

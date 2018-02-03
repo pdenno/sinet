@@ -7,33 +7,34 @@
   :dependencies [[org.clojure/clojure            "1.9.0"]
                  [org.clojure/clojurescript      "1.9.946"]
                  [org.clojure/tools.trace        "0.7.9"]
-                 [org.clojure/core.async         "0.4.474"]
+                 [org.clojure/core.async         "0.4.474"       :exclusions [org.clojure/data.priority-map]]
                  [com.cemerick/piggieback        "0.2.2"]
                  [com.stuartsierra/component     "0.3.2"]
                  [environ                        "1.1.0"]
                  [ch.qos.logback/logback-classic "1.2.3"] 
                  [org.clojure/tools.logging      "0.4.0"]
+                 [net.cgrand/xforms              "0.16.0"]
                  
                  [ring                           "1.6.3"]
                  [ring/ring-defaults             "0.3.1"]
                  [compojure                      "1.6.0"]
                  [http-kit                       "2.2.0"]
 
-                 [com.taoensso/sente             "1.11.0-POD"] ; POD
+                 [com.taoensso/sente             "1.11.0-POD"    :exclusions [org.clojure/data.priority-map]]
 
                  [reagent                        "0.7.0"]
                  [reagent-forms                  "0.5.35"]
                  [re-frame                       "0.10.2"] 
-                 [re-frisk                       "0.5.3"] 
-                 [org.webjars/bootstrap          "3.3.7" #_"4.0.0-beta.3"] ; 4 beta breaks things, no webjar for 4.0
+                 [re-frisk                       "0.5.3"         :exclusions [org.clojure/data.priority-map]] 
+                 [org.webjars/bootstrap          "3.3.7"] ; 4 beta breaks things, no webjar for 4.0
                  [quil                           "2.6.0"]
 
                  [datawalk                       "0.1.12"]
 
                  [aysylu/loom                    "1.0.0"]
-                 [pdenno/utils4pmap              "0.1.0"]
+                 [pdenno/utils4pmap              "0.1.0"          :exclusions [org.clojure/data.priority-map]]
                  [pdenno/pn-draw                 "0.1.0-SNAPSHOT"]
-                 [gov.nist/spntools              "0.1.0-SNAPSHOT"]]
+                 [gov.nist/spntools              "0.1.0"]]
 
   :plugins [[lein-figwheel  "0.5.14"]
             [lein-cljsbuild "1.1.4"]]
@@ -56,10 +57,10 @@
   :profiles {:dev-config {}
              ;; There is a user.clj in dev/. By design of clojure, it gets loaded if it on the path...
              :dev [:dev-config ; This pattern of use from rente. 
-                   {:dependencies [[org.clojure/tools.namespace "0.2.10"]
-                                   [com.cemerick/piggieback "0.2.2"] 
-                                   [figwheel "0.5.14"]
-                                   [figwheel-sidecar "0.5.14"]]
+                   {:dependencies [[org.clojure/tools.namespace "0.2.10" :exclusions [org.clojure/data.priority-map]]
+                                   [com.cemerick/piggieback     "0.2.2"] 
+                                   [figwheel                    "0.5.14" :exclusions [org.clojure/data.priority-map]]
+                                   [figwheel-sidecar            "0.5.14" :exclusions [org.clojure/data.priority-map]]]
                     :repl-options {:nrepl-middleware [cemerick.piggieback/wrap-cljs-repl]}
                     :plugins [[lein-figwheel "0.5.14"]
                               [lein-environ "1.0.1"]]
@@ -81,7 +82,10 @@
                     {:builds 
                      {:client {:compiler {:optimizations :advanced
                                           :elide-asserts true
-                                          :pretty-print false}}}}}}
+                                          :pretty-print false}}}}}
+             :1.8 {:dependencies [[org.clojure/clojure "1.8.0"]]}
+             :1.9 {:dependencies [[org.clojure/clojure "1.9.0"]]}}
   :aliases  {"start-repl" ["do" "clean," "cljsbuild" "once," "repl" ":headless"]
+             "test-all"   ["with-profile" "default" #_"default:+1.8:+1.9" "test"] ; POD lein test would be enough.
              "start"      ["do" "clean," "cljsbuild" "once," "run"]
              "package"    ["with-profile" "prod" "do" "clean" ["cljsbuild" "once"]]})

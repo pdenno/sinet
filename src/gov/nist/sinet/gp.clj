@@ -467,9 +467,9 @@
                            (map :name (:transitions pn)))]
     (if (not-empty candidates)
       (let [trans (rand-nth candidates)
-            patom (atom (pnu/arcs-outof pn trans))
-            arc1 (util/pick-from-atom! patom)
-            arc2 (util/pick-from-atom! patom)
+            pref (ref (pnu/arcs-outof pn trans))
+            arc1 (util/pick-from-ref! pref)
+            arc2 (util/pick-from-ref! pref)
             p1 (:priority arc1)
             p2 (:priority arc2)]
         (-> inv
@@ -611,8 +611,8 @@
             (assoc :reason :timeout-secs)),
         :else world))
 
-(def the-promise (atom nil))
-(def the-future  (atom nil))
+(def the-promise (ref nil))
+(def the-future  (ref nil))
 
 (defn evolve-init
   "Set up world map and initial population."
@@ -671,9 +671,9 @@
   (if @the-future
     (do (println "Ignoring second continue.") world)
     (do (println "Starting future for evolve-continue")
-        (reset! the-promise (promise))
-        (reset! the-future
-                (future (evolve-continue world @the-promise)))
+        (dosync (ref-set the-promise (promise)))
+        (dosync (ref-set the-future
+                         (future (evolve-continue world @the-promise))))
         (future ; This is a last resort timeout method; see also evolve-success?
           (let [result (deref @the-promise ; yes, 'double deref'
                               (* 1000 (-> (app-info) :gp-params :timeout-secs))
@@ -704,8 +704,8 @@
                           (evolve-continue-start world)
 
                           (= msg "pause")      ; continue-evolve will have delivered it.
-                          (do (reset! the-future nil)
-                              (deref @the-promise))
+                          (dosync (ref-set the-future nil)
+                                  (deref @the-promise))
 
                           (= msg "report now!")
                           (do (println "world = " world)
@@ -713,18 +713,18 @@
                               world)
 
                           (= msg "success")
-                          (do (println "success!")
-                              (reset! the-future nil)
-                              (deref @the-promise))
+                          (dosync (println "success!")
+                                  (ref-set the-future nil)
+                                  (deref @the-promise))
 
                           (= msg "abort")
-                          (do (println "aborting...")
-                              (when (future? @the-future)
-                                (future-cancel @the-future)) ; 2017-12-07 uncommented
-                              (reset! the-future nil)
-                              ;(reset! diag {:world world})
-                              (reset! the-promise nil)
-                              world))]
+                          (dosync (println "aborting...")
+                                  (when (future? @the-future)
+                                    (future-cancel @the-future)) ; 2017-12-07 uncommented
+                                  (ref-set the-future nil)
+                                        ;(reset! diag {:world world})
+                                  (ref-set the-promise nil)
+                                  world))]
           (s/assert ::world world)
           (recur world))))))
 
@@ -779,13 +779,13 @@
 ;;;=========================================================================
 ;;; Diagnostics
 ;;;=========================================================================
-(def diag-all-inv (atom {}))
+(def diag-all-inv (ref {}))
 (defn diag-record-inv [inv]
   "Keep a map of EVERY Inv, check that it has a legit PN."
   (if *debugging*
     (let [inv (assoc inv :id (util/uuid))
           errors (pnu/validate-pn (:pn inv))]
-      (swap! diag-all-inv #(assoc % (:id inv) inv))
+      (dosync (alter diag-all-inv #(assoc % (:id inv) inv)))
       (when-not (empty? errors)
         (throw (ex-info "Bad PN" {:id (:id inv) :errors errors})))
       inv)
@@ -796,7 +796,7 @@
   "Run the GP in diagnostic mode from the REPL. A very useful function!"
   []
   (binding [*debugging* false] ;<===== Whether or not to save every individual
-    (reset! diag-all-inv {})
+    (dosync (ref-set diag-all-inv {}))
     (>!! (util/evolve-chan) "init")
     (>!! (util/evolve-chan) "continue")))
 
