@@ -27,7 +27,7 @@
     
     :max-gens 30           ; These three control how long gp runs.  
     :success-threshold 0.15
-    :timeout-secs 15
+    :timeout-secs 60
     
     :favor-smaller-pn? false
     :debugging? true
@@ -47,7 +47,8 @@
 (def problem
   (ref ; :scada-log will be computed in app-start-body
    {:keep-vs-ignore 0.8 
-    :scada-data-file "data/SCADA-logs/scada-3m-2j-third-out.clj"
+    :scada-data-file "data/SCADA-logs/m3-bbs-bas-out.clj"
+    #_"data/SCADA-logs/scada-3m-2j-third-out.clj"
     #_"data/SCADA-logs/m2-j1-n3-block-mild-out.clj"      
     #_"data/SCADA-logs/m2-j1-n3-block-out.clj"
     #_"data/SCADA-logs/scada-m2-j1-starve-m2-out.clj" ;"scada-f0-imbalanced.clj"

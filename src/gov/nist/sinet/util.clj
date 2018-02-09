@@ -2,12 +2,12 @@
   "General sorts of things needed in several places in the sinet project."
   {:author "Peter Denno"}
   (:require [clojure.pprint :refer (cl-format pprint pp)]
-            [clojure.core.async :as async :refer [>! <! >!! <!! go-loop chan close!]]
             [clojure.spec.alpha :as s]
             [clojure.tools.namespace.repl :as nsp]
             [clojure.math.combinatorics :as combo]
-            [clojure.core.async :as async :refer [chan alts!! go timeout >!]]
-            [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp pn-ok-> as-pn-ok->)]))
+            [clojure.core.async :as async :refer [>!!]]
+            [gov.nist.spntools.utils :as pnu :refer (ppprint ppp)]
+            [gov.nist.spntools.reach :as pnr]))
 
 (def ^:private diag (atom nil))
 
@@ -24,17 +24,20 @@
 
 (def failed-evolve "An individual that had an exception in fitness code." (atom nil))
 
+(def ^:dynamic *debugging* nil)
+
 (defmacro handling-evolve [[data] & body]
   (let [e# nil]
-    `(if (not @failed-evolve)
-       (try
-         ~@body
-         (catch Exception e#
-           (reset! failed-evolve {:exception e# :data ~data})
-           (>!! (evolve-chan) "abort")))
-       (throw (ex-info "handling-evolve " {:exception @failed-evolve})))))
+    `(if *debugging*
+       (do ~@body)
+       (if (not @failed-evolve)
+         (try
+           ~@body
+           (catch Exception e#
+             (reset! failed-evolve {:exception e# :data ~data})
+             (>!! (evolve-chan) "abort")))
+         (throw (ex-info "handling-evolve " {:exception @failed-evolve}))))))
 
-; (set-param! [:app :foobar] :baz)
 (defn set-param!
   "The way into the app for writing."
   [path value]
@@ -90,13 +93,6 @@
 
 (defn uuid [] (.toString (java.util.UUID/randomUUID)))
 
-(def ^:dynamic *debugging* false)
-
-(defn when-debugging
-  [& body]
-  `(when *debugging*
-     @body))
-
 (defn pick-from-ref!
   "Randomly remove one element from the atom and return it."
   [pref]
@@ -116,8 +112,8 @@
 
 (defn print-inv [p writer]
   (.write writer (cl-format nil "#Inv [dis=~A,exc=~A]"
-                            (if (number? (:disorder p)) 
-                              (cl-format nil "~5,2F" (:disorder p))
+                            (if (number? (:discipline p)) 
+                              (cl-format nil "~5,2F" (:discipline p))
                               :NA)
                             (if (number? (:except p)) 
                               (cl-format nil "~5,2F" (:except p))
@@ -141,6 +137,30 @@
                         (* dif dif)))
                     v)))))
 
+(defn one-in-one-out?
+  "Return true if the transition (name) has exactly one 
+   inbound arc and exactly one outbound arc. "
+  [pn trans]
+  (let [arcs (:arcs pn)]
+    (and (== 1 (count (filter #(= trans (:source %)) arcs)))
+         (== 1 (count (filter #(= trans (:target %)) arcs))))))
+
+(defn pn-priority-valid?
+  "Return true if for every transition of the PN either:
+   (1) the transition is 1-in-1-out, or
+   (2) where multiple outbound arcs are connected to the 
+       transition they each have a distinct priority."
+  [pn]
+  (let [arcs (:arcs pn)]
+    (every? (fn [trans]
+              (or (one-in-one-out? pn trans)
+                  (let [outbound (filter #(= trans (:source %)) arcs)
+                        priors   (map :priority outbound)]
+                    (or (<= (count priors) 1)
+                        (and (every? number? priors)
+                             (apply distinct? priors))))))
+            (map :name (:transitions pn)))))
+
 ;;;========= These are PNs extended from spntools for use in sinet.  =========
 (s/def ::clk number?)
 (s/def ::line number?)
@@ -163,7 +183,8 @@
 (s/def ::transitions (s/and ::pnu/transitions (s/coll-of ::transition)))
 (s/def ::arcs        (s/and ::pnu/arcs        (s/coll-of ::arc)))
 (s/def ::gppn (s/and ::pnu/pn
-                     (s/keys :req-un [::places ::transitions ::arcs])))
+                     (s/keys :req-un [::places ::transitions ::arcs])
+                     pn-priority-valid?))
 
 (defn check-pn
   "clojure.spec check the pn."
@@ -369,6 +390,18 @@
   (dissoc pn :trans-counts :matched :sigma :winners :distance-fn
           :k-limited? :pdf-fns :rgraph :msg :msg-table :loom-prob))
        
+(defn reasonably-marked-pn
+  "Set PN marking so that things that look like machines have a state."
+  [pn]
+    (let [pn (pnr/renumber-pids pn)
+          r-places (atom (related-places pn))
+          imark (reduce (fn [mark place] ; this generates one of several possibilities. 
+                          (if-let [machine (some #(when (contains? (% @r-places) place) %)
+                                                 (keys @r-places))]
+                            (do (swap! r-places dissoc machine)
+                                (conj mark 1))
+                            (conj mark 0)))
+                        []
+                        (:marking-key pn))]
+      (pnu/set-marking pn imark)))
 
-
-  

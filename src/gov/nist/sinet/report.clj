@@ -4,8 +4,7 @@
   (:require [clojure.tools.logging :as log] ; POD hardly used!
             [clojure.pprint :refer (cl-format pprint)]
             [clojure.core.async :as async :refer [>! <! >!! <!! go-loop chan]]
-            [gov.nist.spntools.core :as pn :refer :all]
-            [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp pn-ok-> as-pn-ok->)]
+            [gov.nist.spntools.utils :as pnu :refer (ppprint ppp pn-ok-> as-pn-ok->)]
             [gov.nist.sinet.util :as util :refer (app-info gp-param *debugging*)]
             [gov.nist.sinet.ws :as ws]))
 

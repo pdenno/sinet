@@ -117,7 +117,7 @@
 (defn quil-pn []
   (let [pn @(rf/subscribe [:pn])]
     (when (contains? pn :places)
-      (reset! pnd/+display-pn+ (pnd/pn-geom pn @pnd/+display-pn+))
+      (reset! pnd/the-pn (pnd/pn-geom pn @pnd/the-pn))
       (draw-it))
     [:canvas {:id "best-pn"}]))
 
@@ -132,7 +132,7 @@
     [:div {:class "container"}
      [:div {:class "row"} [:strong "GP Control"]]
      [:div {:class "row"} "Viewing PN (order): " pn-id]
-     [:div {:class "row"} "Error: " (pretty-val (:err @pnd/+display-pn+))]
+     [:div {:class "row"} "Error: " (pretty-val (:err @pnd/the-pn))]
      [:div {:class "row"}
       [:div {:class "btn-group btn-group-sm"}
        [:button {:class "btn btn-primary" :style {:background-color "#CC0066"}
@@ -199,8 +199,8 @@
     :draw pnd/draw-pn
     :mouse-wheel pnd/pn-wheel-fn
     ;; POD I need a solution for getting it here! 
-    :size [(-> pnd/graph-window-params :window-size :length)
-           (-> pnd/graph-window-params :window-size :height)]))
+    :size [(-> pnd/params :window-length)
+           (-> pnd/params :window-height)]))
 
 ;;; Loughborough Purple:  Pantone 269 C #472267 (71,51,103), Websafe, #330066 
 ;;; Loughborough Magenta: Pantone 220 C #8F004F (143,0,79)   Websafe, #CC0066

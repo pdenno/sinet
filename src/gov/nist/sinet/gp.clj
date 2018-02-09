@@ -6,12 +6,9 @@
             [clojure.core.async :as async :refer [>! <! >!! <!! go-loop chan close!]]
             [clojure.spec.alpha :as s]
             [pdenno.utils4pmap :as u4pmap]
-            [gov.nist.spntools.core :as pn :refer :all]
-            [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp pn-ok-> as-pn-ok->)]
-            [gov.nist.spntools.util.reach :as pnr :refer (reachability)]
-            [gov.nist.spntools.util.pnml :as pnml :refer (read-pnml)] ;  POD clean this up
+            [gov.nist.spntools.utils :as pnu :refer (ppprint ppp pn-ok-> as-pn-ok->)]
+            [gov.nist.spntools.reach :as pnr]
             [gov.nist.sinet.util :as util :refer (log app-info map->Inv gp-param pr-param VARS *debugging* handling-evolve)]
-            [gov.nist.sinet.simulate :as sim :refer (simulate)]
             [gov.nist.sinet.fitness :as fit :refer (exceptional-fitness)]
             [gov.nist.sinet.scada :as scada]
             [gov.nist.sinet.ws :as ws]
@@ -163,20 +160,23 @@
 (defn add-flow-priority-trans
   "Update PN to assign flow priorities to arcs out of the transitions that do not yet have one."
   [pn trans]
-  (let [aout (pnu/arcs-outof pn trans)
-        priorities (map :priority aout) ; existing priorities (includes nils)
-        have-priority (filter identity priorities) ; no nils.
-        max-priority (if (empty? have-priority) 0 (apply max have-priority)) ; current max.
-        num-needed (count (remove identity priorities)) ; number that need a priority
-        pick-plan (map #(+ % max-priority 1) (util/random-index num-needed))
-        pick-map (zipmap pick-plan (map :name (remove :priority aout)))]
-    (update pn :arcs
-            (fn [arcs]
-              (vec
-               (reduce (fn [arcs [priority aname]]
-                         (assoc-in (vec arcs) [(pnu/arc-index pn aname) :priority] priority))
-                       arcs
-                       pick-map))))))
+  (as-> pn ?pn
+    (if (util/one-in-one-out? ?pn trans)
+      pn
+      (let [aout (pnu/arcs-outof pn trans)
+            priorities (map :priority aout) ; existing priorities (includes nils)
+            have-priority (filter identity priorities) ; no nils.
+            max-priority (if (empty? have-priority) 0 (apply max have-priority)) ; current max.
+            num-needed (count (remove identity priorities)) ; number that need a priority
+            pick-plan (map #(+ % max-priority 1) (util/random-index num-needed))
+            pick-map (zipmap pick-plan (map :name (remove :priority aout)))]
+        (update pn :arcs
+                (fn [arcs]
+                  (vec
+                   (reduce (fn [arcs [priority aname]]
+                             (assoc-in (vec arcs) [(pnu/arc-index pn aname) :priority] priority))
+                           arcs
+                           pick-map))))))))
 
 (defn add-flow-priorities
   "Assign flow priorities to all arcs outbound from a transition."
@@ -366,7 +366,9 @@
           true (pnu/add-pn waiting)
           true (pnu/add-pn end-to-waiting)
           true (pnu/add-pn waiting-to-start)
-          (not (util/next-machine pn m1)) (remove-wrap-places m1 m2))
+          (not (util/next-machine pn m1)) (remove-wrap-places m1 m2)
+          true add-flow-priorities
+          true util/reasonably-marked-pn)
       (throw (ex-info "Couldn't find pieces for add-buffer" {:pn pn :m1 m1 :m2 m2})))))
 
 (defn remove-wrap-places
@@ -529,7 +531,8 @@
         (assoc ?i :disorder nil)
         (assoc ?i :except nil)
         (fit/exceptional-fitness ?i log)
-        (assoc ?i :err (:except ?i)#_(+ (:disorder ?i) (:except ?i)))))))
+        (fit/discipline-fitness ?i log)
+        (assoc ?i :err (+ (:except ?i) (:discipline ?i)))))))
 
 (def diag-timeouts (atom []))
 
@@ -561,9 +564,9 @@
          (apply min (repeatedly tournament-size #(rand-int size))))))
 
 (defn reset-spntools! []
-  (reset! pnr/+k-bounded+ (gp-param :pn-k-bounded))
-  (reset! pnr/+max-rs+    (gp-param :pn-max-rs))
-  (reset! pn/+max-states+ (gp-param :pn-max-states))
+;  (reset! pnr/+k-bounded+ (gp-param :pn-k-bounded))  ; these 
+;  (reset! pnr/+max-rs+    (gp-param :pn-max-rs))     ; are 
+;  (reset! pn/+max-states+ (gp-param :pn-max-states)) ; gspn
   (pnu/reset-ids! {}))
 
 (defn reset-all! []
@@ -732,25 +735,26 @@
   "Run the program without async and GUI"
   []
   (reset-all!)
-  (let [world (as-> {} ?w
-                (assoc ?w :gen 0)
-                (assoc ?w :state :init)
-                (assoc ?w :start-time (System/currentTimeMillis))
-                (assoc ?w :pop (initial-pop (gp-param :pop-size))))]
-    (update-pop! (:pop world))
-    (loop [w world]
-      (println "evolve-continue-loop, gen = " (:gen w) "...")
-      (rep/pop-stats w)
-      (as-> w ?w
-        (assoc  ?w :state :running)
-        (update ?w :pop #(sort-by-error %))
-        (do (update-pop! (:pop ?w)) ?w)
-        (update ?w :gen inc)
-        (evolve-success? ?w)
-        (rep/report-gen ?w)
-        (cond (= (:state ?w) :failure) ?w
-              (= (:state ?w) :success) ?w
-              :else (recur (make-next-gen ?w)))))))
+  (binding [*debugging* {}] ; basic debugging
+    (let [world (as-> {} ?w
+                  (assoc ?w :gen 0)
+                  (assoc ?w :state :init)
+                  (assoc ?w :start-time (System/currentTimeMillis))
+                  (assoc ?w :pop (initial-pop (gp-param :pop-size))))]
+      (update-pop! (:pop world))
+      (loop [w world]
+        (println "evolve-continue-loop, gen = " (:gen w) "...")
+        (rep/pop-stats w)
+        (as-> w ?w
+          (assoc  ?w :state :running)
+          (update ?w :pop #(sort-by-error %))
+          (do (update-pop! (:pop ?w)) ?w)
+          (update ?w :gen inc)
+          (evolve-success? ?w)
+          (rep/report-gen ?w)
+          (cond (= (:state ?w) :failure) ?w
+                (= (:state ?w) :success) ?w
+                :else (recur (make-next-gen ?w))))))))
 
 (defn diag-i-error
   []
@@ -782,9 +786,10 @@
 (def diag-all-inv (ref {}))
 (defn diag-record-inv [inv]
   "Keep a map of EVERY Inv, check that it has a legit PN."
-  (if *debugging*
+  (if (:save-invs? *debugging*)
     (let [inv (assoc inv :id (util/uuid))
-          errors (pnu/validate-pn (:pn inv))]
+          ;; pnu/validate-pn requires arcs-into/out-of trans >= 1. 
+          errors [] #_(pnu/validate-pn (:pn inv))] 
       (dosync (alter diag-all-inv #(assoc % (:id inv) inv)))
       (when-not (empty? errors)
         (throw (ex-info "Bad PN" {:id (:id inv) :errors errors})))
@@ -792,26 +797,14 @@
     inv))
 
 ;;; To stop it: (>!! (util/evolve-chan) "abort")
+;;; Alternative is (diag-simple-evolve)
 (defn diag-run
   "Run the GP in diagnostic mode from the REPL. A very useful function!"
   []
-  (binding [*debugging* false] ;<===== Whether or not to save every individual
+  (binding [*debugging* nil] ;<===== {:save-invs? true} to save every individual
     (dosync (ref-set diag-all-inv {}))
     (>!! (util/evolve-chan) "init")
     (>!! (util/evolve-chan) "continue")))
-
-(defn diag-sim
-  "Simulate some steps on the best Inv."
-  ([] (diag-sim 20))
-  ([nsteps]
-   (-> (app-info)
-       :pop
-       first
-       :pn
-       (sim/simulate :max-steps nsteps)
-       :sim
-       :log
-       ppprint)))
 
 (defn diag-scada-patterns
   "pprint the scada-patterns."
@@ -824,7 +817,9 @@
 
 (defn diag-push-inv [inv]
   "Push an individual to the web client for viewing"
-  (rep/push-inv inv))
+  (-> inv
+      (update :pn util/reasonably-marked-pn)
+      rep/push-inv))
 
 (defn diag-write-inv
   "Write an Inv so that it is readable."
@@ -847,7 +842,6 @@
       (doseq [x (-> (app-info) :pop)] (diag-write-inv x))
       (println "])"))))
 
-;;;(diag-force-priority (:pn eee) [{:source :m1-start-job, :target :buffer :priority 2}])
 (defn diag-force-priority
   "Set PN priority as indicated by the argument. Anything not specified has priority=1."
   [pn priority-maps]
@@ -886,7 +880,7 @@
 (defn diag-inject-pn2
   "Read the PN and insert it in the population, replacing the individual specified."
   [fname ix priorities]
-  (let [pn (-> (pnml/read-pnml fname)
+  (let [pn (-> (load-file fname)
                add-color-binding
                (diag-force-priority priorities))]
     (update-pop!

@@ -2,27 +2,23 @@
   "Compute the fitness of an individual"
   (:require [clojure.spec.alpha :as s]
             [clojure.pprint :refer (cl-format pprint print-table)]
-            [clojure.core.async :as async :refer [>! <! >!! <!! go-loop chan close!]]
             [clojure.set :as set]
             [clojure.math.combinatorics :as combo]
             [loom.alg :as alg]
             [loom.graph :as graph]
-            [gov.nist.spntools.core :as pn :refer :all]
-            [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp)]
-            [gov.nist.spntools.util.reach :as pnr :refer (reachability renumber-pids)]
-            [gov.nist.sinet.simulate :as sim :refer-only (simulate)]
-            [gov.nist.sinet.util :as util :refer (*debugging* app-info reset
-                                                  related-places handling-evolve map->Inv)]
+            [gov.nist.spntools.utils :as pnu :refer (ppprint ppp)]
+            [gov.nist.spntools.reach :as pnr]
+            [gov.nist.sinet.util :as util :refer (*debugging* app-info map->Inv)]
             [gov.nist.sinet.scada :as scada]
-            [gov.nist.sinet.pnn :as pnn]
-            [gov.nist.sinet.report :as rep]))
+            [gov.nist.sinet.pnn :as pnn]))
 
-(defn aliases []
+(defn aliases [] ; POD temporary
   (alias 'fit  'gov.nist.sinet.fitness)
-  (alias 'fitt 'gov.nist.sinet.fitness-test) ; POD temporary
-  (alias 'gp   'gov.nist.sinet.gp))          ; POD temporary
+  (alias 'fitt 'gov.nist.sinet.fitness-test) 
+  (alias 'gp   'gov.nist.sinet.gp)         
+  (alias 'gpt  'gov.nist.sinet.gp-test))
 
-(declare contemp-msgs next-time-line reasonably-marked-pn lax-reach max-marks full-interp? max-marks)
+(declare contemp-msgs next-time-line lax-reach max-marks full-interp? max-marks)
 (declare interp-possible? act2trans rgraph2loom-steps buffers-to-constrain constrain-buffer-size)
 
 (def ^:private diag (atom nil))
@@ -375,21 +371,6 @@
            (-> (loop-fn dec #(< % 0)) rest reverse vec)
            (loop-fn inc #(> % max-line)))))))
 
-(defn reasonably-marked-pn
-  "Set PN marking so that things that look like machines have a state."
-  [pn]
-    (let [pn (pnr/renumber-pids pn)
-          r-places (atom (util/related-places pn))
-          imark (reduce (fn [mark place] ; this generates one of several possibilities. 
-                          (if-let [machine (some #(when (contains? (% @r-places) place) %)
-                                                 (keys @r-places))]
-                            (do (swap! r-places dissoc machine)
-                                (conj mark 1))
-                            (conj mark 0)))
-                        []
-                        (:marking-key pn))]
-      (pnu/set-marking pn imark)))
-
 ;;; POD For all combos, replace vals in r-places with index in marking, then choose one from each set (combinatorial)
 ;;;     Replace those values with 1s, all other values in marking key are zeros.
 ;;;     Using all possibilities, choose the rgraph that has most states.
@@ -400,7 +381,7 @@
    Return the pn with an artificially k-bounded :rgraph associated with this marking."
   [pn max-k]
     (as-> pn ?pn 
-      (reasonably-marked-pn ?pn) 
+      (util/reasonably-marked-pn ?pn) 
       (assoc ?pn :rgraph (pnr/simple-reach ?pn (max-marks ?pn max-k))) ; packed
       (assoc ?pn :k-limited? (-> ?pn :rgraph :k-limited?)) ; unpack
       (assoc ?pn :rgraph (-> ?pn :rgraph :rgraph vec))     ; unpack 
@@ -600,8 +581,8 @@
   "Return the Inv with an :except value assessing how well the individual addresses 
    exceptional circumstances (blocking and starvation)."
   [inv log]
-  (handling-evolve [inv]
-    (let [pn  (as-> (find-interp (:pn inv) log) ?pn
+  ;; handling-evolve [inv] POD removed
+  (let [pn  (as-> (find-interp (:pn inv) log) ?pn
                 (assoc  ?pn :msg-table (compute-msg-table ?pn log))
                 (assoc  ?pn :trans-counts (trans-counts (:interp ?pn)))
                 (dissoc ?pn :interp)
@@ -625,7 +606,7 @@
                            (not-empty (:trans-count pn)) 0.5
                            (not-empty (:winners pn))     0.1
                            true                          1.0))
-          (assoc :pn pn)))))
+          (assoc :pn pn))))
 
 ;;;==================== Distance Measures for PNN =========================
 (defn euclid-dist
@@ -710,7 +691,7 @@
       ;;(Math/sqrt (* path-cost (pnn/euclid-dist2 xn yn))) ; POD Better, but what it it?
       (* path-cost (euclid-dist xn yn)))))
 
-;;; POD BBS NYI
+;;; POD I don't think BAS/BBS matters. 
 (defn constrain-buffer-size
   "Return a PN where the buffer cannot exceed size N.
    This involves adding an inhibitor arc of multiplicity N to either
@@ -748,3 +729,61 @@
             []
             blocking)))
 
+;;;==========================================================
+;;; buffering discipline fitness
+;;;==========================================================
+(defn bbs?
+  "Returns true if there is an arc present on machine m providing 
+   block-before-service behavior."
+  [pn m]
+  (let [src (some #(when (and (= (-> % :rep :mjpact) :bj)
+                              (= (-> % :rep :m) m)) (:name %))
+                  (:transitions pn))
+        tar (first (util/buffers-between pn m (util/next-machine pn m)))]
+    (some #(when (and (= src (:source %))
+                      (= tar (:target %)))
+             (:name %))
+          (:arcs pn))))
+
+(defn bas?
+  "Returns true if there is an arc present on machine m providing 
+   block-after-service behavior."
+  [pn m]
+  (let [src (some #(when (and (#{:aj :sm} (-> % :rep :mjpact))
+                              (= (-> % :rep :m) m)) (:name %))
+                  (:transitions pn))
+        tar (first (util/buffers-between pn m (util/next-machine pn m)))]
+    (some #(when (and (= src (:source %))
+                      (= tar (:target %)))
+             (:name %))
+          (:arcs pn))))
+
+(defn discipline-fitness
+  "Assess and set the :discpline fitness of the individual.
+   Penalized 1 point for every wrongly configured machine, though 
+   weighted by how strongly the log looks BAS/BBS on that machine."
+  [inv log]
+  (let [pn (:pn inv)
+        disc (:discipline log)
+        score (reduce (fn [score m]
+                        (let [bas-cnt (-> disc m :bas)
+                              bbs-cnt (-> disc m :bbs)]
+                          (if (and (== 0 bas-cnt)
+                                   (== 0 bbs-cnt))
+                            score
+                            (let [bas-w (/ bas-cnt (+ bas-cnt bbs-cnt))
+                                  bbs-w (/ bbs-cnt (+ bas-cnt bbs-cnt))
+                                  is-bas (if (bas? pn m) 1 0)
+                                  is-bbs (if (bbs? pn m) 1 0)]
+                              (+ score (* bas-w is-bbs) (* bbs-w is-bas))))))
+                      0
+                      (:machines log))]
+    (assoc inv :discipline score)))
+    
+
+  
+
+
+
+
+  

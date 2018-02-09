@@ -4,7 +4,7 @@
             [clojure.core.async :as async]
             [taoensso.sente.server-adapters.http-kit :as sente-http]
             [taoensso.sente :as sente]
-            [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp)]))
+            [gov.nist.spntools.utils :as pnu :refer (ppprint ppp)]))
 
 (def ping-counts (atom 0))
 

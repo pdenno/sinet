@@ -5,11 +5,12 @@
             [clojure.pprint :refer (cl-format pprint)]
             [clojure.edn :as edn]
             [net.cgrand.xforms :as x]
-            [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp)]
+            [gov.nist.spntools.utils :as pnu :refer (ppprint ppp)]
             [gov.nist.sinet.util :as util :refer (app-info)]))
 
 (def ^:private diag (atom nil))
 (declare scada-gather-job job-map scada-patterns exceptional-msgs rand-job-trace)
+(declare buffer-discipline)
 
 (defn load-scada [filename] 
   (with-open [in (java.io.PushbackReader. (clojure.java.io/reader filename))]
@@ -67,15 +68,15 @@
 (defn scada-log
   "Return the entire SCADA log vector."
   []
-  (-> (util/app-info) :problem :scada-log :raw))
+  (-> (util/app-info) :problem :scada-log))
 
 (defn job-trace 
   "Return all mentions of the job."
   [log job-id]
   (when-let [jcover (get (:job-map log) job-id)]
     (->> (subvec (:raw log) (:starts jcover) (-> jcover :ends inc))
-         (remove #(and (contains? % :j)
-                       (not= (:j %) job-id)))
+         (remove #(and (contains? % :j) (not= (:j %) job-id)))
+         (remove #((:exceptional log) (:act %)))
          vec)))
 
 (defn rand-job-trace

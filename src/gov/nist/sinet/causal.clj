@@ -5,11 +5,10 @@
             [clojure.spec.alpha :as s]
             [clojure.core.matrix :as m :refer :all]
             [clojure.core.matrix.linear :as ml :refer (svd)]
-            [gov.nist.spntools.core :as pn :refer (Q-matrix avg-tokens-on-place)]
-            [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp)]
-            [gov.nist.spntools.util.reach :as pnr :refer (reachability renumber-pids)]
-            [gov.nist.spntools.util.pnml :as pnml :refer (read-pnml)] ; POD temporary
-            [gov.nist.sinet.util :as util :refer (app-info reset related-places)]))
+            [gov.nist.spntools.utils :as pnu :refer (ppprint ppp)]
+            [gov.nist.spntools.reach :as pnr]
+            [gov.nist.gspn.core :as gspn] 
+            [gov.nist.sinet.util :as util :refer (app-info)]))
 
 (alias 'cause 'gov.nist.sinet.causal)
 
@@ -80,13 +79,13 @@
         svec (vec (m/get-column (:U sol) (zero-pos (vec (:S sol)))))
         scale (apply + svec)
         pn (assoc pn :steady-state (zipmap (:states pn) (map #(/ % scale) svec)))]
-    (pn/avg-tokens-on-place pn)))
+    (gspn/avg-tokens-on-place pn)))
 
-(defn simple
+#_(defn simple
   "Example of causation: Increase production rate of M2 in a 3-machine serial line."
   []
   (let [pn (-> (pnml/read-pnml "data/PNs/m3.xml")
-               (pnr/reachability)) 
+               (gspn/reachability)) 
         rate-table-1 (reduce (fn [t e] (assoc t (:name e) (:rate e))) {} (:transitions pn))
         steady-state-1 (parametric-steady-state pn rate-table-1)
         rate-table-2 (update rate-table-1 :m2-complete-job #(* % 1.2)) ; 20% increase
