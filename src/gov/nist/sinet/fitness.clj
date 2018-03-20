@@ -14,9 +14,9 @@
 
 (defn aliases [] ; POD temporary
   (alias 'fit  'gov.nist.sinet.fitness)
-  (alias 'fitt 'gov.nist.sinet.fitness-test) 
+  #_(alias 'fitt 'gov.nist.sinet.fitness-test) 
   (alias 'gp   'gov.nist.sinet.gp)         
-  (alias 'gpt  'gov.nist.sinet.gp-test))
+  #_(alias 'gpt  'gov.nist.sinet.gp-test))
 
 (declare contemp-msgs next-time-line lax-reach max-marks full-interp? max-marks)
 (declare interp-possible? act2trans rgraph2loom-steps buffers-to-constrain constrain-buffer-size)
@@ -407,14 +407,15 @@
          (== (-> log :raw last :line)
              (:line llink)))))
 
-;;; POD Needs work. Too restrictive! async serial line. 
+;;; POD Needs work. Too restrictive! async serial line. <================= parallel is a problem 
 (defn interp-possible?
   "Returns true if there are enough buffers for an async serial line."
   [pn log]
-  (when (s/valid? ::util/gppn pn)
-    (let [machs (util/machines-of pn)
-          combos (combo/permutations machs)]
-      (and (= machs (:machines log))
+  (s/valid? ::util/gppn pn)
+  #_(when (s/valid? ::util/gppn pn)
+    (let [machs (util/machines-of pn)   
+          combos (combo/permutations machs)] ; POD 120 for 5 machines....
+      (and (set/subset? machs (:machines log))
            (>= (count (set (mapcat (fn [[m1 m2]] (util/buffers-between pn m1 m2)) combos)))
                (dec (count machs)))))))
 
@@ -582,31 +583,34 @@
    exceptional circumstances (blocking and starvation)."
   [inv log]
   ;; handling-evolve [inv] POD removed
-  (let [pn  (as-> (find-interp (:pn inv) log) ?pn
-                (assoc  ?pn :msg-table (compute-msg-table ?pn log))
-                (assoc  ?pn :trans-counts (trans-counts (:interp ?pn)))
-                (dissoc ?pn :interp)
-                (assoc  ?pn :sigma (-> (app-info) :gp-params :exceptional-sigma))
-                (assoc  ?pn :loom-prob (rgraph2loom-probability (:rgraph ?pn) (:trans-counts ?pn)))
-                (assoc  ?pn :distance-fn #(second (alg/dijkstra-path-dist (:loom-prob ?pn) %1 %2)))
-                (assoc  ?pn :pdf-fns
-                        (zipmap (-> ?pn :msg-table keys)
-                                (map #(parzen-pdf-msg ?pn %)
-                                     (-> ?pn :msg-table keys))))
-                (assoc ?pn :winners (choose-winners ?pn))
-                ;; Constrain buffers if any look promising. POD mark for semantic operator. 
-                (if (:winners ?pn)
-                  (reduce (fn [pn buf-info]
-                            (constrain-buffer-size ?pn (:buffer buf-info) (:k buf-info)))
-                          ?pn
-                          (buffers-to-constrain ?pn))
-                  ?pn))]
+  (if-let [pn (find-interp (:pn inv) log)]
+    (let [pn (as-> pn ?pn
+               (assoc  ?pn :msg-table (compute-msg-table ?pn log))
+               (assoc  ?pn :trans-counts (trans-counts (:interp ?pn)))
+               (dissoc ?pn :interp)
+               (assoc  ?pn :sigma (-> (app-info) :gp-params :exceptional-sigma))
+               (assoc  ?pn :loom-prob (rgraph2loom-probability (:rgraph ?pn) (:trans-counts ?pn)))
+               (assoc  ?pn :distance-fn #(second (alg/dijkstra-path-dist (:loom-prob ?pn) %1 %2)))
+               (assoc  ?pn :pdf-fns
+                       (zipmap (-> ?pn :msg-table keys)
+                               (map #(parzen-pdf-msg ?pn %)
+                                    (-> ?pn :msg-table keys))))
+               (assoc ?pn :winners (choose-winners ?pn))
+               ;; Constrain buffers if any look promising. POD mark for semantic operator. 
+               (if (:winners ?pn)
+                 (reduce (fn [pn buf-info]
+                           (constrain-buffer-size ?pn (:buffer buf-info) (:k buf-info)))
+                         ?pn
+                         (buffers-to-constrain ?pn))
+                 ?pn))]
       (-> inv ; POD most of these are temporary.
           (assoc :except (cond
                            (not-empty (:trans-count pn)) 0.5
                            (not-empty (:winners pn))     0.1
                            true                          1.0))
-          (assoc :pn pn))))
+          (assoc :pn pn)))
+    ;; Interpretation failed. 
+    (assoc inv :except 5.0)))
 
 ;;;==================== Distance Measures for PNN =========================
 (defn euclid-dist
@@ -759,7 +763,7 @@
           (:arcs pn))))
 
 (defn discipline-fitness
-  "Assess and set the :discpline fitness of the individual.
+  "Assess and set the :discipline fitness of the individual.
    Penalized 1 point for every wrongly configured machine, though 
    weighted by how strongly the log looks BAS/BBS on that machine."
   [inv log]
@@ -777,7 +781,7 @@
                                   is-bbs (if (bbs? pn m) 1 0)]
                               (+ score (* bas-w is-bbs) (* bbs-w is-bas))))))
                       0
-                      (:machines log))]
+                      (filter #(util/pn-uses-machine? pn %) (:machines log)))]
     (assoc inv :discipline score)))
     
 

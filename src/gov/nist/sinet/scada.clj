@@ -6,30 +6,63 @@
             [clojure.edn :as edn]
             [net.cgrand.xforms :as x]
             [gov.nist.spntools.utils :as pnu :refer (ppprint ppp)]
-            [gov.nist.sinet.util :as util :refer (app-info)]))
+            [gov.nist.sinet.util :as util :refer (app-info)]
+            [gov.nist.MJPdes.core :as des]
+            [gov.nist.MJPdes.util.log :as des-log]))
 
 (def ^:private diag (atom nil))
 (declare scada-gather-job job-map scada-patterns exceptional-msgs rand-job-trace)
-(declare buffer-discipline)
+(declare buffer-discipline new-line-nums load-scada-raw all-machines)
 
-(defn load-scada [filename] 
+(defn refresh-log!
+  "Pull more data from the log, updating (-> (app-info) :problem :scada-log)"
+  []
+  (let [raw (des/pull-data! (-> (app-info) :problem :des-model) 3000)]
+    (s/assert ::des-log/buf raw)
+    (alter-var-root
+     (resolve 'gov.nist.sinet.run/system)
+     #(assoc-in % [:app :problem :scada-log] (load-scada-raw raw)))))
+
+(defn load-scada-raw
+  "Process a vector of SCADA data."
+  [raw]
+  (as-> {:raw raw} ?log
+    (new-line-nums ?log)
+    (job-map ?log)
+    (scada-patterns ?log)
+    (exceptional-msgs ?log)
+    (assoc ?log :job-ids (-> ?log :job-map keys sort vec))
+    (assoc ?log :machines (all-machines ?log))
+    (buffer-discipline ?log)))
+
+(defn load-scada [filename]
+  "Load scada data from a file"
   (with-open [in (java.io.PushbackReader. (clojure.java.io/reader filename))]
     (let [raw (loop [msg (edn/read {:eof :eof} in)
                      lines (transient [])]
                 (if (not= :eof msg)
                   (recur (edn/read {:eof :eof} in) (conj! lines msg)) 
                   (persistent! lines)))]
-      (as-> {:raw raw} ?log
-        (job-map ?log)
-        (scada-patterns ?log)
-        (exceptional-msgs ?log)
-        (assoc ?log :job-ids (-> ?log :job-map keys sort vec))
-        (assoc ?log :machines (->> ?log
-                                   rand-job-trace 
-                                   (map :m)
-                                   (filter identity)
-                                   set))
-        (buffer-discipline ?log)))))
+      (load-scada-raw raw))))
+
+(defn new-line-nums
+  "Number the lines of the messages from 0."
+  [log]
+  (update log :raw (fn [raw]
+                     (vec (map #(assoc %1 :line %2)
+                               raw
+                               (range (count raw)))))))
+
+(defn all-machines
+  "Return a set of all machines of the argument log"
+  [log]
+  (set
+   (transduce
+    (comp (filter #(contains? % :m))
+          (map :m)
+          (distinct)) 
+    conj
+    (:raw log))))
 
 (s/def ::act keyword?)
 (s/def ::mjpact keyword?)
@@ -261,6 +294,7 @@
 ;;; POD More filtering would be necessary were the machine to generate messages while working.
 ;;;==============================
 ;;; Once warmed-up, a reliable machine BAS follows this cycle:
+
 ;;; {:clk    5.6000 :act :m1-blocked        :m :m1 :mjpact :bl :line 5}
 ;;; {:clk    6.8000 :act :m2-complete-job   :m :m2 :mjpact :ej :ent 1.6 :j 3 :line 6}
 ;;; {:clk    6.8000 :act :m2-start-job      :m :m2 :mjpact :sm :bf :b1 :n 1 :j 4 :line 7}
@@ -269,9 +303,10 @@
 ;;; {:clk    6.8000 :act :m1-start-job      :m :m1 :mjpact :aj :jt :jobType1 :ends 7.6 :j 6 :line 10}
 
 ;;; Key here is (..., m1-start-job, m1-block, m1-unblock, m1-complete-job, ...)
+
 (defn count-bas-pattern 
-  "Counts the number of machine process cycles of log that 
-   reflect a block-after-service discipline."
+  "Count the number of machine process cycles of log 
+   that reflect a block-after-service discipline."
   [raw m]
   (transduce
    (comp (filter #(= m (:m %)))
@@ -287,6 +322,7 @@
    raw))
 
 ;;; Once warmed-up, a reliable machine BBS follows this cycle:
+
 ;;; {:clk    4.8000 :act :m2-complete-job   :m :m2 :mjpact :ej :ent 0.8 :j 2 :line 14}
 ;;; {:clk    4.8000 :act :m2-start-job      :m :m2 :mjpact :sm :bf :b1 :n 1 :j 3 :line 15}
 ;;; {:clk    4.8000 :act :m1-unblocked      :m :m1 :mjpact :ub :line 16}
@@ -297,7 +333,7 @@
 ;;; Key here is (..., m1-unblock, m1-start-job, m1-complete-job, ...)
 
 (defn count-bbs-pattern 
-  "Counts the number of machine process cycles of log 
+  "Count the number of machine process cycles of log 
    that reflect a block-before-service discipline."
   [raw m]
   (transduce

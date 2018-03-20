@@ -531,7 +531,7 @@
         (assoc ?i :disorder nil)
         (assoc ?i :except nil)
         (fit/exceptional-fitness ?i log)
-        (fit/discipline-fitness ?i log)
+        (fit/discipline-fitness  ?i log)
         (assoc ?i :err (+ (:except ?i) (:discipline ?i)))))))
 
 (def diag-timeouts (atom []))
@@ -543,8 +543,8 @@
   (handling-evolve [popu]
    (let [favor-small? (-> (app-info) :gp-params :favor-smaller-pn?)]
      (as-> popu ?p
-       (u4pmap/pmap-timeout1 i-error ?p 15000)
-       ;(map i-error ?p)
+       ;(u4pmap/pmap-timeout i-error ?p 30000)
+       (map i-error ?p)
        (map #(if (= (-> % keys set) #{:timeout})
                  (do (swap! diag-timeouts conj %)
                      (assoc (:timeout %) :err 123))
@@ -723,13 +723,15 @@
                           (= msg "abort")
                           (dosync (println "aborting...")
                                   (when (future? @the-future)
-                                    (future-cancel @the-future)) ; 2017-12-07 uncommented
+                                    (future-cancel @the-future)) 
                                   (ref-set the-future nil)
-                                        ;(reset! diag {:world world})
                                   (ref-set the-promise nil)
                                   world))]
           (s/assert ::world world)
           (recur world))))))
+
+(defn diag-abort []
+  (>!! (util/evolve-chan) "abort"))
 
 (defn diag-simple-evolve
   "Run the program without async and GUI"
@@ -797,10 +799,11 @@
     inv))
 
 ;;; To stop it: (>!! (util/evolve-chan) "abort")
-;;; Alternative is (diag-simple-evolve)
-(defn diag-run
+;;; Alternative is (diag-simple-evolve) <======================
+#_(defn diag-run
   "Run the GP in diagnostic mode from the REPL. A very useful function!"
   []
+  (reset! util/failed-evolve nil)
   (binding [*debugging* nil] ;<===== {:save-invs? true} to save every individual
     (dosync (ref-set diag-all-inv {}))
     (>!! (util/evolve-chan) "init")
@@ -896,3 +899,41 @@
 
 ;(def pnpn (-> (initial-pop 1) first :pn))
 ;(def iii  (-> (initial-pop 1) first))
+
+(defn basic-4-machine-bas-pnpn [iii m3]
+  (-> iii
+      :pn 
+      (add-machine-restart-bbs :m1 :m2)
+      (add-machine-restart-bbs :m2 m3)
+      (add-machine-restart-bbs m3 :m4)
+      (bbs-bas-switch  :m1 :bbs2bas)
+      (bbs-bas-switch  :m2 :bbs2bas)
+      (bbs-bas-switch  m3  :bbs2bas)))
+
+(def pn1 (load-file "data/PNs/parallel-1.clj"))
+(def pn2 (load-file "data/PNs/parallel-2.clj"))
+
+;;; POD Color-version similar (but colors)
+(defn crossover-parallel
+  [pn1 pn2]
+  "Find where use of machines differ and crossover by merging pn1 structure into pn2."
+  (let [pn1-pn2 (util/diff-pns pn1 pn2)
+        pn2-pn1 (util/diff-pns pn2 pn1)
+        p1-start-job (some #(when (#{:aj :sm} (-> (pnu/name2obj pn1 %) :rep :mjpact)) %)
+                           (:transitions pn1-pn2))]
+    (-> pn2
+        (update :transitions (fn [tr] (into tr (map #(pnu/name2obj pn1 %) (:transitions pn1-pn2)))))
+        (update :places      (fn [pl] (into pl (map #(pnu/name2obj pn1 %) (:places      pn1-pn2)))))
+        (update :arcs        (fn [ar] (into ar (map #(pnu/name2obj pn1 %) (:arcs        pn1-pn2)))))
+        ;; hook in to upstream-place
+        (update :arcs #(conj % (-> (pnu/make-arc pn2 (:up-place pn2-pn1) p1-start-job)
+                                   (assoc :bind {:jtype :blue})))) ; POD color
+        ;; hook in to downstream-place                 
+        (update :arcs #(conj % (-> (pnu/make-arc pn2 p1-start-job (:dn-place pn2-pn1))
+                                   (assoc :bind {:jtype :blue}))))))) ; POD color
+        
+  
+  
+  
+
+

@@ -3,6 +3,7 @@
   {:author "Peter Denno"}
   (:require [clojure.pprint :refer (cl-format pprint pp)]
             [clojure.spec.alpha :as s]
+            [clojure.set :as set]
             [clojure.tools.namespace.repl :as nsp]
             [clojure.math.combinatorics :as combo]
             [clojure.core.async :as async :refer [>!!]]
@@ -38,8 +39,9 @@
              (>!! (evolve-chan) "abort")))
          (throw (ex-info "handling-evolve " {:exception @failed-evolve}))))))
 
+;;; (util/set-param! [:app :gp-params :timeout-secs] 1200)
 (defn set-param!
-  "The way into the app for writing."
+  "The way into the app and other components for writing."
   [path value]
   (alter-var-root
    (resolve 'gov.nist.sinet.run/system)
@@ -186,6 +188,7 @@
                      (s/keys :req-un [::places ::transitions ::arcs])
                      pn-priority-valid?))
 
+
 (defn check-pn
   "clojure.spec check the pn."
   [pn]
@@ -284,7 +287,13 @@
       [start]
       (some #(let [paths (pnu/paths-to pn start end %)]
                (first paths))
-            (map #(* % 4) (range 1 (+ 2 (count (machines-of pn)))))))))
+            (map #(* % 4)
+                 (range 1
+                        (+ 3 (->> pn
+                                  :transitions
+                                  (map :rep)
+                                  (filter #(#{:aj :sm} (:mjpact %)))
+                                  count))))))))
 
 (defn upstream? 
   "Return true if mx is upstream of my."
@@ -316,7 +325,13 @@
                                   (map #(first-contact pn m-trans %)
                                        candidates)))]
      best)))
-             
+
+(defn prev-machine
+  ([pn m] (prev-machine pn m false))
+  ([pn m wrap?]
+   (some #(when (= m (next-machine pn % wrap?)) %)
+         (machines-of pn))))
+  
 ;;; POD This is a heuristic, at best. 
 (defn buffers-between
   "Return all (only one?) buffers between the argument machines. "
@@ -393,15 +408,84 @@
 (defn reasonably-marked-pn
   "Set PN marking so that things that look like machines have a state."
   [pn]
-    (let [pn (pnr/renumber-pids pn)
-          r-places (atom (related-places pn))
-          imark (reduce (fn [mark place] ; this generates one of several possibilities. 
-                          (if-let [machine (some #(when (contains? (% @r-places) place) %)
-                                                 (keys @r-places))]
-                            (do (swap! r-places dissoc machine)
-                                (conj mark 1))
-                            (conj mark 0)))
-                        []
-                        (:marking-key pn))]
-      (pnu/set-marking pn imark)))
+  (let [pn (pnr/renumber-pids pn)
+        r-places (atom (related-places pn))
+        imark (reduce (fn [mark place] ; this generates one of several possibilities. 
+                        (if-let [machine (some #(when (contains? (% @r-places) place) %)
+                                               (keys @r-places))]
+                          (do (swap! r-places dissoc machine)
+                              (conj mark 1))
+                          (conj mark 0)))
+                      []
+                      (:marking-key pn))]
+    (pnu/set-marking pn imark)))
 
+(defn pn-uses-machine?
+  "Returns true if the PN uses the machine (it might not if parallel and Eden-like)."
+  [pn m]
+  ((->> pn :transitions (map :rep) (map :m) set) m))
+
+;;; (ppprint (util/rename-arcs (util/diff-pns pn1 pn2) (pnu/pn-names pn2) "foo" 100))
+(defn rename-arcs [pn avoid prefix min-aid]
+  (let [name-map (reduce (fn [nmap old-name]
+                          (let [new-name (pnu/name-with-prefix pn prefix (:avoid nmap))]
+                            (-> nmap
+                                (update :avoid conj new-name)
+                                (update :old-new conj (vector old-name new-name)))))
+                         {:avoid avoid :old-new []}
+                         (map :name (:arcs pn)))
+        old-new (:old-new name-map)
+        min-id (atom min-aid)]
+    (-> pn
+        (update :arcs
+                #(vec (map (fn [ar]
+                             (let [nm (:name ar)]
+                               (if-let [new (some (fn [[old new]] (when (= nm old) new))
+                                                  old-new)]
+                                 (assoc ar :name new)
+                                 ar)))
+                           %)))
+        (update :arcs (fn [arcs] (vec (map #(assoc % :aid (swap! min-id inc)) arcs)))))))
+
+(defn diff-pns
+  "Return machine usage in pn1 that isn't in pn2"
+  [pn1 pn2]
+  (as-> {:machines (set/difference (machines-of pn1)
+                                   (machines-of pn2))} ?d
+    (assoc ?d :m (-> ?d :machines first)) ; POD first
+    (assoc ?d :transitions
+           (filter #((:machines ?d)
+                     (-> % :rep :m)) (:transitions pn1)))
+    (assoc ?d :places
+           (map #(pnu/name2obj pn1 %)
+                (reduce (fn [places m]
+                          (into places (get (related-places pn1) m)))
+                        #{}
+                        (:machines ?d))))
+    (assoc ?d :arcs
+           (map #(pnu/name2obj pn1 %)
+                (reduce (fn [arcs m]
+                          (into arcs (get (related-arcs pn1) m)))
+                        #{}
+                        (:machines ?d))))
+    (assoc ?d :up-place ; POD first
+           (first (buffers-between pn1 (prev-machine pn1 (:m ?d)) (:m ?d))))
+    (assoc ?d :dn-place ; POD first
+           (first (buffers-between pn1 (:m ?d) (next-machine pn1 (:m ?d)))))
+    (assoc ?d :up-arc
+           (some #(when (= (:up-place ?d) (:source %)) (:name %))
+                 (:arcs pn1)))
+    (assoc ?d :dn-arc
+           (some #(when (= (:dn-place ?d) (:target %)) (:name %))
+                 (:arcs pn1)))
+    (rename-arcs   ?d (map :name (:arcs   pn2)))
+    (rename-places ?d (map :name (:places pn2)))))
+                
+
+
+
+
+  
+
+  
+  

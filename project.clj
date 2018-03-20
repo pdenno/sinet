@@ -4,13 +4,15 @@
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :global-vars {*assert* true}
-  ;:jvm-opts ["--add-modules" "java.xml.bind"]  ; Java 9 adventure
+  :jvm-opts ["-Xmx900m"] ; So far starting at 288m. 
   :dependencies [[org.clojure/clojure            "1.9.0"]
                  [org.clojure/clojurescript      "1.9.946"]
                  [org.clojure/tools.trace        "0.7.9"]
                  [org.clojure/core.async         "0.4.474" :exclusions [org.clojure/data.priority-map]]
                  [com.cemerick/piggieback        "0.2.2"]
                  [com.stuartsierra/component     "0.3.2"]
+                 ;[net.mikera/vectorz-clj        "0.47.0"] ; causal only
+                 ;[net.mikera/core.matrix        "0.61.0"] ; causal only
                  [environ                        "1.1.0"]
                  [ch.qos.logback/logback-classic "1.2.3"] 
                  [org.clojure/tools.logging      "0.4.0"]
@@ -43,11 +45,15 @@
   :resource-paths ["resources" "resources-index/prod"]
   :target-path "target/%s"
 
-  :main ^:skip-aot gov.nist.sinet.run ; POD tried .user with cljs-repl (NG?)
+  :main ^:skip-aot gov.nist.sinet.run 
   ;; There is a user.clj in dev/. By design of clojure, it gets loaded if it on the path...
-  :profiles {:dev {:cljsbuild
+  :profiles {:dev {:cljsbuild ; https://github.com/emezeske/lein-cljsbuild
                    {:builds 
-                    {:client {:source-paths ["dev"] :compiler {:optimizations :none :source-map true}}}}
+                    {:client {:source-paths ["src/gov/nist/sinet/client" "dev"]
+                              :compiler {:optimizations :none ; https://clojurescript.org/reference/compiler-options
+                                         :output-to "resources/public/js/app.js"   ; The path to the .js file that will be output
+                                         :output-dir "dev-resources/public/js/out" ; Temporary files used during compilation
+                                         :source-map true}}}}
                    :figwheel {:http-server-root "public"
                               :server-port 3449
                               :repl false

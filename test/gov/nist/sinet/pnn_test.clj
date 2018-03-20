@@ -4,9 +4,8 @@
             [clojure.set :as set]
             [clojure.spec.alpha :as s]
             [clojure.spec.test.alpha :as stest]
-            [gov.nist.spntools.util.utils :as pnu]
-            [gov.nist.spntools.util.reach :as pnr]
-            [gov.nist.spntools.util.pnml :as pnml]
+            [gov.nist.spntools.utils :as pnu]
+            [gov.nist.spntools.reach :as pnr]
             [gov.nist.sinet.pnn :as pnn]))
 
 (stest/instrument 'pnn/euclid-dist2)

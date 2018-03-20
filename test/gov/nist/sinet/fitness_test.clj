@@ -92,31 +92,31 @@
       (is (== 3002 (-> (fit/find-interp pn log) :interp count))))))
 
 (def rgraph
-  [{:M [1 1 0 0 2], :fire :m2-start-job, :Mp [0 1 0 1 1], :rate 1.0}
+  [{:M [1 1 0 0 2], :fire :m2-start-job,    :Mp [0 1 0 1 1], :rate 1.0}
    {:M [1 1 0 0 3], :fire :m1-complete-job, :Mp [1 0 1 0 3], :rate 1.0}
    {:M [1 1 0 0 1], :fire :m1-complete-job, :Mp [1 0 1 0 1], :rate 1.0}
-   {:M [1 1 0 0 1], :fire :m2-start-job, :Mp [0 1 0 1 0], :rate 1.0}
+   {:M [1 1 0 0 1], :fire :m2-start-job,    :Mp [0 1 0 1 0], :rate 1.0}
    {:M [0 1 0 1 3], :fire :m1-complete-job, :Mp [0 0 1 1 3], :rate 1.0}
-   {:M [0 0 1 1 1], :fire :m1-start-job, :Mp [0 1 0 1 2], :rate 1.0}
+   {:M [0 0 1 1 1], :fire :m1-start-job,    :Mp [0 1 0 1 2], :rate 1.0}
    {:M [0 0 1 1 0], :fire :m2-complete-job, :Mp [1 0 1 0 0], :rate 1.0}
-   {:M [1 0 1 0 1], :fire :m1-start-job, :Mp [1 1 0 0 2], :rate 1.0}
+   {:M [1 0 1 0 1], :fire :m1-start-job,    :Mp [1 1 0 0 2], :rate 1.0}
    {:M [1 1 0 0 2], :fire :m1-complete-job, :Mp [1 0 1 0 2], :rate 1.0}
    {:M [0 0 1 1 3], :fire :m2-complete-job, :Mp [1 0 1 0 3], :rate 1.0}
-   {:M [1 0 1 0 2], :fire :m1-start-job, :Mp [1 1 0 0 3], :rate 1.0}
-   {:M [1 1 0 0 3], :fire :m2-start-job, :Mp [0 1 0 1 2], :rate 1.0}
-   {:M [0 0 1 1 2], :fire :m1-start-job, :Mp [0 1 0 1 3], :rate 1.0}
-   {:M [1 0 1 0 3], :fire :m2-start-job, :Mp [0 0 1 1 2], :rate 1.0}
+   {:M [1 0 1 0 2], :fire :m1-start-job,    :Mp [1 1 0 0 3], :rate 1.0}
+   {:M [1 1 0 0 3], :fire :m2-start-job,    :Mp [0 1 0 1 2], :rate 1.0}
+   {:M [0 0 1 1 2], :fire :m1-start-job,    :Mp [0 1 0 1 3], :rate 1.0}
+   {:M [1 0 1 0 3], :fire :m2-start-job,    :Mp [0 0 1 1 2], :rate 1.0}
    {:M [0 1 0 1 2], :fire :m1-complete-job, :Mp [0 0 1 1 2], :rate 1.0}
-   {:M [0 0 1 1 0], :fire :m1-start-job, :Mp [0 1 0 1 1], :rate 1.0}
-   {:M [1 0 1 0 1], :fire :m2-start-job, :Mp [0 0 1 1 0], :rate 1.0}
+   {:M [0 0 1 1 0], :fire :m1-start-job,    :Mp [0 1 0 1 1], :rate 1.0}
+   {:M [1 0 1 0 1], :fire :m2-start-job,    :Mp [0 0 1 1 0], :rate 1.0}
    {:M [0 0 1 1 2], :fire :m2-complete-job, :Mp [1 0 1 0 2], :rate 1.0}
    {:M [0 1 0 1 0], :fire :m2-complete-job, :Mp [1 1 0 0 0], :rate 1.0}
    {:M [1 1 0 0 0], :fire :m1-complete-job, :Mp [1 0 1 0 0], :rate 1.0}
    {:M [0 1 0 1 1], :fire :m2-complete-job, :Mp [1 1 0 0 1], :rate 1.0}
    {:M [0 1 0 1 1], :fire :m1-complete-job, :Mp [0 0 1 1 1], :rate 1.0}
    {:M [0 1 0 1 0], :fire :m1-complete-job, :Mp [0 0 1 1 0], :rate 1.0}
-   {:M [1 0 1 0 2], :fire :m2-start-job, :Mp [0 0 1 1 1], :rate 1.0}
-   {:M [1 0 1 0 0], :fire :m1-start-job, :Mp [1 1 0 0 1], :rate 1.0}
+   {:M [1 0 1 0 2], :fire :m2-start-job,    :Mp [0 0 1 1 1], :rate 1.0}
+   {:M [1 0 1 0 0], :fire :m1-start-job,    :Mp [1 1 0 0 1], :rate 1.0}
    {:M [0 0 1 1 1], :fire :m2-complete-job, :Mp [1 0 1 0 1], :rate 1.0}
    {:M [0 1 0 1 2], :fire :m2-complete-job, :Mp [1 1 0 0 2], :rate 1.0}
    {:M [0 1 0 1 3], :fire :m2-complete-job, :Mp [1 1 0 0 3], :rate 1.0}])

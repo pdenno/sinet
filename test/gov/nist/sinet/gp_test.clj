@@ -3,7 +3,7 @@
   (:require [clojure.test :refer :all]
             [clojure.pprint :refer (cl-format pprint)]
             [clojure.spec.alpha :as s]
-            [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp pn-ok-> as-pn-ok->)]
+            [gov.nist.spntools.utils :as pnu :refer (ppprint ppp pn-ok-> as-pn-ok->)]
             [gov.nist.sinet.util :as util :refer (log app-info map->Inv gp-param pr-param VARS *debugging* handling-evolve)]
             [gov.nist.sinet.gp :as gp]
             [gov.nist.sinet.fitness :as fit]))
