@@ -425,27 +425,47 @@
   [pn m]
   ((->> pn :transitions (map :rep) (map :m) set) m))
 
-;;; (ppprint (util/rename-arcs (util/diff-pns pn1 pn2) (pnu/pn-names pn2) "foo" 100))
-(defn rename-arcs [pn avoid prefix min-aid]
-  (let [name-map (reduce (fn [nmap old-name]
-                          (let [new-name (pnu/name-with-prefix pn prefix (:avoid nmap))]
-                            (-> nmap
-                                (update :avoid conj new-name)
-                                (update :old-new conj (vector old-name new-name)))))
-                         {:avoid avoid :old-new []}
-                         (map :name (:arcs pn)))
-        old-new (:old-new name-map)
-        min-id (atom min-aid)]
-    (-> pn
-        (update :arcs
-                #(vec (map (fn [ar]
-                             (let [nm (:name ar)]
-                               (if-let [new (some (fn [[old new]] (when (= nm old) new))
-                                                  old-new)]
-                                 (assoc ar :name new)
-                                 ar)))
+(defn pn-name-map
+  "Create a vector of [[old-name, new-name]...] for attributes :arcs,
+   :transitions or :places." 
+  [pn attr avoid prefix]
+  (:old-new 
+   (reduce (fn [nmap old-name]
+             (let [new-name (pnu/name-with-prefix pn prefix (:avoid nmap))]
+               (-> nmap
+                   (update :avoid conj new-name)
+                   (update :old-new conj (vector old-name new-name)))))
+           {:avoid avoid :old-new []}
+           (map :name (attr pn)))))
+
+(defn unique-attr [pn attr avoid prefix]
+  "Update :name and :pid / :tid of :places or :transitions, avoiding names in avoid. 
+   Make arcs consistent with the new names."
+  (let [old-new (pn-name-map pn attr avoid prefix)
+        id-attr (case attr :places :pid, :transitions :tid :arcs :aid)
+        min-id (atom (->> pn attr (map id-attr) (apply max) inc))
+        find-name (fn [nm] (some (fn [[old new]] (when (= nm old) new)) old-new))]
+    (as-> pn ?pn
+        (update ?pn attr ; :name
+                #(vec (map (fn [obj]
+                             (if-let [new (find-name (:name obj))]
+                               (assoc obj :name new)
+                               obj))
                            %)))
-        (update :arcs (fn [arcs] (vec (map #(assoc % :aid (swap! min-id inc)) arcs)))))))
+        (update ?pn attr ; :pid or ;tid
+                (fn [objs] (vec (map #(assoc % id-attr (swap! min-id inc)) objs))))
+        (if (= id-attr :aid)
+          ?pn
+          (update ?pn :arcs ; use as :source or :target in :arcs
+                  (fn [arcs]
+                    (vec (map #(as-> % ?a
+                                 (if-let [new (find-name (:source ?a))]
+                                   (assoc ?a :source new)
+                                   ?a)
+                                 (if-let [new (find-name (:target ?a))]
+                                   (assoc ?a :target new)
+                                   ?a))
+                              arcs))))))))
 
 (defn diff-pns
   "Return machine usage in pn1 that isn't in pn2"
@@ -467,7 +487,7 @@
                 (reduce (fn [arcs m]
                           (into arcs (get (related-arcs pn1) m)))
                         #{}
-                        (:machines ?d))))
+                          (:machines ?d))))
     (assoc ?d :up-place ; POD first
            (first (buffers-between pn1 (prev-machine pn1 (:m ?d)) (:m ?d))))
     (assoc ?d :dn-place ; POD first
@@ -477,9 +497,9 @@
                  (:arcs pn1)))
     (assoc ?d :dn-arc
            (some #(when (= (:dn-place ?d) (:target %)) (:name %))
-                 (:arcs pn1)))
-    (rename-arcs   ?d (map :name (:arcs   pn2)))
-    (rename-places ?d (map :name (:places pn2)))))
+                 (:arcs pn1)))))
+
+
                 
 
 

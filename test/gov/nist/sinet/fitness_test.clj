@@ -3,17 +3,14 @@
             [clojure.pprint :refer (cl-format pprint)]
             [loom.alg :as alg]
             [loom.graph :as graph]
-            [gov.nist.spntools.core :as spn]
-            [gov.nist.spntools.util.reach :as pnr]
-            [gov.nist.spntools.util.utils :as pnu :refer (ppprint ppp)]
-            [gov.nist.spntools.util.pnml :as pnml]
-            [gov.nist.spntools.core :as pn]
+            [gov.nist.spntools.reach :as pnr]
+            [gov.nist.spntools.utils :as pnu :refer (ppprint ppp)]
+            [gov.nist.spntools.pnml :as pnml]
             [gov.nist.sinet.util :as util :refer (map->Inv app-info reset big-reset)]
             [gov.nist.sinet.app :as app]
             [gov.nist.sinet.run :as run]
             [gov.nist.sinet.scada :as scada]
             [gov.nist.sinet.gp :as gp]
-            [gov.nist.sinet.simulate :as sim]
             [gov.nist.sinet.pnn :as pnn]
             [gov.nist.sinet.fitness :as fit]))
 
@@ -39,7 +36,7 @@
     (let [machines (util/machines-of hopeful-pn)
           pn (-> hopeful-pn
                  (assoc :pulls-from (zipmap machines (map #(util/pulls-from hopeful-pn %) machines)))
-                 fit/reasonably-marked-pn)]
+                 util/reasonably-marked-pn)]
       (is (not (fit/starved?
                 {:M [0 1 0 1 1], :fire :m2-complete-job, :Mp [1 1 0 0 1], :m :m2, :indx 224}
                 {:act :m2-starved, :m :m2, :prev-act :m2-complete-job, :Mp [1 1 0 0 1], :state [1 1 0 0 1], :indx 225}
@@ -90,6 +87,12 @@
     (let [log (scada/load-scada "data/SCADA-logs/scada-3m-2j-bufs-out.clj")
           pn  (load-file "data/PNs/pn2-2018-01-19.clj")]
       (is (== 3002 (-> (fit/find-interp pn log) :interp count))))))
+
+(deftest find-interp-parallel-jms
+  (testing "that the 2-parallel workcenter all BAS interprets"
+    (let [log (scada/load-scada "data/SCADA-logs/parallel-1&2.clj")
+          pn  (load-file "data/PNs/parallel-1&2-corrected.clj")]
+      (is (== 1000 (-> (fit/find-interp pn log) :interp count))))))
 
 (def rgraph
   [{:M [1 1 0 0 2], :fire :m2-start-job,    :Mp [0 1 0 1 1], :rate 1.0}

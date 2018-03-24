@@ -17,7 +17,8 @@
 (defn refresh-log!
   "Pull more data from the log, updating (-> (app-info) :problem :scada-log)"
   []
-  (let [raw (des/pull-data! (-> (app-info) :problem :des-model) 3000)]
+  (let [raw (des/pull-data! (-> (app-info) :problem :des-model)
+                            (-> (app-info) :problem :log-bite-size))]
     (s/assert ::des-log/buf raw)
     (alter-var-root
      (resolve 'gov.nist.sinet.run/system)
@@ -314,7 +315,8 @@
          (remove #(#{:st :us} %))
          (partition-by #(#{:aj :sm} %))     ; stateful
          (remove #(#{'(:sm) '(:aj)} %))
-         (filter #(and (= :bl (nth % 0))
+         (filter #(and (>= (count %) 3)
+                       (= :bl (nth % 0))
                        (= :ub (nth % 1))
                        (= :bj (nth % 2))))
          x/count)
@@ -342,7 +344,8 @@
          (remove #(#{:st :us} %))
          (partition-by #(= % :ub))  ; stateful
          (remove #(= % '(:ub)))
-         (filter #(and (#{:aj :sm} (first  %))
+         (filter #(and (>= (count %) 2)
+                       (#{:aj :sm} (first  %))
                        (= :bj      (second %))))
          x/count)
    +

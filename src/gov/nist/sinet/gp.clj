@@ -913,18 +913,22 @@
 (def pn1 (load-file "data/PNs/parallel-1.clj"))
 (def pn2 (load-file "data/PNs/parallel-2.clj"))
 
-;;; POD Color-version similar (but colors)
+;;; POD Color-version similar
 (defn crossover-parallel
   [pn1 pn2]
   "Find where use of machines differ and crossover by merging pn1 structure into pn2."
-  (let [pn1-pn2 (util/diff-pns pn1 pn2)
+  (let [pn2-names (pnu/pn-names pn2)
+        pn1-pn2 (-> (util/diff-pns pn1 pn2)
+                    (util/unique-attr :places      pn2-names "place-p")
+                    #_(util/unique-attr :transitions pn2-names "tfoo")
+                    (util/unique-attr :arcs        pn2-names "arc-p"))
         pn2-pn1 (util/diff-pns pn2 pn1)
-        p1-start-job (some #(when (#{:aj :sm} (-> (pnu/name2obj pn1 %) :rep :mjpact)) %)
+        p1-start-job (some #(when (#{:aj :sm} (-> % :rep :mjpact)) (:name %))
                            (:transitions pn1-pn2))]
     (-> pn2
-        (update :transitions (fn [tr] (into tr (map #(pnu/name2obj pn1 %) (:transitions pn1-pn2)))))
-        (update :places      (fn [pl] (into pl (map #(pnu/name2obj pn1 %) (:places      pn1-pn2)))))
-        (update :arcs        (fn [ar] (into ar (map #(pnu/name2obj pn1 %) (:arcs        pn1-pn2)))))
+        (update :transitions #(into % (:transitions pn1-pn2)))
+        (update :places      #(into % (:places      pn1-pn2)))
+        (update :arcs        #(into % (:arcs        pn1-pn2)))
         ;; hook in to upstream-place
         (update :arcs #(conj % (-> (pnu/make-arc pn2 (:up-place pn2-pn1) p1-start-job)
                                    (assoc :bind {:jtype :blue})))) ; POD color

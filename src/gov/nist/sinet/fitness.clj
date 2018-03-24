@@ -14,6 +14,7 @@
 
 (defn aliases [] ; POD temporary
   (alias 'fit  'gov.nist.sinet.fitness)
+  (alias 'app 'gov.nist.sinet.app)
   #_(alias 'fitt 'gov.nist.sinet.fitness-test) 
   (alias 'gp   'gov.nist.sinet.gp)         
   #_(alias 'gpt  'gov.nist.sinet.gp-test))
@@ -22,54 +23,6 @@
 (declare interp-possible? act2trans rgraph2loom-steps buffers-to-constrain constrain-buffer-size)
 
 (def ^:private diag (atom nil))
-;;;===========================================
-;;; QPN
-;;;===========================================
-;;; POD only collects from :act messages currently (no :on-act)
-;;;  {:act :ej, :m :m2, :j [46], :fire :m2-complete-job}
-(defn qpn-gather-tkn
-  "Return every mention of token id in chronological order."
-  [log tkn-id]
-  (filter (fn [msg]
-            (and (contains? msg :act)
-                 #_(some #(= % tkn-id) (:j msg))
-                 ;; POD not too sure about just using the newest token here. 
-                 (when (not-empty (:j msg))
-                   (== tkn-id (apply max (:j msg))))))
-          (:raw log)))
-
-;;; POD Because I'm focusing on jobs here (qpn-gather-job), at some point I'm going to have to account for
-;;; lines in the log that were not addressed by qpn-gather-job (and the things in-between it).
-(defn qpn-act-is-intro? 
-  "Return true if the named transition has an arc exiting it that 
-   introduces a token."
-  [pn act]
-  (let [trans (act2trans pn act)]
-    (some #(= :intro (-> % :bind :act))
-          (filter #(= (:source %) trans) (:arcs pn)))))
-
-;;; If qpn-act-is-intro? and this is not first mention of the token, then it is recycling.
-;;; An example is {:act :aj, :tkns [{:type :a, :id 23} {:type :a, :id 22}]} above.
-;;; Here I remove those. 
-(defn qpn-log-about
-  "Return in chronological order log entries about the argument tkn-id.
-   This removes messages concerning the introduction of a token that is not the argument token."
-  [pn tkn-id]
-  (remove (fn [msg]
-            (and (qpn-act-is-intro? pn (:act msg))
-                 (some #(> (:id %) tkn-id) (:tkns msg))))
-          (qpn-gather-tkn (-> pn :sim :log) tkn-id)))
-
-;;; POD not used yet, but useful. 
-(defn qpn-characterize-tkn-trace
-  "Return a map describing the relative frequency that each event occurs in a token trace."
-  [log tkn-id]
-  (let [acts (distinct (map :act (qpn-gather-tkn log tkn-id)))]
-    (reduce (fn [distrib msg]
-              (update-in distrib [(:act msg)] inc))
-            (zipmap acts (repeat (count acts) 0))
-            (filter #(contains? % :act) (:raw log)))))
-
 ;;;====================================================================================
 ;;; Exceptional Fitness
 ;;;====================================================================================
@@ -117,8 +70,8 @@
 
 (defn diag-occupy-map
   "return :occupy Update match-info's :occupy occupancy info from the log message -- diagnostic only.
-   (The point of interpretation is to figure this stuff out, but 
-   MJPdes messages happen to provide occupancy.) Return updated occupy map."
+   (The point of interpretation is to figure this stuff out, but MJPdes
+    messages happen to provide occupancy.) Return updated occupy map."
   [pn]
   (let [^clojure.lang.PersistentVector mkey (:marking-key pn)
         place-map (:place-map pn)
@@ -219,6 +172,7 @@
   "next-match any contemporary message; return pn updated."
   [pn log]
   (let [old-match  (:matched pn)]
+    (reset! diag {:pn pn :old-match old-match :log log})
     (if-let [pn (some #(let [pn (next-match (assoc pn :matched old-match) log %)] ;!
                          (when (:matched pn) pn))
                       (:msg-buf pn))]
@@ -249,20 +203,19 @@
         (assoc :matched start-link) 
         (assoc :interp [start-link]))))
 
-(defn diag-prep-interp [pn]
-  "Add stuff to PN that is necessary for diagnostics run."
-  (-> pn
-      (assoc :diag-occupy-ok? true)
-      (assoc :place-map {:b1 :place-3 :b2 :place-5})      ; <---------------- POD done by hand
-      (assoc :occupy {:place-3 2 :place-5 2}))) ;
-
 (def diag-pn (atom nil))
-(defn reset-diag-step-interp! []
-  (reset! diag-pn (-> (load-file "data/PNs/pn-2018-01-19.clj")
+(defn reset-diag-step-interp!
+  "Diagnostic: Reset the PN to its starting point. This is what interp does!"
+  []
+  (reset! diag-pn (-> (load-file "data/PNs/parallel-1&2-corrected.clj")
                       (lax-reach 2)
-                      (diag-prep-interp 2)
-                      (prep-interp (-> (app-info) :problem :scada-log :raw)
-                                   {:M [0 1 0 1 0 1 2 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 2 2], :line 0})))
+                      (assoc :diag-occupy-ok? true) ; POD stuff below done by hand, obviously. 
+                      (assoc :place-map {:b1 :place-3 :b2 :place-5 :b3 :place-7})
+                      (assoc :occupy {:place-3 2 :place-5 2 :place-7 0}) 
+                      (prep-interp (scada/load-scada "data/SCADA-logs/parallel-1&2.clj")
+                                   {:M  [1 2 0 2 1 0 1 0 1 0 1 0], :fire :m2-start-job,
+                                    :Mp [1 1 1 2 1 0 1 0 0 0 1 0],
+                                    :line 0})))
   true)
 
 (def last-step-pn (atom nil))
@@ -294,7 +247,7 @@
     - a link augmented with :line and :job (if an ordinary message is processed), or
     - a map naming an exceptional message (if an such a message is processed)."
   [pn log start-link]
-  (binding [*debugging* false]
+  (binding [*debugging* false] ; this must be false for fitness_test.clj testing. 
     (loop [pn (prep-interp pn log start-link)]
       (as-> pn ?pn
         (cond-> ?pn
@@ -327,7 +280,8 @@
     (or found pn)))
 
 (defn find-interp
-  "At increasing values of max-k, find new starting links and try to interpret the entire log. 
+  "Top-level of interpretation:
+   At increasing values of max-k, find new starting links and try to interpret the entire log. 
    Return pn with :interp set to the first complete interpretation found, if any below max-max-k."
   ([pn log] (find-interp pn
                          log

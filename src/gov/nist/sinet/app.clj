@@ -31,17 +31,17 @@
       :b2 (des/map->Buffer {:N 2}) ; originally 5
       :m3-1 (des/map->ExpoMachine {:lambda 0.1 :mu 0.9 :W 1.0 })
       :m3-2 (des/map->ExpoMachine {:lambda 0.1 :mu 0.9 :W 1.0 })
-      :m3-3 (des/map->ExpoMachine {:lambda 0.1 :mu 0.9 :W 1.0 }) 
+;     :m3-3 (des/map->ExpoMachine {:lambda 0.1 :mu 0.9 :W 1.0 }) 
       :b3 (des/map->Buffer {:N 1})                              
       :m4 (des/map->ExpoMachine {:lambda 0.1 :mu 0.9 :W 1.0 }) 
-;      :b4 (des/map->Buffer {:N 1})
-;      :m5 (des/map->ExpoMachine {:lambda 0.1 :mu 0.9 :W 1.0 })
+;     :b4 (des/map->Buffer {:N 1})
+;     :m5 (des/map->ExpoMachine {:lambda 0.1 :mu 0.9 :W 1.0 })
       }
      :topology [:m1 :b1 :m2 :b2
-                {:type :parallel-or :name :m3 :machines [:m3-1 :m3-2 :m3-3]}
+                {:type :parallel-or :name :m3 :machines [:m3-1 :m3-2]}
                 :b3 :m4 #_:b4 #_:m5]
      :entry-point :m1
-     :report {:continuous? true :up&down? false}
+     :report {:continuous? true :up&down? false :job-detail? true}
      :params {:warm-up-time 500}
      :jobmix {:jobType1 (des/map->JobType {:portion 0.8
                                        :w {:m1 1.0, :m2 1.0, :m3 3.0, :m4 1.0, #_:m5 #_1.0}})
@@ -89,6 +89,7 @@
   (ref ; :scada-log will be computed in app-start-body
    {:keep-vs-ignore 0.8
     :des-model (des/main-loop des-model)
+    :log-bite-size 1000
     ;:scada-data-file "data/SCADA-logs/m3-bbs-bas-out.clj"
     #_"data/SCADA-logs/scada-3m-2j-third-out.clj"
     #_"data/SCADA-logs/m2-j1-n3-block-mild-out.clj"      
@@ -114,7 +115,7 @@
                       :gp-system (gp-system))
                (assoc-in ?c [:problem :scada-log]
                          (scada/load-scada-raw
-                          (des/pull-data! (:des-model @problem) 3000))))]
+                          (des/pull-data! (:des-model @problem) 1000))))]
     (s/check-asserts (-> comp :gp-system :check-asserts?))
     (s/assert ::app comp)
     (gp/start-evolve-loop! (-> comp :gp-system :evolve-chan))
