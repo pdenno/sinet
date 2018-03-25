@@ -177,7 +177,9 @@
 {:clk 684.0594, :act :m3-2-complete-job, :m :m3-2, :mjpact :bj, :bf :b3, :n 0, :j 372, :dets {:run {:m3-1 373, :m4 nil, :m2 374, :m1 377, :m3-2 372}, :bufs {:b2 [], :b1 [375 376], :b3 []}}, :line 174}
 {:clk 684.0594, :act :m3-2-starved, :m :m3-2, :mjpact :st, :dets {:run {:m3-1 373, :m4 nil, :m2 374, :m1 377, :m3-2 nil}, :bufs {:b2 [], :b1 [375 376], :b3 [372]}}, :line 175}
 {:clk 684.0594, :act :m4-unstarved, :m :m4, :mjpact :us, :dets {:run {:m3-1 373, :m4 nil, :m2 374, :m1 377, :m3-2 nil}, :bufs {:b2 [], :b1 [375 376], :b3 [372]}}, :line 176}
+
 {:clk 684.0594, :act :m4-start-job, :m :m4, :mjpact :sm, :bf :b3, :n 1, :j 372, :dets {:run {:m3-1 373, :m4 nil, :m2 374, :m1 377, :m3-2 nil}, :bufs {:b2 [], :b1 [375 376], :b3 [372]}}, :line 177}
+
 {:clk 684.553, :act :m2-complete-job, :m :m2, :mjpact :bj, :bf :b2, :n 0, :j 374, :dets {:run {:m3-1 373, :m4 372, :m2 374, :m1 377, :m3-2 nil}, :bufs {:b2 [], :b1 [375 376], :b3 []}}, :line 178}
 {:clk 684.553, :act :m2-start-job, :m :m2, :mjpact :sm, :bf :b1, :n 2, :j 375, :dets {:run {:m3-1 373, :m4 372, :m2 nil, :m1 377, :m3-2 nil}, :bufs {:b2 [374], :b1 [375 376], :b3 []}}, :line 179}
 {:clk 684.553, :act :m3-2-unstarved, :m :m3-2, :mjpact :us, :dets {:run {:m3-1 373, :m4 372, :m2 375, :m1 377, :m3-2 nil}, :bufs {:b2 [374], :b1 [376], :b3 []}}, :line 180}

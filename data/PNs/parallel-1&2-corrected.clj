@@ -79,11 +79,11 @@
   {:aid 21, :source :place-3, :target :m2-start-job, :name :aa-21, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
   {:aid 22, :source :m2-start-job, :target :place-4, :name :aa-22, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
   {:aid 23, :source :place-4, :target :m2-complete-job, :name :aa-23, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
-  {:aid 24, :source :m2-start-job, :target :place-5, :name :aa-24, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
+  {:aid 24, :source :m2-complete-job, :target :place-5, :name :aa-24, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
   {:aid 25, :source :place-5, :target :m3-2-start-job, :name :aa-25, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
   {:aid 26, :source :m3-2-start-job, :target :place-6, :name :aa-26, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
   {:aid 27, :source :place-6, :target :m3-2-complete-job, :name :aa-27, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
-  {:aid 28, :source :m3-2-start-job, :target :place-7, :name :aa-28, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 2}
+  {:aid 28, :source :m3-2-complete-job, :target :place-7, :name :aa-28, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 2}
   {:aid 29, :source :place-7, :target :m4-start-job, :name :aa-29, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
   {:aid 30, :source :m4-start-job, :target :place-8, :name :aa-30, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
   {:aid 31, :source :place-8, :target :m4-complete-job, :name :aa-31, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
@@ -94,15 +94,8 @@
   {:aid 55, :source :m3-2-complete-job, :target :wait-3, :name :aa-55, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
   {:aid 56, :source :wait-3, :target :m3-2-start-job, :name :aa-56, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
   {:aid 58, :source :place-p-1, :target :m3-1-complete-job, :name :arc-p-1, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
-  {:aid 59,
-   :source :m3-1-complete-job,
-   :target :place-p-2,
-   :name :arc-p-2,
-   :type :normal,
-   :multiplicity 1,
-   :bind {:jtype :blue},
-   :priority 1}
+  {:aid 59, :source :m3-1-complete-job, :target :place-p-2, :name :arc-p-2, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
   {:aid 60, :source :m3-1-start-job, :target :place-p-1, :name :arc-p-3, :type :normal, :multiplicity 1, :bind {:jtype :blue}, :priority 1}
   {:aid 61, :source :place-p-2, :target :m3-1-start-job, :name :arc-p-4, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
   {:aid 155, :source :place-5, :target :m3-1-start-job, :name :aa-155, :type :normal, :multiplicity 1, :bind {:jtype :blue}}
-  {:aid 156, :source :m3-1-start-job, :target :place-7, :name :aa-156, :type :normal, :multiplicity 1, :bind {:jtype :blue}}]}
+  {:aid 156, :source :m3-1-complete-job, :target :place-7, :name :aa-156, :type :normal, :multiplicity 1, :bind {:jtype :blue}}]}

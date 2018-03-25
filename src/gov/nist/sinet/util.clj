@@ -41,7 +41,8 @@
 
 ;;; (util/set-param! [:app :gp-params :timeout-secs] 1200)
 (defn set-param!
-  "The way into the app and other components for writing."
+  "The way into the app and other components for writing.
+   TYPICALLY, PATH START WITH :app."
   [path value]
   (alter-var-root
    (resolve 'gov.nist.sinet.run/system)

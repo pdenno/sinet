@@ -15,8 +15,9 @@
 (defn aliases [] ; POD temporary
   (alias 'fit  'gov.nist.sinet.fitness)
   (alias 'app 'gov.nist.sinet.app)
-  #_(alias 'fitt 'gov.nist.sinet.fitness-test) 
-  (alias 'gp   'gov.nist.sinet.gp)         
+  (alias 'fitt 'gov.nist.sinet.fitness-test) 
+  (alias 'gp   'gov.nist.sinet.gp)
+  (alias 'reach 'gov.nist.spntools.reach)         
   #_(alias 'gpt  'gov.nist.sinet.gp-test))
 
 (declare contemp-msgs next-time-line lax-reach max-marks full-interp? max-marks)
@@ -26,40 +27,46 @@
 ;;;====================================================================================
 ;;; Exceptional Fitness
 ;;;====================================================================================
+;;; An rgraph entry looks like this:
+;;;  [0 2 1 1 0 1 0 1 0 1 1 0]
+;;;  ([:m3-2-start-job    [0 2 1 0 1 2 0 1 0 0 1 0]]
+;;;   [:m2-complete-job   [0 2 0 1 0 1 0 1 1 1 1 0]]
+;;;   [:m3-1-complete-job [0 2 1 1 0 1 0 1 0 1 0 1]])
 (defn starting-links
-  "Based only on the rgraph and message firing, return all 
-   links that could start interpretation." 
+  "Based only on the rgraph and message :fire, return all 
+   links that could start interpretation (they need only match fire)." 
   [pn log]
   (if-let [msg (some #(when ((:ordinary log) (:act %)) %) (:raw log))]
     (let [line (:line msg)
           fire (:act msg)]
-      (distinct
-       (filter #(= fire (:fire %))
-               (map #(-> %
-                         (dissoc :rate-fn :rate)
-                         (assoc :line line))
-                  (:rgraph pn)))))
+      (reduce-kv (fn [result k v] ; k is mark; v is coll of [act Mp].
+                   (if-let [add (some #(when (= fire (first %))
+                                         {:M k
+                                          :act fire
+                                          :Mp (second %)
+                                          :line line})
+                                      v)]
+                     (conj result add)
+                     result))
+                 []
+                 (:rgraph pn)))
     (throw (ex-info "Log has no ordinary messages" {}))))
 
-(defn link+msg
-  "Return a map that augments link info with msg info."
-  [link msg]
-  (-> link
-      (assoc :m    (:m msg))
-      (assoc :job  (:j msg))
-      (assoc :clk  (:clk msg))
-      (assoc :line (:line msg))
-      (dissoc :rate-fn :clk :rate)))
-
-;;; BTW 'link' here is a combination of spntools-like link info and MJPdes-like msg info. (see link+msg.)
-(defn link-match
+;;; BTW 'link' here is a combination of spntools-like link info and MJPdes-like msg info.
+(defn link-match 
   "Return the link which follows from the current link and log msg."
-  [pn action llink msg]
-  (when-let [link (some #(when (and (= (:Mp llink) (:M %)) 
-                                    (= (:fire %) (:act msg)))
-                           %)
-                        (:rgraph pn))]
-    (link+msg link msg)))
+  [pn llink msg]
+  ;(reset! diag {:pn pn :llink llink :msg msg})
+  (let [act (:act msg)
+        Mp  (:Mp llink)]
+    (some #(when (= (first %) act)
+             {:M Mp
+              :act act
+              :Mp (second %)
+              :m (:m msg)
+              :job (:j msg)
+              :line (:line msg)})
+          (get (:rgraph pn) Mp))))
 
 (defn starved?
   "Return true if the argument machine (in msg) is starved.
@@ -122,51 +129,36 @@
     (println "..................."))
   (assoc pn :matched nil))
 
-;;; Process msgs in strict log-order:
 ;;; (1) If the msg is not ordinary...
 ;;;   (1.1) If starvation and not consistent, interpretation fails.
 ;;;   (1.2) If not starvation, no problem. <========= POD we know k-bounded, could we check blocked? too?
 ;;; (2) If the rgraph step matches, no problem.
-;;; (3) If job is new and rgraph step matches no problem, update :active-jobs
-;;; (5) If job not= current job but on :active-jobs and rgraph matches on that history,
-;;;     no problem (add to interp with a note).
-;;; (6) Otherwise interpretation failed.  (return nil)
+;;; (3) Otherwise interpretation failed. Return pn with :matched nil.
+;;; Also, if job is new and rgraph step matches no problem, update :active-jobs
 (defn next-match
   "If the argument msg is not ordinary, return information about it and the llink. 
    If the argument msg can advance the rgraph (i.e. ordinary), return augmented
    link information. Otherwise return nil."
   [pn log msg] 
   (let [job (:j msg)
-        llink (:matched pn)
-        slink (atom nil)]
+        llink (:matched pn)]
     (as-> pn ?pn
-      (cond (not ((:ordinary log) (:act msg)))                      ; (1)
-            (if (and (= (:mjpact msg) :st)
-                     (when-let [machine (:m msg)]
-                       (not (starved? llink msg (:marking-key pn)
-                                      (first (machine (:pulls-from pn)))))))
-              (match-starve-inconsistent ?pn msg)
-              (assoc ?pn :matched ; else create a link 
-                     {:exceptional true :act (:act msg) :Mp (:Mp llink) 
-                      :clk (:clk msg) :line (:line msg)})),
-              
-            (reset! slink (link-match ?pn :link llink msg))         ; (2)
-            (assoc ?pn :matched @slink),                              
-
-            (and (= :aj (:mjpact msg))                              ; (3)
-                 (reset! slink (link-match ?pn :aj llink msg)))
-            (assoc ?pn :matched @slink), 
-              
-            (and (contains? (:active-jobs ?pn) job)
-                 (reset! slink (link-match ?pn :active llink msg))) ; (5)
-            (assoc ?pn :matched @slink), 
-              
-            true (assoc ?pn :matched nil))                          ; (6)
-            
-            (cond-> ?pn
-              true                    (assoc :msg msg) ;!4
-              (= :aj (:mjpact msg))   (assoc :active-jobs (conj (:active-jobs ?pn) job)),
-              (= :ej (:mjpact msg))   (assoc :active-jobs (set/difference (:active-jobs pn) #{job}))))))
+      (if (not ((:ordinary log) (:act msg))) ; (1)
+        (if (and (= (:mjpact msg) :st)
+                 (when-let [machine (:m msg)]
+                   (not (starved? llink msg (:marking-key pn)
+                                  (first (machine (:pulls-from pn)))))))
+          (match-starve-inconsistent ?pn msg)
+          (assoc ?pn :matched ; else create a link 
+                 {:exceptional true :act (:act msg) :Mp (:Mp llink) 
+                  :clk (:clk msg) :line (:line msg)}))
+        ;; else ordinary
+        (assoc ?pn :matched (link-match ?pn llink msg)))
+      ;(do (println "line " (-> ?pn :matched :line) "matched =" (-> ?pn :matched :act)) ?pn)
+      (cond-> ?pn
+        true (assoc :msg msg)
+        (= :aj (:mjpact msg)) (assoc :active-jobs (conj (:active-jobs ?pn) job)),
+        (= :ej (:mjpact msg)) (assoc :active-jobs (set/difference (:active-jobs pn) #{job}))))))
 
 (defn match-contemp-block
   "next-match any contemporary message; return pn updated."
@@ -203,20 +195,25 @@
         (assoc :matched start-link) 
         (assoc :interp [start-link]))))
 
+;;;  [:place-2 :place-3 :place-4 :place-5 :place-6 :place-7 :place-8 :wait-1 :wait-2 :wait-3 :place-p-1 :place-p-2]
+;;;  {:act :m2-start-job, :det {:run {:m3-1 357, :m4 358, :m2 nil, :m1 364, :m3-2 359},
+;;;                             :bufs {:b2 [360 361], :b1 [362 363], :b3 []}}, :line 0}
 (def diag-pn (atom nil))
 (defn reset-diag-step-interp!
   "Diagnostic: Reset the PN to its starting point. This is what interp does!"
   []
+  (util/set-param! [:app :problem :scada-log] (scada/load-scada "data/SCADA-logs/parallel-1&2.clj"))
   (reset! diag-pn (-> (load-file "data/PNs/parallel-1&2-corrected.clj")
-                      (lax-reach 2)
-                      (assoc :diag-occupy-ok? true) ; POD stuff below done by hand, obviously. 
+                      (lax-reach 2) ; POD stuff below done by hand, obviously. 
+                      (assoc :diag-occupy-ok? true) ; set :report {:job-detail? true} to get it. 
                       (assoc :place-map {:b1 :place-3 :b2 :place-5 :b3 :place-7})
                       (assoc :occupy {:place-3 2 :place-5 2 :place-7 0}) 
-                      (prep-interp (scada/load-scada "data/SCADA-logs/parallel-1&2.clj")
+                      (prep-interp (-> (app-info) :problem :scada-log)
                                    {:M  [1 2 0 2 1 0 1 0 1 0 1 0], :fire :m2-start-job,
                                     :Mp [1 1 1 2 1 0 1 0 0 0 1 0],
                                     :line 0})))
-  true)
+  ;; If it returns false, rgraph is botched. 
+  (contains? @diag-pn :rgraph))
 
 (def last-step-pn (atom nil))
 (defn diag-unstep-interp! ; POD probably not good for more that one step.
@@ -325,6 +322,8 @@
            (-> (loop-fn dec #(< % 0)) rest reverse vec)
            (loop-fn inc #(> % max-line)))))))
 
+;;; POD probably belong in spntools/reach, with other simple- stuff. 
+
 ;;; POD For all combos, replace vals in r-places with index in marking, then choose one from each set (combinatorial)
 ;;;     Replace those values with 1s, all other values in marking key are zeros.
 ;;;     Using all possibilities, choose the rgraph that has most states.
@@ -334,14 +333,12 @@
   "Set the marking-key such there is one token on each machine.
    Return the pn with an artificially k-bounded :rgraph associated with this marking."
   [pn max-k]
-    (as-> pn ?pn 
-      (util/reasonably-marked-pn ?pn) 
-      (assoc ?pn :rgraph (pnr/simple-reach ?pn (max-marks ?pn max-k))) ; packed
-      (assoc ?pn :k-limited? (-> ?pn :rgraph :k-limited?)) ; unpack
-      (assoc ?pn :rgraph (-> ?pn :rgraph :rgraph vec))     ; unpack 
-      (if (pnu/m-mp-mp-m-valid? (:rgraph ?pn))
-        ?pn
-        (dissoc ?pn :rgraph))))
+  (let [pn (util/reasonably-marked-pn pn)
+        rgraph-map (pnr/simple-reach pn (max-marks pn max-k))
+        valid? (pnr/simple-reach-valid? (:rgraph rgraph-map))]
+    (cond-> pn ; unpack rgraph-map or forget it. 
+      valid? (assoc :rgraph     (:rgraph rgraph-map)) 
+      valid? (assoc :k-limited? (:k-limited? rgraph-map)))))
 
 (defn max-marks
   "Return a vector where buffer places are max-k and others are 1."
@@ -383,11 +380,13 @@
   "Return a map indicating what markings are associated with what message types, 
    where message types are either ':ordinary' or some exceptional message type."
   [pn log]
-  (let [msg-types (conj (:exceptional log) :ordinary)
-        markings (map :M (:rgraph pn))]
+  (reset! diag {:pn pn :log log})
+  (let [exceptional (:exceptional log)
+        msg-types (vec (conj exceptional :ordinary))
+        markings (keys (:rgraph pn))]
     (when-let [interp (not-empty (:interp pn))]
       (let [report (reduce (fn [sum msg]
-                             (if (contains? msg :act)
+                             (if (exceptional (msg :act))
                                (update-in sum [(:act msg) (:Mp msg)] inc)
                                (update-in sum [:ordinary (:M msg)] inc)))
                            (zipmap msg-types
@@ -415,21 +414,30 @@
       0.00001) ; There are transitions in the rgraph that might not have been exercised in the log
     0.00001))
 
+(defn flat-rgraph
+  "Given a rgraph map, return a vector of vectors where each element is [M Mp]."
+  [rgraph]
+  (reduce-kv (fn [accum k v]
+               (into accum (map #(vector k (second %)) v)))
+             []
+             rgraph))
+
 (defn rgraph2loom-probability 
   "Return a loom weighted-digraph where costs are based on probability (1/p)."
   [rgraph trans-cnt]
-  (apply graph/weighted-digraph
-         (map #(let [m  (:M %)
-                     mp (:Mp %)
-                     p (trans-prob m mp trans-cnt)]
-                 (vector m mp (/ 1 p)))
-              rgraph)))
+  (let [flat (flat-rgraph rgraph)]
+    (apply graph/weighted-digraph
+           (map #(let [m  (first  %) ; :M
+                       mp (second %) ; :Mp
+                       p (trans-prob m mp trans-cnt)]
+                   (vector m mp (/ 1 p)))
+                flat))))
 
 (defn rgraph2loom-steps
   "Return a loom weighted-digraph that simply counts steps."
   [rgraph]
   (apply graph/weighted-digraph
-         (map #(vector (:M %) (:Mp %) 1) rgraph)))
+         (map #(conj % 1) (flat-rgraph rgraph))))
 
 (defn trans-counts
   "Create a table indexed by :M and counts the number of transitions to :Mp
@@ -576,8 +584,8 @@
   [rgraph]
   (let [highs (reduce (fn [highs mark]
                         (map max highs mark))
-                      (repeat (-> rgraph first :M count) 0)
-                      (map :M rgraph))]
+                      (repeat (-> rgraph keys first count) 0)
+                      (keys rgraph))]
     ;; zero? implies a bad PN, BTW. 
     (mapv #(if (zero? %) 0 (/ 1 %)) highs)))
 
@@ -737,11 +745,10 @@
                       0
                       (filter #(util/pn-uses-machine? pn %) (:machines log)))]
     (assoc inv :discipline score)))
-    
 
-  
-
-
-
-
-  
+(defn tryme [rgraph]
+  (reduce (fn [accum link]
+            (update accum (:M link) #(vec (conj % [(:fire link) (:Mp link)]))))
+          {}
+          rgraph))
+          
