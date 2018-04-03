@@ -12,7 +12,7 @@
 
 (def ^:private diag (atom nil))
 (declare scada-gather-job job-map scada-patterns exceptional-msgs rand-job-trace)
-(declare buffer-discipline new-line-nums load-scada-raw all-machines)
+(declare buffer-discipline new-line-nums load-scada-raw all-machines drop-front-exceptional)
 
 (defn refresh-log!
   "Pull more data from the log, updating (-> (app-info) :problem :scada-log)"
@@ -28,6 +28,7 @@
   "Process a vector of SCADA data."
   [raw]
   (as-> {:raw raw} ?log
+    (drop-front-exceptional ?log)
     (new-line-nums ?log)
     (job-map ?log)
     (scada-patterns ?log)
@@ -289,6 +290,16 @@
                           ?jmap
                           (keys ?jmap)))]
     (assoc log :job-map job-map)))
+
+(defn drop-front-exceptional
+  "Remove things that look like exceptional from the start of the buffer."
+  [log]
+  (let [raw (:raw log)]
+    (assoc log :raw
+           (loop [idx 0]
+             (if (#{:bl :un :st :us} (:mjpact (nth raw idx)))
+               (recur (inc idx))
+               (subvec raw idx))))))
 
 ;;;==============================
 ;;; log-only BAS/BBS analysis 

@@ -50,86 +50,42 @@
    #(assoc-in % [:app :pop] pop))
   pop)
 
-(def ^:private diag (atom nil))
+(def diag (atom nil))
 
 ;;;================================================================
 ;;; Generate initial population
 ;;;================================================================
-
-;;; {:tkns [{:jtype :blue, :id 1}], :rep {:act :m2-complete-job, :mjpact :ej, :m :m2}}}
-;;; (-> (scada/rand-job-trace) mjpdes2pn make-plan)
-;;; {:cnt 6,
-;;;  :t
-;;;  [{:act :m1-start-job, :mjpact :aj, :m :m1}
-;;;   {:act :m2-unstarved, :mjpact :us, :m :m2}
-;;;   {:act :m2-starved, :mjpact :st, :m :m2}
-;;;   {:act :m1-complete-job, :mjpact :bj, :m :m1, :bf :b1}
-;;;   {:act :m2-start-job, :mjpact :sm, :m :m2, :bf :b1}
-;;;   {:act :m2-complete-job, :mjpact :ej, :m :m2}],
-;;;  :p [{:name :place-1} {:name :place-2} {:name :place-3} {:name :place-4} {:name :place-5} {:name :place-6}]}
-(defn make-vertices
-  "Return map with vectors containing skeleton transition and place definition maps."
-  [msg]
-  (reduce (fn [plan msg]
-            (as-> plan ?p
-              (update ?p :cnt inc)
-              (update ?p :t conj msg)
-              (update ?p :p conj {:name (keyword (format "place-%d" (:cnt ?p)))})))
-          {:cnt 0 :t [] :p []}
-          msg))
-
-;;; POD This still needs work. There needs to be higher level operations
-;;; These include (1) recognizing subsystems and preserving them from further mucking.
-;;; (2) adding feeder lines, (3) messing with buffer size. The setting of rates
-;;; and distributions of timed transitions will be another process, one that also
-;;; looks at the default causal knowledge. See Sankaran Mahadevan's paper with Sudarsan
-;;; "Automated uncertainty quantification analysis using a system model and data"
-;;; (4) The NN problem with blocking/starvation.
-(defn eden-pn
-  "Return a PN expressing the places and transitions of the argument 'plan.'
-   It is a loop made by using visible places and transitions with additional
-   hidden places and transitions necessary to close the loop."
-  [plan]
-  (as-> {:places [] :transitions [] :arcs []} ?pn
-    (eden-places ?pn (:p plan))
-    (eden-trans  ?pn (:t plan))
-    (eden-arcs   ?pn plan)))
-
-(defn eden-places
-  "Update the PN with :places according to the seq of plan-maps for places."
-  [pn plans]
-  (as-> pn ?pn
-    (assoc ?pn :places
-           (vec (map (fn [plan]
-                       (as-> (pnu/make-place pn :name (:name plan)) ?pl
-                         (assoc ?pl :visible? (if (= :silent (:mjpact plan)) false true))))
-                      plans)))
-    (update-in ?pn [:places 0 :initial-tokens] inc))) ; Add a token to make it alive
-
-(defn eden-trans
-  "Update the PN with :transitions according to the seq of plan-maps for transitions."
-  [pn plans]
-  (assoc pn :transitions
-         (vec (map (fn [plan]
-                     (as-> (pnu/make-transition pn :name (:act plan)) ?tr
-                       (assoc ?tr :type :exponential) ; (if (= 0 (rand-int 2)) :exponential :immediate))
-                       (assoc ?tr :rep (dissoc plan :name :dets :ends))
-                       (assoc ?tr :visible? (if (= :silent (:mjpact plan)) false true))))
-                   plans))))
-
-(defn eden-arcs
-  "Update the PN with :arc according to the plan."
-  [pn plan]
-  (assoc pn :arcs
-         (reduce (fn [arcs [from to]] (conj arcs (pnu/make-arc pn from to)))
-                 []
-                 (map vec (partition
-                           2 (interleave
-                              (vec (interleave (map :name (:p plan)) (map :act (:t plan))))
-                              ;; connect last first
-                              (vec (interleave (map :act (:t plan))
-                                               (conj (vec (rest (map :name (:p plan))))
-                                                     (first (map :name (:p plan))))))))))))
+;;; POD I can't decide whether or not I want a connected individual!
+(defn make-eden
+  "Make a PN from a SCADA job trace."
+  [trace]
+  (let [cnt (atom 0)]
+    (as-> {:places [] :transitions [] :arcs []} ?pn
+      (reduce
+       (fn [pn msg]
+         (-> pn
+             (update :transitions conj
+                     (-> (pnu/make-transition pn :name (:act msg) :type :exponential)
+                         (assoc :visible? true)
+                         (assoc :rep (dissoc msg :dets :n :bf :ends))))
+             (update :places conj
+                     (pnu/make-place pn
+                                     :name (keyword (format "place-%d" (swap! cnt inc))) 
+                                     :initial-tokens (if (== 1 @cnt) 1 0)))))
+       ?pn
+       trace)
+      (update ?pn :places #(vec (butlast %)))
+      (let [place-names (->> ?pn :places (map :name))
+            trans-names (->> ?pn :transitions (map :name))]
+        (reduce (fn [pn [src tar]]
+                  (update pn :arcs conj
+                          (-> (pnu/make-arc pn src tar)
+                              (assoc :bind {:jtype :blue})
+                              (assoc :priority 1))))
+                ?pn
+                (interleave 
+                 (partition 2 (interleave trans-names place-names))
+                 (partition 2 (interleave place-names (rest trans-names)))))))))
 
 ;;; POD Currently only one color.
 (defn add-color-binding
@@ -190,9 +146,7 @@
   "Translate a SCADA job trace into a PN."
   [job-trace]
   (->> job-trace
-       make-vertices         ; returns map of skeletons for place and transition definitions
-       eden-pn               ; complete skeletons and add :arcs, making a bipartite graph.
-       add-color-binding     ; add e.g. :bind {:jtype :blue} to :arcs for multi-job paths.
+       make-eden
        add-flow-priorities   ; add info for deciding which tokens go where when multiple in/out on trans.
        util/check-pn))
 
@@ -824,6 +778,13 @@
       (update :pn util/reasonably-marked-pn)
       rep/push-inv))
 
+(defn diag-push-pn [pn]
+  "Push an individual to the web client for viewing"
+  (-> (util/map->Inv {:pn pn})
+      (update :pn util/reasonably-marked-pn)       
+      rep/push-inv))
+
+
 (defn diag-write-inv
   "Write an Inv so that it is readable."
   [inv]
@@ -935,9 +896,3 @@
         ;; hook in to downstream-place                 
         (update :arcs #(conj % (-> (pnu/make-arc pn2 p1-start-job (:dn-place pn2-pn1))
                                    (assoc :bind {:jtype :blue}))))))) ; POD color
-        
-  
-  
-  
-
-

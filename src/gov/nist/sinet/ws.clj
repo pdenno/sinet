@@ -41,9 +41,9 @@
 
 (defmethod event-msg-handler :chsk/ws-ping
   [_]
-    (swap! ping-counts inc)
-    (when (= 0 (mod @ping-counts 100))
-      (println "ping counts: " @ping-counts)))
+  (swap! ping-counts inc)
+  #_(when (= 0 (mod @ping-counts 100))
+    (println "ping count: " @ping-counts)))
 
 (defmethod event-msg-handler :rente/testevent
   [{:as ev-msg :keys [event id ?data ring-req ?reply-fn send-fn]}]

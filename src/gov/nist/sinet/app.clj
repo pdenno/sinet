@@ -25,28 +25,28 @@
 (def des-model
    (des/map->Model 
     {:line     
-     {:m1 (des/map->ExpoMachine {:lambda 0.1 :mu 0.9 :W 1.0 })  
+     {:wc1 (des/map->ExpoMachine {:lambda 0.1 :mu 0.9 :W 1.0 })  
       :b1 (des/map->Buffer {:N 2}) ; originally 3                              
-      :m2 (des/map->ExpoMachine {:lambda 0.1 :mu 0.9 :W 1.0 })
+      :wc2 (des/map->ExpoMachine {:lambda 0.1 :mu 0.9 :W 1.0 :discipline :BBS})
       :b2 (des/map->Buffer {:N 2}) ; originally 5
-      :m3-1 (des/map->ExpoMachine {:lambda 0.1 :mu 0.9 :W 1.0 })
-      :m3-2 (des/map->ExpoMachine {:lambda 0.1 :mu 0.9 :W 1.0 })
-;     :m3-3 (des/map->ExpoMachine {:lambda 0.1 :mu 0.9 :W 1.0 }) 
+      :wc3-1 (des/map->ExpoMachine {:lambda 0.1 :mu 0.9 :W 1.0 })
+      :wc3-2 (des/map->ExpoMachine {:lambda 0.1 :mu 0.9 :W 1.0 })
+      :wc3-3 (des/map->ExpoMachine {:lambda 0.1 :mu 0.9 :W 1.0 }) 
       :b3 (des/map->Buffer {:N 1})                              
-      :m4 (des/map->ExpoMachine {:lambda 0.1 :mu 0.9 :W 1.0 }) 
-;     :b4 (des/map->Buffer {:N 1})
-;     :m5 (des/map->ExpoMachine {:lambda 0.1 :mu 0.9 :W 1.0 })
+      :wc4 (des/map->ExpoMachine {:lambda 0.1 :mu 0.9 :W 1.0 }) 
+      :b4 (des/map->Buffer {:N 1})
+      :wc5 (des/map->ExpoMachine {:lambda 0.1 :mu 0.9 :W 1.0 })
       }
-     :topology [:m1 :b1 :m2 :b2
-                {:type :parallel-or :name :m3 :machines [:m3-1 :m3-2]}
-                :b3 :m4 #_:b4 #_:m5]
-     :entry-point :m1
+     :topology [:wc1 :b1 :wc2 :b2
+                {:type :parallel-or :name :wc3 :machines [:wc3-1 :wc3-2]}
+                :b3 :wc4 :b4 :wc5]
+     :entry-point :wc1
      :report {:continuous? true :up&down? false :job-detail? true}
      :params {:warm-up-time 500}
      :jobmix {:jobType1 (des/map->JobType {:portion 0.8
-                                       :w {:m1 1.0, :m2 1.0, :m3 3.0, :m4 1.0, #_:m5 #_1.0}})
+                                       :w {:wc1 1.0, :wc2 1.0, :wc3 3.0, :wc4 1.0, :wc5 1.0}})
               :jobType2 (des/map->JobType {:portion 0.2
-                                           :w {:m1 1.0, :m2 1.0, :m3 3.6, :m4 1.2, #_:m5 #_1.0}})}}))
+                                           :w {:wc1 1.0, :wc2 1.0, :wc3 3.6, :wc4 1.2, :wc5 1.0}})}}))
 
 (def mutation-dist "The pdf for ordinary mutations (not eden mutations)"
   [[:add-place                  0] ; Add place (mine can't be absorbing, thus Nobile 1&2).

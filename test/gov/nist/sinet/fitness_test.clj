@@ -21,7 +21,6 @@
   [v1 v2 tol]
   (< (- v1 tol) v2 (+ v1 tol)))
 
-
 (def hopeful-pn (-> (load-file "data/PNs/hopeful-pn.clj")
                     (assoc :pulls-from {:m1 [], :m2 [:Place-103]})))
 
@@ -72,27 +71,28 @@
                 (assoc :pulls-from {:m1 [], :m2 [:Place-13], :m3 [:Place-14]})
                 (assoc :place-map {:b1 :Place-13 :b2 :Place-14})
                 (assoc :occupy {:Place-13 2 :Place-14 2})
-                (fit/prep-interp     log {:M [0 1 0 1 0 1 2 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 2 2], :line 0})
-                (fit/interpret-scada log {:M [0 1 0 1 0 1 2 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 2 2], :line 0})
+                (fit/prep-interp       log)
+                (fit/prep-interp-start log {:M [0 1 0 1 0 1 2 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 2 2], :line 0})
+                (fit/interpret-scada   log {:M [0 1 0 1 0 1 2 2], :fire :m3-complete-job, :Mp [1 1 0 1 0 0 2 2], :line 0})
                 (-> :interp count))))))
 
 (deftest find-interp-3m-all-bbs
-  (testing "that a 3-machine with all machine using BBS discipline interprets."
-    (let [log (scada/load-scada "data/SCADA-logs/scada-3m-2j-bufs-out.clj")
-          pn  (load-file "data/PNs/pn1-2018-01-19.clj")]
-      (is (== 3002 (-> (fit/find-interp pn log) :interp count))))))
+  (testing "that a 3-machine with all machine using BAS discipline interprets."
+    (let [log (scada/load-scada "data/SCADA-logs/fitness-test1-out.clj")
+          pn  (load-file "data/PNs/fitness-test1-pn.clj")]
+      (is (-> (fit/find-interp pn log) :full-interp?)))))
 
 (deftest find-interp-3m-bas-bbs
   (testing "that a 3-machine with m1 using BAS and m2 BBS discipline interprets."
-    (let [log (scada/load-scada "data/SCADA-logs/scada-3m-2j-bufs-out.clj")
-          pn  (load-file "data/PNs/pn2-2018-01-19.clj")]
-      (is (== 3002 (-> (fit/find-interp pn log) :interp count))))))
+    (let [log (scada/load-scada "data/SCADA-logs/fitness-test2-out.clj")
+          pn  (load-file "data/PNs/fitness-test2-pn.clj")]
+      (is (-> (fit/find-interp pn log) :full-interp?)))))
 
 (deftest find-interp-parallel-jms
   (testing "that the 2-parallel workcenter all BAS interprets"
     (let [log (scada/load-scada "data/SCADA-logs/parallel-1&2.clj")
           pn  (load-file "data/PNs/parallel-1&2-corrected.clj")]
-      (is true #_(== 1000 (-> (fit/find-interp pn log) :interp count))))))
+      (is (-> (fit/find-interp pn log) :full-interp?)))))
 
 (def rgraph
   {[0 0 1 1 1] [[:m1-start-job [0 1 0 1 2]] [:m2-complete-job [1 0 1 0 1]]],
@@ -201,6 +201,12 @@
              {}
              m))
 
+(deftest rgraph-simple-test
+  (testing "that an rgraph can be correctly calculated."
+    (let [pn (fit/lax-reach hopeful-pn 3)]
+      (is (= (map-with-set-vals (:rgraph pn))
+             (map-with-set-vals rgraph))))))
+
 (deftest full-winner-process
   (testing "that the process works to winners and that intermediate test data is in sync."
     (let [log (scada/load-scada "data/SCADA-logs/m2-j1-n3-block-mild-out.clj")
@@ -217,8 +223,6 @@
                                (map #(fit/parzen-pdf-msg ?pn %)
                                     (-> ?pn :msg-table keys)))))]
       (is (= (:norm-factors pn) norm-factors))
-      (is (= (map-with-set-vals (:rgraph pn))
-             (map-with-set-vals rgraph)))
       (is (= (:msg-table pn) msg-table))
       (is (= (:trans-counts pn) trans-counts))
       (is (= (fit/choose-winners pn)

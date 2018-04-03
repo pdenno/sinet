@@ -17,10 +17,11 @@
   (alias 'app 'gov.nist.sinet.app)
   (alias 'fitt 'gov.nist.sinet.fitness-test) 
   (alias 'gp   'gov.nist.sinet.gp)
-  (alias 'reach 'gov.nist.spntools.reach)         
+  (alias 'reach 'gov.nist.spntools.reach)
+  (alias 'app   'gov.nist.sinet.app)
   #_(alias 'gpt  'gov.nist.sinet.gp-test))
 
-(declare contemp-msgs next-time-line lax-reach max-marks full-interp? max-marks)
+(declare contemp-msgs next-time-line lax-reach max-marks max-marks)
 (declare interp-possible? act2trans rgraph2loom-steps buffers-to-constrain constrain-buffer-size)
 
 (def ^:private diag (atom nil))
@@ -56,7 +57,6 @@
 (defn link-match 
   "Return the link which follows from the current link and log msg."
   [pn llink msg]
-  ;(reset! diag {:pn pn :llink llink :msg msg})
   (let [act (:act msg)
         Mp  (:Mp llink)]
     (some #(when (= (first %) act)
@@ -139,11 +139,11 @@
   "If the argument msg is not ordinary, return information about it and the llink. 
    If the argument msg can advance the rgraph (i.e. ordinary), return augmented
    link information. Otherwise return nil."
-  [pn log msg] 
+  [pn msg ordinary?]
   (let [job (:j msg)
         llink (:matched pn)]
     (as-> pn ?pn
-      (if (not ((:ordinary log) (:act msg))) ; (1)
+      (if (not ordinary?) 
         (if (and (= (:mjpact msg) :st)
                  (when-let [machine (:m msg)]
                    (not (starved? llink msg (:marking-key pn)
@@ -160,67 +160,84 @@
         (= :aj (:mjpact msg)) (assoc :active-jobs (conj (:active-jobs ?pn) job)),
         (= :ej (:mjpact msg)) (assoc :active-jobs (set/difference (:active-jobs pn) #{job}))))))
 
-(defn match-contemp-block
-  "next-match any contemporary message; return pn updated."
-  [pn log]
-  (let [old-match  (:matched pn)]
-    (reset! diag {:pn pn :old-match old-match :log log})
-    (if-let [pn (some #(let [pn (next-match (assoc pn :matched old-match) log %)] ;!
-                         (when (:matched pn) pn))
-                      (:msg-buf pn))]
-      (as-> pn ?pn ;!3 and conj!
-        (assoc ?pn :msg-buf (remove #(= (-> ?pn :matched :line) (:line %)) (:msg-buf ?pn)))
-        (assoc ?pn :interp (conj (:interp ?pn) (:matched ?pn)))
-        (cond-> ?pn
-          *debugging* (assoc :occupy (diag-occupy-map ?pn))
-          *debugging* (diag-report-interp)))
+;;; NEW!
+(defn match-msg
+  "Replacement for match-contemp-block, assumes DES gets order right."
+  [pn msg ordinary?]
+  (as-> pn ?pn
+      (next-match ?pn msg ordinary?)
+      (update ?pn :interp #(conj % (:matched ?pn)))
+      (cond-> ?pn
+        *debugging* (assoc :occupy (diag-occupy-map ?pn))
+        *debugging* (diag-report-interp))
       (do 
-        (when *debugging* (cl-format *out* "~%Failed on msg block: ~{~%    ~A~}~%" (:msg-buf pn)))
-        (assoc pn :matched nil)))))
+        (when (and *debugging* (not (:matched pn)))
+          (cl-format *out* "~%Failed on msg: ~%    ~A~%" msg))
+        ?pn)))
 
-(defn prep-interp [pn log start-link]
-  "Prepare the PN for interpretation."
-  (when *debugging*
-    (println "msg = " (-> log :raw first))
-    (println "start = " start-link))
+(defn prep-interp [pn log]
+  "Set some properties that are invarient to start-link"
   (let [machines (util/machines-of pn)
         pulls-from (map #(util/pulls-from pn %) machines)]
     (-> pn 
-        (assoc :msg-buf (remove #(= (:line %) (:line start-link))
-                                (contemp-msgs log (:line start-link))))
         (assoc :pulls-from (zipmap machines pulls-from))
         (assoc :occupy-wrong (zipmap pulls-from (repeat (count pulls-from) 0)))
-        (assoc :active-jobs (scada/active-jobs log))
-        (assoc :start-link start-link) ; useful for debugging
-        (assoc :matched start-link) 
-        (assoc :interp [start-link]))))
+        (assoc :active-jobs (scada/active-jobs log)))))
+
+(defn prep-interp-start [pn log start-link]
+  "Set :matched to start-link and :interp to [start-link]."
+  (when *debugging*
+    (println "msg = " (-> log :raw first))
+    (println "start = " start-link))
+  (-> pn
+      (assoc :full-interp? false)
+      (assoc :matched start-link) 
+      (assoc :interp [start-link])))
 
 ;;;  [:place-2 :place-3 :place-4 :place-5 :place-6 :place-7 :place-8 :wait-1 :wait-2 :wait-3 :place-p-1 :place-p-2]
 ;;;  {:act :m2-start-job, :det {:run {:m3-1 357, :m4 358, :m2 nil, :m1 364, :m3-2 359},
 ;;;                             :bufs {:b2 [360 361], :b1 [362 363], :b3 []}}, :line 0}
 (def diag-pn (atom nil))
-(defn reset-diag-step-interp!
+#_(defn reset-diag-step-interp!
   "Diagnostic: Reset the PN to its starting point. This is what interp does!"
   []
   (util/set-param! [:app :problem :scada-log] (scada/load-scada "data/SCADA-logs/parallel-1&2.clj"))
-  (reset! diag-pn (-> (load-file "data/PNs/parallel-1&2-corrected.clj")
-                      (lax-reach 2) ; POD stuff below done by hand, obviously. 
-                      (assoc :diag-occupy-ok? true) ; set :report {:job-detail? true} to get it. 
-                      (assoc :place-map {:b1 :place-3 :b2 :place-5 :b3 :place-7})
-                      (assoc :occupy {:place-3 2 :place-5 2 :place-7 0}) 
-                      (prep-interp (-> (app-info) :problem :scada-log)
-                                   {:M  [1 2 0 2 1 0 1 0 1 0 1 0], :fire :m2-start-job,
-                                    :Mp [1 1 1 2 1 0 1 0 0 0 1 0],
-                                    :line 0})))
+  (let [log (-> (app-info) :problem :scada-log)]
+    (reset! diag-pn (-> (load-file "data/PNs/parallel-1&2-corrected.clj")
+                        (lax-reach 2) ; POD stuff below done by hand, obviously. 
+                        (assoc :diag-occupy-ok? true) ; set :report {:job-detail? true} to get it. 
+                        (assoc :place-map {:b1 :place-3 :b2 :place-5 :b3 :place-7})
+                        (assoc :occupy {:place-3 2 :place-5 2 :place-7 0})
+                        (prep-interp log)
+                        (prep-interp-start log
+                                           {:M  [1 2 0 2 1 0 1 0 1 0 1 0], :fire :m2-start-job,
+                                            :Mp [1 1 1 2 1 0 1 0 0 0 1 0],
+                                            :line 0})))
   ;; If it returns false, rgraph is botched. 
-  (contains? @diag-pn :rgraph))
-
-(def last-step-pn (atom nil))
-(defn diag-unstep-interp! ; POD probably not good for more that one step.
+    (contains? @diag-pn :rgraph)))
+[    1        1       0         2       1       0       1        0   ]
+[:place-2 :place-3 :place-4 :place-5 :place-6 :wait-1 :wait-2 :wait-3]
+;;; m1 busy
+;;; m2 waiting
+;;; m3 busy
+;;; b1 = 1
+;;; b2 = 2
+(defn reset-diag-step-interp!
+  "Diagnostic: Reset the PN to its starting point. This is what interp does!"
   []
-  "Undo the effect of the last interpretation step."
-  (reset! diag-pn @last-step-pn)
-  true)
+  (util/set-param! [:app :problem :scada-log] (scada/load-scada "data/SCADA-logs/fitness-test2-out.clj"))
+  (let [log (-> (app-info) :problem :scada-log)]
+    (reset! diag-pn (-> (load-file "data/PNs/fitness-test2-pn.clj")
+                        (lax-reach 2) ; POD stuff below done by hand, obviously. 
+                        (assoc :diag-occupy-ok? true) ; set :report {:job-detail? true} to get it. 
+                        (assoc :place-map {:b1 :place-3 :b2 :place-5})
+                        (assoc :occupy {:place-3 1 :place-5 1})
+                        (prep-interp log)
+                        (prep-interp-start log {:M [ 1 1 1 1 1 0 0 0] :act :m2-complete-job
+                                                :Mp [1 1 0 2 1 0 1 0] :line 0})))
+    ;; If it returns false, rgraph is botched. 
+    (contains? @diag-pn :rgraph)))
+(def last-step-pn (atom nil))
 
 (defn diag-step-interp!
   []
@@ -228,15 +245,20 @@
   (binding [*debugging* true]
     (let [pn @diag-pn
           log (-> (app-info) :problem :scada-log)]
-      (if (full-interp? pn log)
-        (println "Full interpretation!")
-        (do (reset! last-step-pn pn)
-            (reset! diag-pn 
-                    (cond-> pn
-                      (empty? (:msg-buf pn))
-                      (assoc :msg-buf (contemp-msgs log (next-time-line log (-> pn :matched :line)))), ;!
-                      true (match-contemp-block log)))))
-    true)))
+      (cond (== (-> pn :interp count) (-> log :raw last :line)) ; POD add -1 elems at head if exceptionals.
+            (println "Full interpretation!"),
+            (not (:matched pn))
+            (println "Interpretation Failed."),
+            :else (let [msg (nth (:raw log) (inc (-> pn :matched :line)))]
+                    (reset! last-step-pn pn)
+                    (reset! diag-pn (match-msg pn msg ((:ordinary log) (:act msg)))))))
+    true))
+
+(defn diag-unstep-interp! ; POD probably not good for more that one step.
+  []
+  "Undo the effect of the last interpretation step."
+  (reset! diag-pn @last-step-pn)
+  true)
 
 (defn interpret-scada
   "Describe how the message stream could be accounted for by this PN. 
@@ -244,26 +266,28 @@
     - a link augmented with :line and :job (if an ordinary message is processed), or
     - a map naming an exceptional message (if an such a message is processed)."
   [pn log start-link]
-  (binding [*debugging* false] ; this must be false for fitness_test.clj testing. 
-    (loop [pn (prep-interp pn log start-link)]
-      (as-> pn ?pn
-        (cond-> ?pn
-          (empty? (:msg-buf ?pn)) 
-          (assoc :msg-buf (contemp-msgs log (next-time-line log (-> ?pn :matched :line)))), ;!
-          true (match-contemp-block log))
-        (cond (not (:matched ?pn))
-              (assoc ?pn :interp []), 
-              (full-interp? ?pn log)
-              (dissoc ?pn :msg-buf :active-jobs),
-              true   ; continue
-              (recur ?pn))))))
+  ;(println "start-link =" start-link)
+  (binding [*debugging* false] ; Only use this with diag stepping. Needs :occupy, etc. 
+    (let [raw (:raw log)
+          ordinary? (:ordinary log)
+          last-idx (-> raw last :line)]
+      (loop [pn (prep-interp-start pn log start-link)
+             idx (:line start-link)]
+        ;(println "line = " idx)
+        ;(when (== idx 1277) (reset! diag-pn pn) (throw (ex-info "Fails here" {})))
+        (cond (== idx last-idx)   (assoc pn :full-interp? true)  ; success
+              (not (:matched pn)) (assoc pn :full-interp? false) ; failure
+              :else (let [msg (nth raw (inc (-> pn :matched :line)))
+                          pn  (match-msg pn msg (ordinary? (:act msg)))]
+                      (recur pn (inc idx))))))))                 ; continue
 
 (defn interp-k-some-start-link
   "Try to interpret the log where the rgraph reflects a given k-boundedness."
   [pn log start-links]
-  (some #(let [result-pn (interpret-scada pn log %)]
-           (when (full-interp? result-pn log) result-pn))
-        start-links))
+  (let [pn (prep-interp pn log)]
+    (some #(let [result-pn (interpret-scada pn log %)]
+             (when (:full-interp? result-pn) result-pn))
+          start-links)))
 
 (defn interp-some-k
   "Calculate the reachability graph either interpret with supplied starting links
@@ -287,9 +311,7 @@
   ([pn log min-max-k max-max-k] 
    (when (interp-possible? pn log)
      (let [machines (vec (util/machines-of pn))] 
-       (as-> pn ?pn ; memoize util/pulls-from
-         (assoc ?pn :pulls-from (zipmap machines (map #(util/pulls-from ?pn %) machines)))
-         (interp-some-k ?pn log :min-max-k min-max-k :max-max-k max-max-k))))))
+       (interp-some-k pn log :min-max-k min-max-k :max-max-k max-max-k)))))
 
 ;;; Interp utils ==================
 (defn next-time-line
@@ -350,14 +372,6 @@
              1)
           (:marking-key pn))))
 
-(defn full-interp?
-  "Return true if the interpretation read the whole log."
-  [pn log]
-  (let [llink (:matched pn)]
-    (and (number? (:line llink))
-         (== (-> log :raw last :line)
-             (:line llink)))))
-
 ;;; POD Needs work. Too restrictive! async serial line. <================= parallel is a problem 
 (defn interp-possible?
   "Returns true if there are enough buffers for an async serial line."
@@ -380,7 +394,6 @@
   "Return a map indicating what markings are associated with what message types, 
    where message types are either ':ordinary' or some exceptional message type."
   [pn log]
-  (reset! diag {:pn pn :log log})
   (let [exceptional (:exceptional log)
         msg-types (vec (conj exceptional :ordinary))
         markings (keys (:rgraph pn))]
@@ -746,9 +759,21 @@
                       (filter #(util/pn-uses-machine? pn %) (:machines log)))]
     (assoc inv :discipline score)))
 
-(defn tryme [rgraph]
-  (reduce (fn [accum link]
-            (update accum (:M link) #(vec (conj % [(:fire link) (:Mp link)]))))
-          {}
-          rgraph))
-          
+(defn tryme []
+  (let [log (scada/load-scada "data/SCADA-logs/fitness-test2-out.clj")
+        pn  (load-file "data/PNs/fitness-test2-pn.clj")]
+    (-> (reset! diag (find-interp pn log)) :full-interp?)))
+
+(defn tryme2 []
+  (let [pn  (load-file "data/PNs/fitness-test2-pn.clj")
+        log (scada/load-scada "data/SCADA-logs/fitness-test2-out.clj")]
+    (interp-some-k pn
+                   log
+                   :min-max-k 2
+                   :max-max-k 2
+                   :start-links [{:M [ 1 1 1 1 1 0 0 0] :act :m2-complete-job :Mp [1 1 0 2 1 0 1 0] :line 0}])))
+
+(defn vis-vm []
+  (let [log (scada/load-scada "data/SCADA-logs/parallel-1&2.clj")
+        pn  (load-file "data/PNs/parallel-1&2-corrected.clj")]
+    (-> (reset! diag (find-interp pn log)) :full-interp?)))

@@ -18,7 +18,7 @@
                  [org.clojure/tools.logging      "0.4.0"]
                  [net.cgrand/xforms              "0.16.0"]
                  
-                 [ring                           "1.6.3" :exclusions [org.clojure/tools.namespace org.clojure/data.priority-map]]
+                 [ring                           "1.6.3" #_:exclusions #_[org.clojure/tools.namespace org.clojure/data.priority-map]]
                  [ring/ring-defaults             "0.3.1"]
                  [compojure                      "1.6.0"]
                  [http-kit                       "2.2.0"]
@@ -47,33 +47,49 @@
 
   :main ^:skip-aot gov.nist.sinet.run 
   ;; There is a user.clj in dev/. By design of clojure, it gets loaded if it on the path...
-  :profiles {:dev {:cljsbuild ; https://github.com/emezeske/lein-cljsbuild
-                   {:builds 
-                    {:client {:source-paths ["src/gov/nist/sinet/client" "dev"]
-                              :compiler {:optimizations :none ; https://clojurescript.org/reference/compiler-options
-                                         :output-to "resources/public/js/app.js"   ; The path to the .js file that will be output
-                                         :output-dir "dev-resources/public/js/out" ; Temporary files used during compilation
-                                         :source-map true}}}}
-                   :figwheel {:http-server-root "public"
-                              :server-port 3449
-                              :repl false
-                              :css-dirs ["resources/public/css"]}
-                   :dependencies [[org.clojure/tools.namespace "0.2.10" :exclusions [org.clojure/data.priority-map]]
-                                  [com.cemerick/piggieback     "0.2.2"] 
-                                  [figwheel                    "0.5.14" :exclusions [org.clojure/data.priority-map]]
-                                  [figwheel-sidecar            "0.5.14" :exclusions [org.clojure/data.priority-map]]]
-                   :source-paths   ["dev"]
-                   :resource-paths ^:replace ["resources" "dev-resources" "resources-index/dev"]
+  ;; https://github.com/bhauman/figwheel-template/blob/master/src/leiningen/new/figwheel/project.clj
+  :cljsbuild {:builds 
+              [{:id "dev"
+                :source-paths ["src"] ; <==================== Try "src/client" here???
+                ;; The presence of a :figwheel configuration here
+                ;; will cause figwheel to inject the figwheel client
+                ;; into your build
+                :figwheel {:on-jsload "gov.nist/sinet.core/on-js-reload"
+                           ;; :open-urls will pop open your application
+                           ;; in the default browser once Figwheel has
+                           ;; started and compiled your application.
+                           ;; Comment this out once it no longer serves you.
+                           :open-urls ["http://localhost:3449/index.html"]}
+                
+                :compiler {:main gov.nist/sinet.core
+                           :asset-path "js/compiled/out"
+                           :output-to "resources/public/js/compiled/sinet.js" ; sanitized. 
+                           :output-dir "resources/public/js/compiled/out"
+                           :source-map-timestamp true
+                           ;; To console.log CLJS data-structures make sure you enable devtools in Chrome
+                           ;; https://github.com/binaryage/cljs-devtools
+                           :preloads [devtools.preload]}}
+               
+               :css-dirs ["resources/public/css"]
+               
+               
+               :client {:source-paths ["src/gov/nist/sinet/client" "dev"]
+                        :compiler {:optimizations :none ; https://clojurescript.org/reference/compiler-options
+                                   :output-to "resources/public/js/app.js"   ; The path to the .js file that will be output
+                                   :output-dir "dev-resources/public/js/out" ; Temporary files used during compilation
+                                   :source-map true}}]}
+  :figwheel {:css-dirs ["resources/public/css"]}
+  :profiles {:dev {:dependencies [[binaryage/devtools "0.9.9"]
+                                  [figwheel-sidecar "0.5.15"]
+                                  [com.cemerick/piggieback "0.2.2"]]
+                   ;; need to add dev source path here to get user.clj loaded
+                   :source-paths ["src" "dev"]
+                   ;; for CIDER
+                   :plugins [[cider/cider-nrepl "0.17.0-snapshot"]]
                    :repl-options {:nrepl-middleware [cemerick.piggieback/wrap-cljs-repl]}
-                   :plugins [[lein-figwheel  "0.5.14"]
-                             [lein-cljsbuild "1.1.7" ]
-                             [lein-environ   "1.0.1" ]]}
-             :prod {:cljsbuild
-                    {:builds 
-                     {:client {:compiler {:optimizations :advanced :elide-asserts true :pretty-print false}}}}}
-             :1.8 {:dependencies [[org.clojure/clojure "1.8.0"]]}
-             :1.9 {:dependencies [[org.clojure/clojure "1.9.0"]]}}
+                   ;; need to add the compliled assets to the :clean-targets
+                   :clean-targets ^{:protect false} ["resources/public/js/compiled"
+                                                     :target-path]}}
   :aliases  {"start-repl" ["do" "clean," "cljsbuild" "once," "repl" ":headless"]
-             "test-all"   ["with-profile" "default:+1.8:+1.9" "test"]
              "start"      ["do" "clean," "cljsbuild" "once," "run"]
              "package"    ["with-profile" "prod" "do" "clean" ["cljsbuild" "once"]]})

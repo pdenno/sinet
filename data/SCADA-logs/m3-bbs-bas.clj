@@ -1,5 +1,6 @@
 ;;; 2018-02-03 For testing log-only BBS/BAS detection.
 ;;; ./MJPdes -i ~/Documents/git/sinet/data/SCADA-logs/m3-bbs-bas.clj -o ~/Documents/git/sinet/data/SCADA-logs/m3-bbs-bas-out.clj
+;;; ./MJPdes -i ~/Documents/git/sinet/data/SCADA-logs/m3-bbs-bas.clj -o ~/Documents/git/sinet/data/SCADA-logs/fitness-test2-m3-bbs-bas-out.clj
 (map->Model
    {:line 
     {:m1 (map->ExpoMachine {:lambda 0.1 :mu 0.9 :W 1.0 :discipline :BBS}) 

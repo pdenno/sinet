@@ -409,17 +409,19 @@
 (defn reasonably-marked-pn
   "Set PN marking so that things that look like machines have a state."
   [pn]
-  (let [pn (pnr/renumber-pids pn)
-        r-places (atom (related-places pn))
-        imark (reduce (fn [mark place] ; this generates one of several possibilities. 
-                        (if-let [machine (some #(when (contains? (% @r-places) place) %)
-                                               (keys @r-places))]
-                          (do (swap! r-places dissoc machine)
-                              (conj mark 1))
-                          (conj mark 0)))
-                      []
-                      (:marking-key pn))]
-    (pnu/set-marking pn imark)))
+  (if (pnu/free-choice? pn) ; POD here I assume it is something like an Eden. Needs works
+    pn 
+    (let [pn (pnr/renumber-pids pn)
+          r-places (atom (related-places pn))
+          imark (reduce (fn [mark place] ; this generates one of several possibilities. 
+                          (if-let [machine (some #(when (contains? (% @r-places) place) %)
+                                                 (keys @r-places))]
+                            (do (swap! r-places dissoc machine)
+                                (conj mark 1))
+                            (conj mark 0)))
+                        []
+                        (:marking-key pn))]
+      (pnu/set-marking pn imark))))
 
 (defn pn-uses-machine?
   "Returns true if the PN uses the machine (it might not if parallel and Eden-like)."
